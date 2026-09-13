@@ -6,6 +6,7 @@ Modes: arb | daily | buy | price | backtest | portfolio | all
 import json
 import os
 import sys
+import time
 import concurrent.futures
 from argparse import ArgumentParser
 from datetime import datetime, timezone
@@ -338,8 +339,13 @@ def run_daily(token, chat_id):
         if q.get(e, 0) >= int(cfg.get("min_daily_qv", 1500000)) * 0.5:
             top.append(e)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
-        res = [r for r in ex.map(lambda c: analyze_coin_daily(c, fng_nudge), top) if r]
+    def _scan(c):
+        r = analyze_coin_daily(c, fng_nudge, vol_map=None)
+        time.sleep(0.06)
+        return r
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+        res = [r for r in ex.map(_scan, top) if r]
     res = [r for r in res if r["rating"] in ("BUY", "STRONG BUY")]
     res.sort(key=lambda r: -r["score"])
     res = res[: cfg.get("daily_top_n", 20)]

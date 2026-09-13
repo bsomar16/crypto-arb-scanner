@@ -64,6 +64,8 @@ def score_daily(dc, vol_ratio, chg24, fng_nudge=0.0):
 
 
 def daily_indicators(closes):
+    if len(closes) < 15:
+        return None
     e12 = ind.ema(closes, 12)
     e26 = ind.ema(closes, 26)
     macd = [a - b for a, b in zip(e12, e26)]
@@ -74,7 +76,7 @@ def daily_indicators(closes):
             "e20": e20[-1], "e50": e50[-1], "close": closes[-1]}
 
 
-def analyze_coin_daily(coin, fng_nudge=0.0, min_bars=35):
+def analyze_coin_daily(coin, fng_nudge=0.0, min_bars=35, vol_map=None):
     try:
         data = http_json(
             f"{BN}/api/v3/klines?symbol={coin}USDT&interval=1d&limit=70",
@@ -82,28 +84,26 @@ def analyze_coin_daily(coin, fng_nudge=0.0, min_bars=35):
         if len(data) < min_bars:
             return None
         closes = [float(k[4]) for k in data][:-1]
+        highs = [float(k[2]) for k in data][:-1]
+        lows = [float(k[3]) for k in data][:-1]
         dc = daily_indicators(closes)
+        if dc is None:
+            return None
         t24 = http_json(
             f"{BN}/api/v3/ticker/24hr?symbol={coin}USDT", timeout=15)
         chg24 = float(t24["priceChangePercent"])
         qv = float(t24["quoteVolume"])
-        closes_h, highs_h, lows_h, vols_h = [], [], [], []
-        try:
-            kh = http_json(
-                f"{BN}/api/v3/klines?symbol={coin}USDT&interval=1h&limit=25",
-                timeout=15)
-            vols_h = [float(k[5]) for k in kh]
-            closes_h = [float(k[4]) for k in kh]
-        except Exception:
-            pass
-        if len(vols_h) >= 12:
-            last = (vols_h[-1] + vols_h[-2]) / 2
-            avg = sum(vols_h[:-2]) / len(vols_h[:-2])
-            vol_x = last / avg if avg > 0 else 0
+        vol_x = 1.0
+        if vol_map and coin in vol_map:
+            vol_x = vol_map[coin] or 1.0
         else:
-            vol_x = 1.0
+            vols = [float(k[5]) for k in data][:-1]
+            if len(vols) >= 12:
+                last = (vols[-1] + vols[-2]) / 2
+                avg = sum(vols[-22:-2]) / len(vols[-22:-2])
+                vol_x = last / avg if avg > 0 else 0
         s = score_daily(dc, vol_x or 1.0, chg24, fng_nudge)
-        a = ind.atr(highs_h, lows_h, closes_h)
+        a = ind.atr(highs, lows, closes)
         return {"coin": coin, "price": dc["close"], "rsi": round(dc["rsi"], 1),
                 "vol_x": round(vol_x, 2) if vol_x else 1.0,
                 "chg": round(chg24, 2), "vol_x6": round(vol_x, 1),
