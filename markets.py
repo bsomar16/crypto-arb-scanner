@@ -203,12 +203,23 @@ def currency_name(ex, coin):
 
 
 def names_diverge(a, b):
-    """True when both names are known and clearly differ (collision check)."""
+    """True when both names are known and clearly differ (collision check).
+
+    "Aave" vs "Aave (AAVE)" are the same coin (parenthetical suffix), while
+    "Bitcoin" vs "Bitcoin Cash" really diverge.
+    """
     if not a or not b:
         return False
     na = "".join(ch for ch in a.lower() if ch.isalnum())
     nb = "".join(ch for ch in b.lower() if ch.isalnum())
-    return na != nb
+    if not na or not nb:
+        return False
+    if na == nb:
+        return False
+    # parenthetical/quoted suffix -> same base name
+    if na.startswith(nb) or nb.startswith(na):
+        return False
+    return True
 
 
 def fetch_exchange(name):

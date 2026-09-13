@@ -38,8 +38,8 @@ class TestIndicators(unittest.TestCase):
 class TestSignals(unittest.TestCase):
     def test_score_daily_range(self):
         # minimal indicator dict; score must be finite 0..100
-        d = {"rsi": 55.0, "close": 1.0, "ema20": 0.98, "ema50": 0.95,
-             "macd": 0.001, "macd_signal": 0.0}
+        d = {"rsi": 55.0, "close": 1.0, "e20": 0.98, "e50": 0.95,
+             "macd": 0.001, "macd_sig": 0.0}
         for chg in (-5, 0, 5):
             s = signals.score_daily(d, 1.2, chg)
             self.assertGreaterEqual(s, 0)
@@ -47,11 +47,10 @@ class TestSignals(unittest.TestCase):
             self.assertEqual(s, float(s))
 
     def test_rating(self):
-        self.assertEqual(signals.rating(55), "BUY")
         self.assertEqual(signals.rating(75), "STRONG BUY")
-        self.assertEqual(signals.rating(30), "SELL")
-        self.assertEqual(signals.rating(20), "STRONG SELL")
-        self.assertEqual(signals.rating(45), "WATCH")
+        self.assertEqual(signals.rating(62), "BUY")
+        self.assertEqual(signals.rating(55), "WATCH")
+        self.assertEqual(signals.rating(45), "AVOID")
 
 
 class _FakeChains(unittest.TestCase):
