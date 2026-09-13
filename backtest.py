@@ -89,7 +89,7 @@ def run_backtest(cfg):
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [f"📈 <b>BACKTEST</b> · signaux quotidiens \u00b7 {now}",
-             f"<i>strat: score\u226560 entrée, score<55 / RSI>80 / 30j stop\u2192sortie · coûts 0.15%</i>",
+             f"<i>strat: score &#8805;60 entrée, score &lt;55 / RSI &gt;80 / 30j stop&#8594;sortie · coûts 0.15%</i>",
              "",
              f"{'Coin':<7}{'#':>4}{'Win%':>7}{'AvgW':>7}{'AvgL':>7}{'PF':>6}"
              f"{'Ret%':>8}{'B&H%':>7}{'MDD%':>7}"]

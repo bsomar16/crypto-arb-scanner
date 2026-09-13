@@ -2,6 +2,7 @@
 """Shared helpers: http, escaping, json persistence, telegram sending (chunked)."""
 
 import json
+import urllib.error
 import urllib.request
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -65,5 +66,9 @@ def _send(token, chat_id, text):
                "disable_web_page_preview": True}
     req = urllib.request.Request(url, data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=25) as r:
-        return r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")
+        raise RuntimeError(f"telegram HTTP {e.code}: {body[:400]}") from e
