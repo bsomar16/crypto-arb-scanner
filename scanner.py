@@ -14,16 +14,21 @@ SPREAD_ALERT_PCT = 1.0
 DIGEST_PCT = 0.5
 
 EXCHANGES = {
-    "BINANCE": "https://api.binance.com/api/v3/ticker/price",
+    "BINANCE": "https://data-api.binance.vision/api/v3/ticker/price",
     "BITGET": "https://api.bitget.com/api/v2/spot/market/tickers",
     "OKX": "https://www.okx.com/api/v5/market/tickers?instType=SPOT",
     "GATE": "https://api.gateio.ws/api/v4/spot/tickers",
     "MEXC": "https://api.mexc.com/api/v3/ticker/price",
-    "BYBIT": "https://api.bybit.com/v5/market/tickers?category=spot",
+    "POLONIEX": "https://api.poloniex.com/markets/ticker24h",
     "KUCOIN": "https://api.kucoin.com/api/v1/market/allTickers",
     "HTX": "https://api.huobi.pro/market/tickers",
     "COINEX": "https://api.coinex.com/v2/spot/ticker",
 }
+
+BINANCE_FALLBACKS = [
+    "https://api.binance.com/api/v3/ticker/price",
+    "https://data-api.binance.vision/api/v3/ticker/price",
+]
 
 KNOWN_TRAPS = {
     "ELON": "T", "XTER": "T", "RON_L": "T", "DATA": "T", "ARC": "T",
@@ -72,10 +77,10 @@ def fetch_exchange(name):
             for t in data:
                 if t["symbol"].endswith("USDT") and "USDT" not in t["symbol"][:-4]:
                     m[t["symbol"][:-4]] = float(t["price"])
-        elif name == "BYBIT":
-            for t in data["result"]["list"]:
-                if t["symbol"].endswith("USDT"):
-                    m[t["symbol"][:-4]] = float(t["lastPrice"])
+        elif name == "POLONIEX":
+            for t in data:
+                if t["symbol"].endswith("_USDT"):
+                    m[t["symbol"][:-5]] = float(t["close"])
         elif name == "KUCOIN":
             for t in data["data"]["ticker"]:
                 if t["symbol"].endswith("-USDT"):
@@ -90,6 +95,21 @@ def fetch_exchange(name):
                     m[t["market"][:-4]] = float(t["last"])
         return m
     except Exception:
+        if name == "BINANCE":
+            alt = EXCHANGES["BINANCE"]
+            if alt.startswith("https://data-api.binance.vision"):
+                alt2 = "https://api.binance.com/api/v3/ticker/price"
+            else:
+                alt2 = "https://data-api.binance.vision/api/v3/ticker/price"
+            try:
+                data = http_json(alt2, timeout=20)
+                m = {}
+                for t in data:
+                    if t["symbol"].endswith("USDT") and "USDT" not in t["symbol"][:-4]:
+                        m[t["symbol"][:-4]] = float(t["price"])
+                return m
+            except Exception:
+                return {}
         return {}
 
 
@@ -111,9 +131,12 @@ def main():
         sys.exit(1)
 
     maps = {}
+    offline = []
     for ex in EXCHANGES:
         maps[ex] = fetch_exchange(ex)
         print(f"{ex}: {len(maps[ex])} pairs")
+        if not maps[ex]:
+            offline.append(ex)
 
     counts = {}
     for ex, m in maps.items():
@@ -154,6 +177,9 @@ def main():
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [f"<b>Arb scan {now}</b> | {len(universe)} coins / {len(EXCHANGES)} exchanges"]
+    if offline:
+        lines.append(f"<b>WARN: offline feeds</b>: {', '.join(offline)} (geo-blocked or down)")
+        lines.append("Coverage below excludes these venues.")
     if suspects:
         lines.append("")
         lines.append("<b>ALERTS ({})</b>".format(len(suspects)))
