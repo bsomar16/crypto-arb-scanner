@@ -28,7 +28,9 @@ permissions:
 
 jobs:
   arb-scan:
-    if: github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *'
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'arb')
     runs-on: ubuntu-latest
     concurrency:
       group: arb-scan
