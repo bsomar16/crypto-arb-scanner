@@ -1,34 +1,42 @@
-name: Arb Scanner
+name: Crypto Signal Bot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/15 * * * *"     # arb scan every 15 min
+    - cron: "30 8 * * *"       # daily top-20 buy signals at 08:30 UTC
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Mode to run"
+        required: true
+        default: "arb"
+        type: choice
+        options:
+          - arb
+          - daily
+          - both
 
 permissions:
   contents: write
 
 concurrency:
-  group: arb-scan
+  group: signal-bot
   cancel-in-progress: false
 
 jobs:
-  scan:
+  arb-scan:
+    if: github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Run scanner
+      - name: Run arb scanner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scanner.py
-
+        run: python scanner.py --mode arb
       - name: Commit trap registry
         run: |
           git config user.name "github-actions[bot]"
@@ -40,3 +48,20 @@ jobs:
           else
             echo "No changes to traps.json"
           fi
+
+  daily-picks:
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '30 8 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'daily') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'both')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run daily top-20
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py --mode daily
