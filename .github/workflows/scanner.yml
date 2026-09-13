@@ -1,11 +1,12 @@
 name: Crypto Signal Bot
 
 on:
+  # Off-peak minutes (avoid exact :00/:15/:30/:45) to reduce GitHub high-load drops.
   schedule:
-    - cron: "*/15 * * * *"   # arb scan every 15 min
-    - cron: "0 * * * *"      # intraday BUY signals every hour
-    - cron: "0 8 * * *"      # daily report 08:00 UTC (match config.json daily_hour_utc)
-    - cron: "0 12 * * 1"     # weekly backtest, Monday 12:00 UTC
+    - cron: "7,22,37,52 * * * *"   # arb scan every 15 min (at :07 :22 :37 :52)
+    - cron: "17 * * * *"           # intraday BUY signals every hour (at :17)
+    - cron: "7 8 * * *"           # daily report 08:07 UTC (match config.json daily_hour_utc)
+    - cron: "10 12 * * 1"         # weekly backtest, Monday 12:10 UTC
   workflow_dispatch:
     inputs:
       mode:
@@ -29,7 +30,7 @@ permissions:
 jobs:
   arb-scan:
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'arb')
     runs-on: ubuntu-latest
     concurrency:
@@ -62,7 +63,7 @@ jobs:
 
   buy-signals:
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '0 * * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '17 * * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'buy') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
     runs-on: ubuntu-latest
@@ -96,7 +97,7 @@ jobs:
 
   daily-picks:
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '0 8 * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '7 8 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'daily') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
     runs-on: ubuntu-latest
@@ -130,7 +131,7 @@ jobs:
 
   weekly-backtest:
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '0 12 * * 1') ||
+      (github.event_name == 'schedule' && github.event.schedule == '10 12 * * 1') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'backtest')
     runs-on: ubuntu-latest
     concurrency:
