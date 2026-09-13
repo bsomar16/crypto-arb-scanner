@@ -84,7 +84,7 @@ def fetch_exchange(name):
 
 
 def fetch_binance_24h():
-    """Top movers from Binance 24hr ticker (vision mirror)."""
+    """Top movers + quote volume from Binance 24hr ticker (vision mirror)."""
     try:
         data = http_json("https://data-api.binance.vision/api/v3/ticker/24hr",
                          timeout=25)
@@ -101,13 +101,122 @@ def fetch_binance_24h():
                 ch = float(t["priceChangePercent"])
             except (ValueError, KeyError):
                 continue
-            if q < 500000:
+            if q < 1000000:
                 continue
-            rows.append((base, ch, q))
+            rows.append([base, ch, q])
         rows.sort(key=lambda r: r[1], reverse=True)
         return rows
     except Exception:
         return []
+
+
+def volume_spike(symbol, hours=25):
+    """Ratio of last 1h volume vs avg of previous 24h (Binance klines)."""
+    try:
+        data = http_json(
+            f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}USDT"
+            f"&interval=1h&limit={hours}", timeout=20)
+        vols = [float(k[5]) for k in data]
+        if len(vols) < 12:
+            return None
+        last = vols[-1]
+        avg = sum(vols[:-1]) / len(vols[:-1])
+        if avg <= 0:
+            return None
+        return last / avg
+    except Exception:
+        return None
+
+
+def chain_summary(chans):
+    """Chans: list of (name, dep_ok, wd_ok). Return open nets + a flag."""
+    open_n = [n for n, d, w in chans if d and w]
+    if open_n:
+        cap = open_n[:5]
+        more = f" +{len(open_n) - 5}" if len(open_n) > 5 else ""
+        return " ".join(cap) + more, True
+    partial = [f"{n}(" + ("D" if d else "-") + ("W" if w else "-") + ")"
+               for n, d, w in chans if d or w]
+    return (" ".join(partial[:4])) if partial else "all closed", False
+
+
+def fetch_coin_status(coin):
+    """Collect deposit/withdraw + network info across 4 exchanges."""
+    out = {}
+    # KuCoin
+    try:
+        d = http_json(f"https://api.kucoin.com/api/v1/currencies/{coin}",
+                      timeout=15)
+        dd = d["data"]
+        dep = bool(dd.get("isDepositEnabled"))
+        wd = bool(dd.get("isWithdrawEnabled"))
+        fee = dd.get("withdrawalMinFee")
+        note = f"min fee {fee}" if fee not in (None, "", "0") else ""
+        out["KUCOIN"] = {"dep": dep, "wd": wd, "net": ["chain"], "note": note}
+    except Exception:
+        pass
+    # Gate
+    try:
+        d = http_json(f"https://api.gateio.ws/api/v4/spot/currencies/{coin}",
+                      timeout=15)
+        chans = [(c.get("name", "?"), not c.get("deposit_disabled"),
+                  not c.get("withdraw_disabled")) for c in d.get("chains", [])]
+        if chans:
+            net, fully = chain_summary(chans)
+            out["GATE"] = {"dep": fully or any(c[1] for c in chans),
+                           "wd": fully or any(c[2] for c in chans),
+                           "net": [net], "note": ""}
+    except Exception:
+        pass
+    # HTX
+    try:
+        d = http_json("https://api.huobi.pro/v2/reference/currencies",
+                      timeout=25)
+        for cur in d.get("data", []):
+            if cur.get("currency", "").lower() == coin.lower():
+                chans = [(c.get("displayName", "?"),
+                          c.get("depositStatus") == "allowed",
+                          c.get("withdrawStatus") == "allowed")
+                         for c in cur.get("chains", [])]
+                if chans:
+                    net, fully = chain_summary(chans)
+                    out["HTX"] = {"dep": fully or any(c[1] for c in chans),
+                                  "wd": fully or any(c[2] for c in chans),
+                                  "net": [net], "note": ""}
+                break
+    except Exception:
+        pass
+    # Bitget
+    try:
+        d = http_json("https://api.bitget.com/api/v2/spot/public/coins",
+                      timeout=25)
+        for cur in d.get("data", []):
+            if cur.get("coin", "").upper() == coin.upper():
+                chans = [(c.get("chain", "?"),
+                          str(c.get("rechargeable", "false")).lower() == "true",
+                          str(c.get("withdrawable", "false")).lower() == "true")
+                         for c in cur.get("chains", [])]
+                if chans:
+                    net, fully = chain_summary(chans)
+                    out["BITGET"] = {"dep": fully or any(c[1] for c in chans),
+                                     "wd": fully or any(c[2] for c in chans),
+                                     "net": [net], "note": ""}
+                break
+    except Exception:
+        pass
+    return out
+
+
+STATUS_ICON = {"ok": "\u2705", "warn": "\u26a0\ufe0f", "bad": "\u274c", "unknown": "\u2753"}
+
+
+def fmt_status(ex, info):
+    dep, wd = info["dep"], info["wd"]
+    icon = STATUS_ICON["ok"] if (dep and wd) else (STATUS_ICON["warn"] if (dep or wd) else STATUS_ICON["bad"])
+    note = f" | {info['note']}" if info.get("note") else ""
+    net = info["net"][0]
+    nmark = f"nets: {net}" if not (dep and wd) else f"nets: {net}"
+    return f"   {icon} <b>{ex}</b>  D:{'on' if dep else 'off'} W:{'on' if wd else 'off'}{note}\n      {nmark}"
 
 
 def telegram_msg(token, chat_id, text):
@@ -118,6 +227,10 @@ def telegram_msg(token, chat_id, text):
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.read()
+
+
+def esc(s):
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def main():
@@ -176,45 +289,65 @@ def main():
     new_alerts.sort(key=lambda r: r["spread"], reverse=True)
     watch.sort(key=lambda r: r["spread"], reverse=True)
 
-    # persist new flagged coins so they never re-alert
     traps |= all_flagged
     with open(TRAP_FILE, "w") as f:
         json.dump(sorted(traps), f)
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"<b>Arb scan {now}</b> | {len(universe)} coins / {len(EXCHANGES)} exchanges"]
-    if offline:
-        lines.append(f"<b>WARN offline:</b> {', '.join(offline)}")
+    bar = "──────" * 3
+
+    lines = []
+    lines.append(f"\U0001f4ca <b>ARB SCAN</b> \u00b7 {now}")
+    lines.append(f"\U0001f310 {len(universe)} coins \u00b7 {len(EXCHANGES)} exchanges"
+                 f" \u00b7 {len(EXCHANGES) - len(offline)}/9 feeds live")
+
     if new_alerts:
         lines.append("")
-        lines.append(f"<b>NEW ALERTS ({len(new_alerts)})</b>")
-        for r in new_alerts[:10]:
-            lines.append(
-                f'<a href="https://www.tradingview.com/symbols/{r["coin"]}USDT/">'
-                f'{r["coin"]}</a> +{r["spread"]:.1f}% | '
-                f'buy {r["low"]:.5g}@{r["low_ex"]} sell {r["high"]:.5g}@{r["high_ex"]}'
-            )
-    else:
-        lines.append("")
-        lines.append("No new candidates above 1%.")
+        lines.append(f"\U0001f6a8 <b>NEW ALERTS ({len(new_alerts)})</b>")
+        for r in new_alerts[:5]:
+            lines.append(f"\u2588 {esc(r['coin'])}  <b>+{r['spread']:.1f}%</b> (median {r['median']:.5g})")
+            lines.append(f"   \U0001f4e4 buy  {r['low']:.6g} \u00b7 <b>{r['low_ex']}</b>")
+            lines.append(f"   \U0001f4e5 sell {r['high']:.6g} \u00b7 <b>{r['high_ex']}</b>")
+            st = fetch_coin_status(r["coin"])
+            if st:
+                lines.append(f"   \U0001f6f0\ufe0f <b>deposit / withdraw</b>")
+                for ex in ("KUCOIN", "GATE", "HTX", "BITGET"):
+                    if ex in st:
+                        lines.append("   " + fmt_status(ex, st[ex]))
+        lines.append(bar)
+
     if watch:
         lines.append("")
-        lines.append("<b>Watchlist (0.5-1%)</b>")
-        for r in watch[:8]:
-            lines.append(f'{r["coin"]} +{r["spread"]:.1f}% ({r["low_ex"]}->{r["high_ex"]})')
+        lines.append(f"\U0001f440 <b>WATCHLIST (0.5\u20131%)</b>")
+        for r in watch[:6]:
+            lines.append(f"   {r['coin']}  +{r['spread']:.1f}%  ({r['low_ex']}\u2192{r['high_ex']})")
+        lines.append(bar)
 
     movers = fetch_binance_24h()
     if movers:
+        gainers = movers[:5]
+        losers = sorted([r for r in movers if r[1] < 0], key=lambda r: r[1])[:5]
         lines.append("")
-        lines.append("<b>Top movers (24h, vol>500k USDT)</b>")
-        g = movers[:4]
-        l = [r for r in movers if r[1] < 0][-4:]
-        l = l[::-1]
-        lines.append("G:" + " ".join(f'{r[0]} {r[1]:+.1f}%' for r in g))
-        lines.append("L:" + " ".join(f'{r[0]} {r[1]:+.1f}%' for r in l))
+        lines.append(f"\U0001f4c8 <b>TOP GAINERS 24h</b> (BN)")
+        for i, (b, ch, q) in enumerate(gainers, 1):
+            spike = volume_spike(b)
+            v = f" \u00b7 <b>vol x{spike:.1f}</b>" if spike else ""
+            lines.append(f"  {i}. {b}  +{ch:.1f}%{v}")
+        lines.append("")
+        lines.append(f"\U0001f4c9 <b>TOP LOSERS 24h</b> (BN)")
+        for i, (b, ch, q) in enumerate(losers, 1):
+            spike = volume_spike(b)
+            v = f" \u00b7 <b>vol x{spike:.1f}</b>" if spike else ""
+            lines.append(f"  {i}. {b}  {ch:.1f}%{v}")
+
+    if offline:
+        lines.append("")
+        lines.append(f"\u26a0\ufe0f offline feeds: {', '.join(offline)}")
 
     text = "\n".join(lines)
     print(text)
+    if len(text) > 4000:
+        text = text[:4000] + "..."
     telegram_msg(token, chat_id, text)
 
 
