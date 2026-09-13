@@ -5,20 +5,22 @@ import re
 import xml.etree.ElementTree as ET
 from botutil import http_json, http_text
 
-POS = set("""surge surges surged rally rallies rallied rocket rockets soaring
-gains gain gained record high highs all-time ath breakout breaks broke out
-above higher upgrade upgrades upgraded bullish bull approve approved approval
-adoption inflow inflows etf halving etf launch launches launched partnership
-partnerships milestone buy bought accumulation recovery rebounds rebound beat
-beats outperform outperforms signaling uptrend lowcap moonshot".split())
+POS = set("surge surges surged rally rallies rallied rocket rockets soaring "
+          "gains gain gained record high highs all-time ath breakout breaks "
+          "broke out above higher upgrade upgrades upgraded bullish bull "
+          "approve approved approval adoption inflow inflows etf halving etf "
+          "launch launches launched partnership partnerships milestone buy "
+          "bought accumulation recovery rebounds rebound beat beats "
+          "outperform outperforms signaling uptrend lowcap moonshot".split())
 
-NEG = set("""plunge plunges plunged plunging crash crashes crashed dump dumped
-collapse collapses collapsed slump slumps slid slide slides drop drops dropped
-rejection rejected rejections bearish bear bears outflows outflow lawsuit
-lawsuits banned ban sued sues sec hack hacked hacking exploit compromised
-vulnerability sell selloff selling delist delisted downgrade downgraded fail
-fails failed loss losses fraud arrested arrest probe risky risk warning
-warnings fears fear scrutiny mixed outlook".split())
+NEG = set("plunge plunges plunged plunging crash crashes crashed dump dumped "
+          "collapse collapses collapsed slump slumps slid slide slides drop "
+          "drops dropped rejection rejected rejections bearish bear bears "
+          "outflows outflow lawsuit lawsuits banned ban sued sues sec hack "
+          "hacked hacking exploit compromised vulnerability sell selloff "
+          "selling delist delisted downgrade downgraded fail fails failed "
+          "loss losses fraud arrested arrest probe risky risk warning "
+          "warnings fears fear scrutiny mixed outlook".split())
 
 FNG_URL = "https://api.alternative.me/fng/?limit=1&format=json"
 GLOBAL_URL = "https://api.coingecko.com/api/v3/global"
