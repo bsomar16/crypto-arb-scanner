@@ -1,205 +1,77 @@
 #!/usr/bin/env python3
-"""Crypto signal bot: daily Top-20 buy picks + 15-min arb alerts via Telegram."""
+"""Crypto signal bot orchestration.
+Modes: arb | daily | buy | price | backtest | portfolio | all
+"""
 
 import json
 import os
 import sys
-import urllib.request
 import concurrent.futures
 from argparse import ArgumentParser
 from datetime import datetime, timezone
-from statistics import mean, median
+from statistics import median
+
+from botutil import esc, telegram_msg, load_json, save_json
+import markets
+from markets import (EXCHANGES, fetch_exchange, fetch_binance_24h, crypto_quote,
+                     volume_spike, coin_status, yahoo_chart)
+from signals import daily_indicators, score_daily, analyze_coin_daily, intraday_signal, rating
+import sentiment
+import portfolio as portfolio_mod
+import alerts as alerts_mod
+import backtest as backtest_mod
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 1.0
 TRAP_FILE = "traps.json"
-TOP_N = 20
-MIN_QV = 1500000  # min 24h quote volume for daily picks
+STATE_DIR = "state"
 
-EXCHANGES = {
-    "BINANCE": "https://data-api.binance.vision/api/v3/ticker/price",
-    "BITGET": "https://api.bitget.com/api/v2/spot/market/tickers",
-    "OKX": "https://www.okx.com/api/v5/market/tickers?instType=SPOT",
-    "GATE": "https://api.gateio.ws/api/v4/spot/tickers",
-    "MEXC": "https://api.mexc.com/api/v3/ticker/price",
-    "POLONIEX": "https://api.poloniex.com/markets/ticker24h",
-    "KUCOIN": "https://api.kucoin.com/api/v1/market/allTickers",
-    "HTX": "https://api.huobi.pro/market/tickers",
-    "COINEX": "https://api.coinex.com/v2/spot/ticker",
+DEFAULTS = {
+    "timezone_label": "UTC",
+    "daily_hour_utc": 8,
+    "daily_minute_utc": 0,
+    "daily_top_n": 20,
+    "daily_scan_top": 80,
+    "min_daily_qv": 1500000,
+    "buy_scan_top_n": 60,
+    "buy_min_vol": 5000000,
+    "buy_interval": "1h",
+    "daily_news_top": 8,
+    "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX",
+                  "LINK", "TON", "TRX", "DOT", "LTC", "MATIC", "PEPE", "FET",
+                  "APT", "ARB", "OP", "INJ"],
+    "holdings": [],
+    "stocks": [{"symbol": "NVDA", "market": "NASDAQ"},
+               {"symbol": "COMI.CA", "market": "EGX"},
+               {"symbol": "TSLA", "market": "NASDAQ"}],
+    "price_alerts": [],
+    "backtest_symbols": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE"],
 }
 
 
-def http_json(url, timeout=20):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+def load_cfg():
+    d = load_json("config.json", {}) or {}
+    out = dict(DEFAULTS)
+    for k, v in d.items():
+        out[k] = v
+    return out
 
 
-def esc(s):
-    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def now_s():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def telegram_msg(token, chat_id, text):
-    if len(text) > 4000:
-        text = text[:3990] + "\n…(truncated)"
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-               "disable_web_page_preview": True}
-    req = urllib.request.Request(url, data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=25) as r:
-        return r.read()
+def fmt_price(p):
+    if p >= 1000:
+        return f"${p:,.0f}"
+    if p >= 1:
+        return f"${p:,.2f}"
+    if p >= 0.01:
+        return f"${p:,.4f}"
+    return f"${p:.6g}"
 
 
 # ────────────────────────── ARB SCANNER ──────────────────────────
-
-def fetch_exchange(name):
-    try:
-        data = http_json(EXCHANGES[name])
-        m = {}
-        if name == "BINANCE":
-            for t in data:
-                s = t["symbol"]
-                if s.endswith("USDT") and s != "USDTUSDT":
-                    b = s[:-4]
-                    if "USDT" not in b:
-                        m[b] = float(t["price"])
-        elif name == "BITGET":
-            for t in data.get("data", []):
-                if t["symbol"].endswith("USDT"):
-                    m[t["symbol"][:-4]] = float(t["lastPr"])
-        elif name == "OKX":
-            for t in data.get("data", []):
-                if t["instId"].endswith("-USDT"):
-                    m[t["instId"][:-5]] = float(t["last"])
-        elif name == "GATE":
-            for t in data:
-                cp = t["currency_pair"]
-                if cp.endswith("_USDT") and "_" not in cp[:-5]:
-                    m[cp[:-5]] = float(t["last"])
-        elif name == "MEXC":
-            for t in data:
-                s = t["symbol"]
-                if s.endswith("USDT") and s != "USDTUSDT":
-                    b = s[:-4]
-                    if "USDT" not in b:
-                        m[b] = float(t["price"])
-        elif name == "POLONIEX":
-            for t in data:
-                if t["symbol"].endswith("_USDT"):
-                    m[t["symbol"][:-5]] = float(t["close"])
-        elif name == "KUCOIN":
-            for t in data["data"]["ticker"]:
-                if t["symbol"].endswith("-USDT"):
-                    m[t["symbol"][:-5]] = float(t["last"])
-        elif name == "HTX":
-            for t in data.get("data", []):
-                if t["symbol"].endswith("usdt"):
-                    m[t["symbol"][:-4].upper()] = float(t["close"])
-        elif name == "COINEX":
-            for t in data.get("data", []):
-                if t["market"].endswith("USDT"):
-                    m[t["market"][:-4]] = float(t["last"])
-        return m
-    except Exception:
-        return {}
-
-
-def fetch_binance_24h():
-    try:
-        return http_json("https://data-api.binance.vision/api/v3/ticker/24hr",
-                         timeout=25)
-    except Exception:
-        return []
-
-
-def volume_spike(symbol, hours=25):
-    try:
-        data = http_json(
-            f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}USDT"
-            f"&interval=1h&limit={hours}", timeout=20)
-        vols = [float(k[5]) for k in data]
-        if len(vols) < 12:
-            return None
-        last = mean(vols[-2:])
-        avg = mean(vols[:-2])
-        return last / avg if avg > 0 else None
-    except Exception:
-        return None
-
-
-def chain_summary(chans):
-    open_n = [n for n, d, w in chans if d and w]
-    if open_n:
-        cap = open_n[:5]
-        more = f" +{len(open_n) - 5}" if len(open_n) > 5 else ""
-        return " ".join(cap) + more, True
-    partial = [f"{n}(" + ("D" if d else "-") + ("W" if w else "-") + ")"
-               for n, d, w in chans if d or w]
-    return " ".join(partial[:4]) if partial else "all closed", False
-
-
-def fetch_coin_status(coin):
-    out = {}
-    try:
-        d = http_json(f"https://api.kucoin.com/api/v1/currencies/{coin}",
-                      timeout=15)
-        dd = d["data"]
-        dep = bool(dd.get("isDepositEnabled"))
-        wd = bool(dd.get("isWithdrawEnabled"))
-        fee = dd.get("withdrawalMinFee")
-        note = f"min fee {fee}" if fee not in (None, "", "0") else ""
-        out["KUCOIN"] = {"dep": dep, "wd": wd, "net": ["chain"], "note": note}
-    except Exception:
-        pass
-    try:
-        d = http_json(f"https://api.gateio.ws/api/v4/spot/currencies/{coin}",
-                      timeout=15)
-        chans = [(c.get("name", "?"), not c.get("deposit_disabled"),
-                  not c.get("withdraw_disabled")) for c in d.get("chains", [])]
-        if chans:
-            net, fully = chain_summary(chans)
-            out["GATE"] = {"dep": fully or any(c[1] for c in chans),
-                           "wd": fully or any(c[2] for c in chans),
-                           "net": [net], "note": ""}
-    except Exception:
-        pass
-    try:
-        d = http_json("https://api.huobi.pro/v2/reference/currencies",
-                      timeout=25)
-        for cur in d.get("data", []):
-            if cur.get("currency", "").lower() == coin.lower():
-                chans = [(c.get("displayName", "?"),
-                          c.get("depositStatus") == "allowed",
-                          c.get("withdrawStatus") == "allowed")
-                         for c in cur.get("chains", [])]
-                if chans:
-                    net, fully = chain_summary(chans)
-                    out["HTX"] = {"dep": fully or any(c[1] for c in chans),
-                                  "wd": fully or any(c[2] for c in chans),
-                                  "net": [net], "note": ""}
-                break
-    except Exception:
-        pass
-    try:
-        d = http_json("https://api.bitget.com/api/v2/spot/public/coins",
-                      timeout=25)
-        for cur in d.get("data", []):
-            if cur.get("coin", "").upper() == coin.upper():
-                chans = [(c.get("chain", "?"),
-                          str(c.get("rechargeable", "false")).lower() == "true",
-                          str(c.get("withdrawable", "false")).lower() == "true")
-                         for c in cur.get("chains", [])]
-                if chans:
-                    net, fully = chain_summary(chans)
-                    out["BITGET"] = {"dep": fully or any(c[1] for c in chans),
-                                     "wd": fully or any(c[2] for c in chans),
-                                     "net": [net], "note": ""}
-                break
-    except Exception:
-        pass
-    return out
-
 
 STATUS_ICON = {"ok": "\u2705", "warn": "\u26a0\ufe0f", "bad": "\u274c"}
 
@@ -261,9 +133,7 @@ def run_arb(token, chat_id):
     with open(TRAP_FILE, "w") as f:
         json.dump(sorted(traps), f)
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    bar = "\u2501" * 18
-    lines = [f"\U0001f4ca <b>ARB SCAN</b> \u00b7 {now}",
+    lines = [f"\U0001f4ca <b>ARB SCAN</b> \u00b7 {now_s()}",
              f"\U0001f310 {len(universe)} coins \u00b7 {len(EXCHANGES)} exchanges"
              f" \u00b7 {len(EXCHANGES) - len(offline)}/9 feeds"]
 
@@ -274,13 +144,13 @@ def run_arb(token, chat_id):
             lines.append(f"\n\U0001f525 {esc(r['coin'])}  <b>+{r['spread']:.1f}%</b>")
             lines.append(f"   \U0001f4e4 buy  {r['low']:.6g} \u00b7 <b>{r['low_ex']}</b>")
             lines.append(f"   \U0001f4e5 sell {r['high']:.6g} \u00b7 <b>{r['high_ex']}</b>")
-            st = fetch_coin_status(r["coin"])
+            st = coin_status(r["coin"])
             if st:
                 lines.append(f"   \U0001f6f0\ufe0f <b>deposit / withdraw</b>")
                 for ex in ("KUCOIN", "GATE", "HTX", "BITGET"):
                     if ex in st:
                         lines.append(fmt_status(ex, st[ex]))
-        lines.append(bar)
+        lines.append("\u2501" * 18)
     else:
         lines.append("")
         lines.append("No new cross-exchange gaps. \u2705")
@@ -292,8 +162,8 @@ def run_arb(token, chat_id):
             lines.append(f"   {r['coin']}  +{r['spread']:.1f}%  ({r['low_ex']}\u2192{r['high_ex']})")
 
     movers = fetch_binance_24h()
+    gainers = []
     if movers:
-        gainers = []
         for t in movers:
             s = t["symbol"]
             if not (s.endswith("USDT") and s != "USDTUSDT"):
@@ -321,203 +191,286 @@ def run_arb(token, chat_id):
         lines.append("")
         lines.append(f"\u26a0\ufe0f offline feeds: {', '.join(offline)}")
 
-    text = "\n".join(lines)
-    print(f"[ARB] {len(new_alerts)} alerts, {len(watch)} watch, {len(gainers) if 'gainers' in dir() else 0} gainers")
-    telegram_msg(token, chat_id, text)
+    print(f"[ARB] {len(new_alerts)} alerts, {len(watch)} watch, {len(gainers)} gainers")
+    telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
 
-# ────────────────────────── DAILY TOP 20 ──────────────────────────
+# ────────────────────────── INTRADAY BUY SIGNALS ──────────────────────────
 
-def ema(vals, period):
-    k = 2 / (period + 1)
-    out = [vals[0]]
-    for v in vals[1:]:
-        out.append(v * k + out[-1] * (1 - k))
-    return out
+def run_buy(token, chat_id):
+    cfg = load_cfg()
+    interval = cfg.get("buy_interval", "1h")
+    t24 = fetch_binance_24h()
+    q = crypto_quote(t24)
+    cands = [sym for sym, _ in
+             sorted(q.items(), key=lambda kv: -kv[1])[:cfg.get("buy_scan_top_n", 60)]]
 
+    star = set(str(w).upper() for w in cfg.get("watchlist", []))
+    star |= set(str(h.get("symbol", "")).upper() for h in cfg.get("holdings", [])
+                if h.get("symbol"))
+    for e in sorted(star - set(cands)):
+        if q.get(e, 0) >= int(cfg.get("buy_min_vol", 5000000)) * 0.2:
+            cands.append(e)
 
-def rsi(closes, period=14):
-    if len(closes) < period + 1:
-        return None
-    gains, losses = [], []
-    for i in range(1, len(closes)):
-        d = closes[i] - closes[i - 1]
-        gains.append(max(d, 0))
-        losses.append(max(-d, 0))
-    ag, al = mean(gains[:period]), mean(losses[:period])
-    for i in range(period, len(gains)):
-        ag = (ag * (period - 1) + gains[i]) / period
-        al = (al * (period - 1) + losses[i]) / period
-    if al == 0:
-        return 100
-    return 100 - 100 / (1 + ag / al)
+    fired = load_json("state/fired_signals.json", {}) or {}
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    updates = {}
 
-
-def indicators(closes):
-    e12 = ema(closes, 12)
-    e26 = ema(closes, 26)
-    macd = [a - b for a, b in zip(e12, e26)]
-    sig = ema(macd, 9)
-    e20 = ema(closes, 20)
-    e50 = ema(closes, 50)
-    return {"rsi": rsi(closes), "macd": macd[-1], "macd_sig": sig[-1],
-            "e20": e20[-1], "e50": e50[-1], "close": closes[-1]}
-
-
-def score(ind, vol_ratio, chg24):
-    s = 0
-    if ind["close"] > ind["e20"]:
-        s += 15
-    if ind["e20"] > ind["e50"]:
-        s += 15
-    r = ind["rsi"] or 50
-    if 45 <= r <= 68:
-        s += 15
-    elif 35 <= r < 45 or 68 < r <= 75:
-        s += 8
-    elif 25 <= r < 35 or 75 < r <= 80:
-        s += 3
-    if r > 82:
-        s -= 15
-    if r < 28:
-        s -= 10
-    if ind["macd"] > ind["macd_sig"]:
-        s += 12
-    if ind["macd"] > 0:
-        s += 8
-    if vol_ratio >= 3:
-        s += 15
-    elif vol_ratio >= 2:
-        s += 12
-    elif vol_ratio >= 1.5:
-        s += 9
-    elif vol_ratio >= 1.0:
-        s += 5
-    elif vol_ratio >= 0.7:
-        s += 2
-    if 0 <= chg24 <= 10:
-        s += 10
-    elif 10 < chg24 <= 20:
-        s += 6
-    elif -5 <= chg24 < 0:
-        s += 4
-    elif chg24 > 30:
-        s -= 6
-    if ind["macd"] > 0 and ind["macd"] > ind["macd_sig"] and ind["close"] > ind["e20"]:
-        s += 5
-    return max(0, min(100, s))
-
-
-def rating(s):
-    if s >= 75:
-        return "STRONG BUY"
-    if s >= 60:
-        return "BUY"
-    if s >= 50:
-        return "WATCH"
-    return "AVOID"
-
-
-def analyze_coin(coin):
-    try:
-        data = http_json(
-            f"https://data-api.binance.vision/api/v3/klines?symbol={coin}USDT"
-            f"&interval=1d&limit=70", timeout=15)
-        if len(data) < 35:
+    def scan(sym):
+        s = intraday_signal(sym, interval=interval)
+        if not s:
             return None
-        closes = [float(k[4]) for k in data][:-1]
-        ind = indicators(closes)
-        t24 = http_json(
-            f"https://data-api.binance.vision/api/v3/ticker/24hr?symbol={coin}USDT",
-            timeout=15)
-        chg24 = float(t24["priceChangePercent"])
-        qv = float(t24["quoteVolume"])
-        vol_x = volume_spike(coin)
-        s = score(ind, vol_x or 0, chg24)
-        conf_k = ("315" if s >= 75 else "215" if s >= 60 else "155" if s >= 50 else "111")
-        return {"coin": coin, "price": ind["close"], "rsi": round(ind["rsi"], 1),
-                "vol_x": round(vol_x, 1) if vol_x else 0, "chg": round(chg24, 2),
-                "score": s, "rating": rating(s), "qv": qv / 1e6,
-                "above_e20": ind["close"] > ind["e20"],
-                "macd_bull": ind["macd"] > ind["macd_sig"] and ind["macd"] > 0}
+        key = f"{sym}|{interval}"
+        rec = fired.get(key, {})
+        if rec.get("date") == today and rec.get("entry"):
+            if abs(s["price"] - rec["entry"]) / rec["entry"] < 0.035:
+                return None
+        updates[key] = {"date": today, "entry": s["price"]}
+        s["star"] = sym in star
+        return s
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
+        res = [r for r in ex.map(scan, cands) if r]
+    res.sort(key=lambda r: -r["st"])
+
+    strong = [r for r in res if r["st"] >= 5 and r["vol_x"] >= 1.5]
+    normal = [r for r in res if r["st"] < 5 or r["vol_x"] < 1.5]
+    fired_alerts, changed = alerts_mod.check_price_alerts(cfg)
+
+    if not (strong or normal or fired_alerts):
+        print("[BUY] no new signals")
+        return False
+
+    for k, v in updates.items():
+        fired[k] = v
+    if updates:
+        save_json("state/fired_signals.json", fired)
+
+    lines = [f"\U0001f680 <b>BUY SIGNALS</b> \u00b7 {now_s()}",
+             f"\U0001f310 Binance {interval} \u00b7 {len(cands)} coins scanned "
+             f"\u00b7 {len(strong) + len(normal)} new setups", ""]
+
+    def rows(bucket, head):
+        if not bucket:
+            return
+        lines.append(head)
+        for i, r in enumerate(bucket, 1):
+            sflag = " \u2b50" if r.get("star") else ""
+            lines.append(f"{i:>2}. <b>{esc(r['coin'])}</b>{sflag}  "
+                         f"{fmt_price(r['price'])}  RSI {r['rsi']:.0f}  "
+                         f"{r['chg24']:+.1f}%  vol\u00d7{r['vol_x']:.1f}")
+            flags = []
+            if r.get("e9_e21"):
+                flags.append("EMA9>21")
+            if r.get("macd_rising"):
+                flags.append("MACD\u2191")
+            extra = (" \u00b7 " + ", ".join(flags)) if flags else ""
+            lines.append(f"     ENTRY {fmt_price(r['entry'])}  STOP "
+                         f"{fmt_price(r['stop'])}  "
+                         f"T1 {fmt_price(r['t1'])} T2 {fmt_price(r['t2'])}"
+                         f" T3 {fmt_price(r['t3'])}{extra}")
+        lines.append("")
+
+    rows(strong, "\U0001f7e9 <b>STRONG ({})</b>".format(len(strong)))
+    if strong and normal:
+        lines.append("")
+    rows(normal, "\U0001f7e1 <b>NEW ({})</b>".format(len(normal)))
+
+    if fired_alerts:
+        lines.append("\U0001f514 <b>PRICE ALERTS</b>")
+        lines.extend(fired_alerts[:6])
+        lines.append("")
+
+    lines.append("\u2501" * 20)
+    lines.append("Règle: EMA9>EMA21 + MACD \u2191 + RSI 40-72 + volume. "
+                 "STOP = entrée - 1.5\u00b7ATR, T1/T2/T3 = 1R/2R/3R.")
+    lines.append("\u2b50 = sur ta watchlist / portefeuille \u00b7 "
+                 "Signaux seulement, vérifie avant de trader.")
+
+    print(f"[BUY] {len(strong)} strong, {len(normal)} normal, {len(fired_alerts)} alerts")
+    telegram_msg(token, chat_id, "\n".join(lines))
+    return True
+
+
+# ────────────────────────── DAILY REPORT ──────────────────────────
+
+def analyze_stock(cfg_sym):
+    try:
+        sym = str(cfg_sym).strip()
+        c = yahoo_chart(sym, "1d", "2y")
+        if not c:
+            return None
+        closes = [x for x in c["close"] if x]
+        if len(closes) < 70:
+            return None
+        work = closes[:-1] if len(closes) > 70 else closes
+        dc = daily_indicators(work)
+        chg = (closes[-1] / closes[-2] - 1) * 100 if len(closes) > 1 else 0.0
+        vols = [x for x in c.get("volume", []) if x]
+        vr = (vols[-1] / (sum(vols[-11:-1]) / 10)) if len(vols) >= 11 else 1.0
+        s = score_daily(dc, max(vr, 1.0), chg)
+        return {"symbol": str(c.get("symbol", sym)).replace(".", ""),
+                "name": c.get("chart_name", sym), "price": c["price"] or dc["close"],
+                "rsi": round(dc["rsi"], 1), "score": round(s, 1),
+                "rating": rating(s), "chg": round(chg, 2)}
     except Exception:
         return None
 
 
 def run_daily(token, chat_id):
+    cfg = load_cfg()
+    fng, fngc = sentiment.fear_greed()
+    btc_dom, eth_dom, total_mcap = sentiment.btc_dominance()
+    fng_nudge = 0.0
+    if fng is not None:
+        fng_nudge = (fng - 50) / 50 * 3.0
+
     t24 = fetch_binance_24h()
-    cands = []
-    for x in t24:
-        s = x["symbol"]
-        if not (s.endswith("USDT") and s != "USDTUSDT"):
-            continue
-        b = s[:-4]
-        if "USDT" in b or "FDUSD" in b:
-            continue
-        try:
-            q = float(x["quoteVolume"])
-        except (ValueError, KeyError):
-            continue
-        if q >= MIN_QV:
-            cands.append((b, q))
-    cands.sort(key=lambda r: -r[1])
-    top = [c for c, _ in cands[:80]]
+    q = crypto_quote(t24)
+    pool = [sym for sym, qv in sorted(q.items(), key=lambda kv: -kv[1])
+            if qv >= cfg.get("min_daily_qv", 1500000)]
+    top = pool[:cfg.get("daily_scan_top", 80)]
+    star = set(str(w).upper() for w in cfg.get("watchlist", []))
+    star |= set(str(h.get("symbol", "")).upper() for h in cfg.get("holdings", [])
+                if h.get("symbol"))
+    for e in sorted(star - set(top)):
+        if q.get(e, 0) >= int(cfg.get("min_daily_qv", 1500000)) * 0.5:
+            top.append(e)
 
-    print(f"[DAILY] candidate pool: {len(top)}")
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
-        res = list(ex.map(analyze_coin, top))
-    res = [r for r in res if r and r["rating"] in ("BUY", "STRONG BUY")]
+        res = [r for r in ex.map(lambda c: analyze_coin_daily(c, fng_nudge), top) if r]
+    res = [r for r in res if r["rating"] in ("BUY", "STRONG BUY")]
     res.sort(key=lambda r: -r["score"])
-    res = res[:TOP_N]
+    res = res[: cfg.get("daily_top_n", 20)]
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    news_targets = set(r["coin"] for r in res[: cfg.get("daily_news_top", 8)])
+    news_targets |= {"BTC", "ETH"}
+    news_targets |= set(str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []))
+
+    news = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        nn = dict(zip(news_targets, ex.map(lambda s: sentiment.news_score(s), news_targets)))
+    news = {k: v for k, v in nn.items() if v and v[0] not in ("?", "No news")}
+
+    stk_rows = [r for r in (analyze_stock(s["symbol"]) for s in cfg.get("stocks", [])) if r]
+    stk_good = [r for r in stk_rows if r["rating"] in ("BUY", "STRONG BUY")]
+    stk_good.sort(key=lambda r: -r["score"])
+
+    holdings_rows = portfolio_mod.portfolio_rows(cfg.get("holdings", []))
+    fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
+
+    lines = [f"\U0001f4c8 <b>DAILY REPORT</b> \u00b7 {now_s()}"]
+    mkt = (f"\U0001f310 Binance \u00b7 {len(top)} coins scannés "
+           f"(vol > ${cfg.get('min_daily_qv', 1500000) / 1e6:.1f}M)")
+    if fng is not None:
+        mkt = (f"\U0001f300 Fear&Greed <b>{fng}</b> ({esc(fngc)})"
+               f" \u00b7 {mkt}")
+        if btc_dom:
+            mkt += f" \u00b7 BTC dom {btc_dom:.1f}%"
+        if total_mcap:
+            mkt += f" \u00b7 MCap ${total_mcap / 1e12:.2f}T"
+    lines.append(mkt)
+    lines.append("")
+
     sb = [r for r in res if r["rating"] == "STRONG BUY"]
     b = [r for r in res if r["rating"] == "BUY"]
-    bar = "\u2501" * 20
 
-    lines = [f"\U0001f4c8 <b>TOP {len(res)} BUY SIGNALS</b> \u00b7 {now}",
-             f"\U0001f310 Binance universe \u00b7 {len(top)} candidates scanned "
-             f"(vol >$1.5M 24h)",
-             ""]
-
-    def row(i, r, badge):
-        emoji = f"{badge} <b>{esc(r['coin'])}</b>"
-        price = f"${r['price']:,.4f}" if r["price"] < 1 else f"${r['price']:,.2f}"
-        vol = f"\U0001f4c8 vol x{r['vol_x']:.1f}" if r["vol_x"] >= 1.2 else \
-            f"\U0001f4c9 vol x{r['vol_x']:.1f}"
-        dir3 = "\U0001f53b" if r["chg"] >= 0 else "\U0001f53d"
+    def drow(i, r, badge, star_flag):
+        news_s = ""
+        if r["coin"] in news:
+            lbl = news[r["coin"]][0]
+            icon = {"Bullish": "\U0001f44d", "Mild bullish": "\U0001f44f",
+                    "Bearish": "\U0001f44e", "Mild bearish": "\U0001f53d"}.get(lbl, "\u26aa")
+            news_s = f"  {icon} {esc(lbl)}"
+        price = fmt_price(r["price"])
+        vol = f"\U0001f4c8 vol\u00d7{r['vol_x']:.1f}" if r["vol_x"] >= 1.2 else f"\U0001f4c9 vol\u00d7{r['vol_x']:.1f}"
+        dir3 = "\u2191" if r["chg"] >= 0 else "\u2193"
         trend = "E20\u2191 " if r["above_e20"] else ""
-        macd = "MACD\u2191 " if r["macd_bull"] else ""
-        return (f"{i:>2}. {emoji}  {price}  RSI {r['rsi']:>4}   {vol}   "
-                f"{dir3}{r['chg']:+.1f}%   score {r['score']:>2}   {trend}{macd}")
+        macd = " MACD\u2191" if r["macd_bull"] else ""
+        sfl = f" \u2b50" if star_flag else ""
+        lines.append(f"{i:>2}. {badge} <b>{esc(r['coin'])}</b>{sfl}  {price}  "
+                     f"RSI {r['rsi']:>4}  {vol}  {dir3}{r['chg']:+.1f}%  "
+                     f"score {r['score']:>3}{trend}{macd}{news_s}")
 
     lines.append(f"\U0001f525 <b>STRONG BUY ({len(sb)})</b>")
     for i, r in enumerate(sb, 1):
-        lines.append(row(i, r, "\U0001f7e9"))
+        drow(i, r, "\U0001f7e9", r["coin"] in star)
     lines.append("")
     lines.append(f"\U0001f44d <b>BUY ({len(b)})</b>")
     for i, r in enumerate(b, len(sb) + 1):
-        lines.append(row(i, r, "\U0001f7e1"))
-    lines.append("")
-    lines.append(bar)
-    lines.append("RSI momentum \u00b7 volume spike (1h vs 24h avg) \u00b7 "
-                 "MACD/EMA trend \u00b7 score 0-100")
-    lines.append("\u26a0\ufe0f Signals only \u2014 verify before trading. "
-                 f"{len(sb)} strong, {len(b)} buy from {len(top)} scanned.")
+        drow(i, r, "\U0001f7e1", r["coin"] in star)
 
-    text = "\n".join(lines)
-    print(f"[DAILY] {len(sb)} STRONG BUY, {len(b)} BUY")
+    if holdings_rows:
+        pnl = portfolio_mod.format_portfolio(holdings_rows)
+        lines.append("")
+        lines.extend(pnl)
+
+    if stk_good:
+        lines.append("")
+        lines.append(f"\U0001f4c9 <b>STOCKS BUY ({len(stk_good)})</b>")
+        for r in stk_good[:5]:
+            lines.append(f"   {esc(r['symbol'])} ({esc(r['name'][:24])})  "
+                         f"{fmt_price(r['price'])}  RSI {r['rsi']:.0f}  "
+                         f"{'BUY' if r['rating']=='BUY' else 'STRONG'} "
+                         f"score {r['score']:.0f}")
+
+    if fired_alerts:
+        lines.append("")
+        lines.append("\U0001f514 <b>PRICE ALERTS</b>")
+        lines.extend(fired_alerts[:6])
+
+    lines.append("")
+    lines.append("\u2501" * 20)
+    lines.append("RSI \u00b7 volume (1h vs 24h moy) \u00b7 MACD/EMA \u00b7 "
+                 "score 0-100 \u00b7 multicoins.")
+    lines.append(f"{len(sb)} strong, {len(b)} buy sur {len(pool)} coins. "
+                 "Signaux seulement — vérifie avant de trader.")
+
+    print(f"[DAILY] {len(sb)} STRONG BUY, {len(b)} BUY, {len(stk_good)} stocks")
+    telegram_msg(token, chat_id, "\n".join(lines))
+    return True
+
+
+# ────────────────────────── OTHER MODES ──────────────────────────
+
+def run_price(token, chat_id):
+    cfg = load_cfg()
+    fired, changed = alerts_mod.check_price_alerts(cfg)
+    if not fired:
+        print("[PRICE] no alerts")
+        return False
+    lines = [f"\U0001f514 <b>PRICE ALERTS</b> \u00b7 {now_s()}", ""]
+    lines.extend(fired[:10])
+    telegram_msg(token, chat_id, "\n".join(lines))
+    return True
+
+
+def run_backtest(token, chat_id):
+    cfg = load_cfg()
+    text = backtest_mod.run_backtest(cfg)
     telegram_msg(token, chat_id, text)
+    return True
+
+
+def run_portfolio(token, chat_id):
+    cfg = load_cfg()
+    rows = portfolio_mod.portfolio_rows(cfg.get("holdings", []))
+    lines = [f"\U0001f4b0 <b>PORTFOLIO SNAPSHOT</b> \u00b7 {now_s()}"]
+    lines.extend(portfolio_mod.format_portfolio(rows))
+    telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
 
 # ────────────────────────── MAIN ──────────────────────────
 
+MODES = ["arb", "daily", "buy", "price", "backtest", "portfolio", "all"]
+
+
 def main():
     ap = ArgumentParser()
-    ap.add_argument("--mode", choices=["arb", "daily"], default="arb")
-    ap.add_argument("--all", action="store_true", help="run both modes")
+    ap.add_argument("--mode", choices=MODES, default="buy")
+    ap.add_argument("--all", action="store_true")
     args = ap.parse_args()
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -526,13 +479,23 @@ def main():
         print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
         sys.exit(1)
 
-    if args.all:
-        run_arb(token, chat_id)
+    os.makedirs(STATE_DIR, exist_ok=True)
+    mode = "all" if args.all else args.mode
+    if mode == "all":
         run_daily(token, chat_id)
-    elif args.mode == "daily":
+        run_buy(token, chat_id)
+    elif mode == "daily":
         run_daily(token, chat_id)
-    else:
+    elif mode == "buy":
+        run_buy(token, chat_id)
+    elif mode == "arb":
         run_arb(token, chat_id)
+    elif mode == "price":
+        run_price(token, chat_id)
+    elif mode == "backtest":
+        run_backtest(token, chat_id)
+    elif mode == "portfolio":
+        run_portfolio(token, chat_id)
 
 
 if __name__ == "__main__":

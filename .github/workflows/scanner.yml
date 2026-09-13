@@ -2,31 +2,35 @@ name: Crypto Signal Bot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"     # arb scan every 15 min
-    - cron: "30 8 * * *"       # daily top-20 buy signals at 08:30 UTC
+    - cron: "*/15 * * * *"   # arb scan every 15 min
+    - cron: "0 * * * *"      # intraday BUY signals every hour
+    - cron: "0 8 * * *"      # daily report 08:00 UTC (match config.json daily_hour_utc)
+    - cron: "0 12 * * 1"     # weekly backtest, Monday 12:00 UTC
   workflow_dispatch:
     inputs:
       mode:
         description: "Mode to run"
         required: true
-        default: "arb"
+        default: "buy"
         type: choice
         options:
-          - arb
+          - buy
           - daily
-          - both
+          - arb
+          - price
+          - backtest
+          - all
 
 permissions:
   contents: write
-
-concurrency:
-  group: signal-bot
-  cancel-in-progress: false
 
 jobs:
   arb-scan:
     if: github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *'
     runs-on: ubuntu-latest
+    concurrency:
+      group: arb-scan
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,31 +41,104 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py --mode arb
-      - name: Commit trap registry
+      - name: Commit bot state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -n "$(git status --porcelain traps.json)" ]; then
-            git add traps.json
-            git commit -m "Update trap registry $(date -u +%Y-%m-%dT%H:%M)"
-            git push
-          else
-            echo "No changes to traps.json"
-          fi
+          for i in 1 2 3; do
+            if [ -n "$(git status --porcelain)" ]; then
+              git add -A
+              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
+            else
+              echo "No changes"
+              break
+            fi
+            sleep 8
+          done
 
-  daily-picks:
+  buy-signals:
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '30 8 * * *') ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'daily') ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'both')
+      (github.event_name == 'schedule' && github.event.schedule == '0 * * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'buy') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
     runs-on: ubuntu-latest
+    concurrency:
+      group: buy-scan
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run daily top-20
+      - name: Run intraday buy-signal scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py --mode buy
+      - name: Commit bot state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3; do
+            if [ -n "$(git status --porcelain)" ]; then
+              git add -A
+              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
+            else
+              echo "No changes"
+              break
+            fi
+            sleep 8
+          done
+
+  daily-picks:
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 8 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'daily') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: daily-report
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run daily report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py --mode daily
+      - name: Commit bot state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3; do
+            if [ -n "$(git status --porcelain)" ]; then
+              git add -A
+              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
+            else
+              echo "No changes"
+              break
+            fi
+            sleep 8
+          done
+
+  weekly-backtest:
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 12 * * 1') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'backtest')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weekly-backtest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run weekly backtest
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py --mode backtest
