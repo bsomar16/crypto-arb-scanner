@@ -19,6 +19,8 @@ on:
           - arb
           - price
           - backtest
+          - check
+          - report
           - all
 
 permissions:
@@ -142,3 +144,73 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py --mode backtest
+
+  position-check:
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'check')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: position-check
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Follow-up check (positions + spreads)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py --mode check
+      - name: Commit bot state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3; do
+            if [ -n "$(git status --porcelain)" ]; then
+              git add -A
+              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
+            else
+              echo "No changes"
+              break
+            fi
+            sleep 8
+          done
+
+  signal-report:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'report'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: signal-report
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate signal report
+        id: report
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py --mode report --report-format html
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-report
+          path: state/report.html
+          if-no-files-found: warn
+      - name: Commit bot state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3; do
+            if [ -n "$(git status --porcelain)" ]; then
+              git add -A
+              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
+            else
+              echo "No changes"
+              break
+            fi
+            sleep 8
+          done

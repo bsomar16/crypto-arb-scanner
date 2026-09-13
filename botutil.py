@@ -2,10 +2,62 @@
 """Shared helpers: http, escaping, json persistence, telegram sending (chunked)."""
 
 import json
+import os
+import time
 import urllib.error
 import urllib.request
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+JSON_LOGS = False
+
+
+def set_json_logs(flag):
+    global JSON_LOGS
+    JSON_LOGS = bool(flag)
+
+
+def log(*parts):
+    """Human-readable by default; one JSON line per call with --json-logs."""
+    msg = " ".join(str(p) for p in parts)
+    if JSON_LOGS:
+        print(json.dumps({"ts": int(time.time()), "msg": msg}))
+    else:
+        print(msg)
+
+
+def elog(event, **fields):
+    """Structured progress line (JSON when --json-logs)."""
+    row = {"event": event, **fields}
+    if JSON_LOGS:
+        print(json.dumps(row))
+    else:
+        print(event, " ".join(f"{k}={v}" for k, v in sorted(fields.items())))
+
+
+def env_float(name, default):
+    try:
+        return float(os.environ.get(name, ""))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def env_int(name, default):
+    return int(env_float(name, default))
+
+
+def fmt_price(p):
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return "$?"
+    if p >= 1000:
+        return f"${p:,.0f}"
+    if p >= 1:
+        return f"${p:,.2f}"
+    if p >= 0.01:
+        return f"${p:,.4f}"
+    return f"${p:.6g}"
 
 
 def http_json(url, timeout=20, retries=1):

@@ -2,6 +2,8 @@
 """Market data sources: 9 crypto exchanges, Binance mirror (geo-safe), Yahoo stocks."""
 
 import json
+import os
+
 from botutil import http_json
 
 EXCHANGES = {
@@ -17,6 +19,196 @@ EXCHANGES = {
 }
 
 BN = "https://data-api.binance.vision"
+
+# Approximate spot taker fees (fraction of notional). Fees change rarely;
+# confirm with each venue before relying on exact numbers. Env-overridable.
+FEE_TAKER = {
+    "BINANCE": 0.0010, "BITGET": 0.0010, "OKX": 0.0010, "GATE": 0.0015,
+    "MEXC": 0.0010, "POLONIEX": 0.0015, "KUCOIN": 0.0010, "HTX": 0.0020,
+    "COINEX": 0.0025,
+}
+
+# Exchanges with no public deposit/withdraw status endpoint (need API keys).
+API_PRIVATE_STATUS = ("BINANCE", "OKX", "MEXC", "COINEX")
+
+
+def taker_fee(ex):
+    return float(os.environ.get(f"FEE_{ex}", FEE_TAKER.get(ex, 0.0020)))
+
+
+def cost_effective(high, low, high_ex, low_ex):
+    """Return (net_return_pct, round-trip cost fraction) for the arb leg pair."""
+    fh, fl = taker_fee(high_ex), taker_fee(low_ex)
+    cost_mult = (1 + fl) / (1 - fh)
+    return ((high * (1 - fh)) / (low * (1 + fl)) - 1) * 100.0, (cost_mult - 1) * 100.0
+
+
+def calc_net(high, low, high_ex, low_ex):
+    net, _ = cost_effective(high, low, high_ex, low_ex)
+    return net
+
+
+# ─────────────────────────── order book depth ───────────────────────────
+
+def _norm_levels(pair_list):
+    out = []
+    for p, q in pair_list:
+        try:
+            out.append((float(p), float(q)))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _depth_url(ex, symbol):
+    if ex == "BINANCE":
+        return f"https://data-api.binance.vision/api/v3/depth?symbol={symbol}USDT&limit=20"
+    if ex == "BITGET":
+        return f"https://api.bitget.com/api/v2/spot/market/orderbook?symbol={symbol}USDT&type=step0&limit=20"
+    if ex == "OKX":
+        return f"https://www.okx.com/api/v5/market/books?instId={symbol}-USDT&sz=20"
+    if ex == "GATE":
+        return f"https://api.gateio.ws/api/v4/spot/order_book?currency_pair={symbol}_USDT&limit=20"
+    if ex == "MEXC":
+        return f"https://api.mexc.com/api/v3/depth?symbol={symbol}USDT&limit=20"
+    if ex == "POLONIEX":
+        return f"https://api.poloniex.com/markets/{symbol}_USDT/orderBook?limit=20"
+    if ex == "KUCOIN":
+        return f"https://api.kucoin.com/api/v1/market/orderbook/level2_20?symbol={symbol}-USDT"
+    if ex == "HTX":
+        return f"https://api.huobi.pro/market/depth?symbol={symbol}usdt&type=step0&depth=20"
+    if ex == "COINEX":
+        return f"https://api.coinex.com/v1/spot/depth?market={symbol}USDT&limit=20"
+    return None
+
+
+def fetch_orderbook(ex, symbol, limit=20):
+    url = _depth_url(ex, symbol)
+    if not url:
+        return None
+    try:
+        d = http_json(url, timeout=12)
+        if ex in ("BINANCE", "MEXC", "GATE"):
+            asks = _norm_levels(d.get("asks", []))
+            bids = _norm_levels(d.get("bids", []))
+        elif ex == "BITGET":
+            r = d.get("data", {})
+            asks = _norm_levels(r.get("asks", []))
+            bids = _norm_levels(r.get("bids", []))
+        elif ex == "OKX":
+            r = d.get("data", [{}])[0]
+            asks = _norm_levels(r.get("asks", []))
+            bids = _norm_levels(r.get("bids", []))
+        elif ex == "POLONIEX":
+            asks = _norm_levels(d.get("asks", []))
+            bids = _norm_levels(d.get("bids", []))
+        elif ex == "KUCOIN":
+            r = d.get("data", {})
+            asks = _norm_levels(r.get("asks", []))
+            bids = _norm_levels(r.get("bids", []))
+        elif ex == "HTX":
+            r = d.get("tick", {})
+            asks = _norm_levels(r.get("asks", []))
+            bids = _norm_levels(r.get("bids", []))
+        elif ex == "COINEX":
+            r = d.get("data", {})
+            asks = _norm_levels(r.get("asks", []))
+            bids = _norm_levels(r.get("bids", []))
+        else:
+            return None
+        asks.sort(key=lambda x: x[0])
+        bids.sort(key=lambda x: x[0], reverse=True)
+        return {"asks": asks, "bids": bids}
+    except Exception:
+        return None
+
+
+def slipped_size(levels, base_price, allowed_move):
+    """Quote-side size (USDT) fillable before price slips `allowed_move`.
+
+    `levels` ascending for asks (buy), descending for bids (sell).
+    Pure function, unit-tested.
+    """
+    if not levels or not base_price:
+        return 0.0
+    target = base_price * (1 + allowed_move)
+    go_higher = allowed_move >= 0
+    qty, cum = 0.0, 0.0
+    for p, q in levels:
+        nq = qty + q
+        avg = (cum + p * q) / nq if nq else 0
+        crossed = (avg >= target) if go_higher else (avg <= target)
+        if crossed:
+            break
+        qty, cum = nq, cum + p * q
+    return qty * base_price
+
+
+def depth_estimate(ex, symbol, orderbook=None, target_net_pct=1.0):
+    """Estimate max size before slippage halves / erases the net spread.
+
+    Returns dict with 'full_usd' and 'half_usd' or None when no book data.
+    """
+    orderbook = orderbook if orderbook is not None else fetch_orderbook(ex, symbol)
+    if not orderbook:
+        return None
+    ask0 = orderbook["asks"][0][0] if orderbook["asks"] else None
+    bid0 = orderbook["bids"][0][0] if orderbook["bids"] else None
+    base = ask0 or bid0
+    if not base:
+        return None
+    move = max(float(target_net_pct), 0.1) / 100.0
+    buy_size = slipped_size(orderbook["asks"], base, move)
+    sell_size = slipped_size(orderbook["bids"], base, -move)
+    full = min(buy_size, sell_size)
+    half = min(slipped_size(orderbook["asks"], base, move / 2),
+               slipped_size(orderbook["bids"], base, -move / 2))
+    return {"full_usd": round(full), "half_usd": round(half)}
+
+
+# ─────────────────────────── symbol identity check ───────────────────────────
+
+def currency_name(ex, coin):
+    """Best-effort full name for a coin on an exchange (None if unknown)."""
+    try:
+        if ex == "KUCOIN":
+            d = http_json(f"https://api.kucoin.com/api/v1/currencies/{coin}",
+                          timeout=12)
+            return d.get("data", {}).get("fullName")
+        if ex == "GATE":
+            d = http_json(f"https://api.gateio.ws/api/v4/spot/currencies/{coin}",
+                          timeout=12)
+            return d.get("name")
+        if ex == "COINEX":
+            d = http_json("https://api.coinex.com/v1/spot/currencies", timeout=20)
+            for c in d.get("data", []):
+                if str(c.get("asset", "")).upper() == coin.upper():
+                    return c.get("name")
+        if ex == "POLONIEX":
+            d = http_json(f"https://api.poloniex.com/currencies/{coin}", timeout=12)
+            return (d.get("name") or d.get("shortName")) if isinstance(d, dict) else None
+        if ex == "HTX":
+            d = http_json("https://api.huobi.pro/v2/reference/currencies", timeout=25)
+            for c in d.get("data", []):
+                if str(c.get("currency", "")).lower() == coin.lower():
+                    return c.get("displayName") or c.get("baseCurrency")
+        if ex == "BITGET":
+            d = http_json("https://api.bitget.com/api/v2/spot/public/coins", timeout=25)
+            for c in d.get("data", []):
+                if str(c.get("coin", "")).upper() == coin.upper():
+                    return c.get("coinName")
+    except Exception:
+        return None
+    return None
+
+
+def names_diverge(a, b):
+    """True when both names are known and clearly differ (collision check)."""
+    if not a or not b:
+        return False
+    na = "".join(ch for ch in a.lower() if ch.isalnum())
+    nb = "".join(ch for ch in b.lower() if ch.isalnum())
+    return na != nb
 
 
 def fetch_exchange(name):
@@ -231,4 +423,17 @@ def coin_status(coin):
                 break
     except Exception:
         pass
+    try:
+        d = http_json("https://api.poloniex.com/currencies", timeout=25)
+        for cur in d:
+            if str(cur.get("currency", "")).lower() == coin.lower():
+                dep = bool(cur.get("depositEnabled")) and not bool(cur.get("disallowedDeposit"))
+                wd = bool(cur.get("withdrawalEnabled")) and not bool(cur.get("disallowedWithdraw"))
+                out["POLONIEX"] = {"dep": dep, "wd": wd, "net": ["multi"],
+                                   "note": ""}
+                break
+    except Exception:
+        pass
+    for ex in API_PRIVATE_STATUS:
+        out[ex] = {"dep": None, "wd": None, "net": [], "note": "API priv\u00e9e"}
     return out

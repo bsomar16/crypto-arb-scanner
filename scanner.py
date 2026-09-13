@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Crypto signal bot orchestration.
-Modes: arb | daily | buy | price | backtest | portfolio | all
+Modes: arb | daily | buy | price | backtest | portfolio | check | report | all
 """
 
-import json
 import os
 import sys
 import time
@@ -12,18 +11,26 @@ from argparse import ArgumentParser
 from datetime import datetime, timezone
 from statistics import median
 
-from botutil import esc, telegram_msg, load_json, save_json
+from botutil import (esc, telegram_msg, load_json, save_json, fmt_price,
+                     env_float, env_int, log, set_json_logs)
 import markets
 from markets import (EXCHANGES, fetch_exchange, fetch_binance_24h, crypto_quote,
-                     volume_spike, coin_status, yahoo_chart)
+                     volume_spike, coin_status, yahoo_chart,
+                     calc_net, taker_fee, depth_estimate, currency_name,
+                     names_diverge, API_PRIVATE_STATUS)
 from signals import daily_indicators, score_daily, analyze_coin_daily, intraday_signal, rating
 import sentiment
 import portfolio as portfolio_mod
 import alerts as alerts_mod
 import backtest as backtest_mod
+import traps as traps_mod
+import store as store_mod
+import positions as positions_mod
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 1.0
+MAX_ALERTS_PER_RUN = 10
+TRAP_EXPIRY_DAYS = 7.0
 TRAP_FILE = "traps.json"
 STATE_DIR = "state"
 
@@ -47,6 +54,16 @@ DEFAULTS = {
                {"symbol": "TSLA", "market": "NASDAQ"}],
     "price_alerts": [],
     "backtest_symbols": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE"],
+    "min_exchanges": MIN_EXCHANGES,
+    "spread_alert_pct": SPREAD_ALERT_PCT,
+    "max_alerts_per_run": MAX_ALERTS_PER_RUN,
+    "trap_expiry_days": TRAP_EXPIRY_DAYS,
+    "stoploss_pct": 0.05,
+    "tp1_pct": 0.05,
+    "tp2_pct": 0.10,
+    "tp3_pct": 0.20,
+    "position_expiry_days": 14,
+    "max_open_positions": 40,
 }
 
 
@@ -62,14 +79,17 @@ def now_s():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def fmt_price(p):
-    if p >= 1000:
-        return f"${p:,.0f}"
-    if p >= 1:
-        return f"${p:,.2f}"
-    if p >= 0.01:
-        return f"${p:,.4f}"
-    return f"${p:.6g}"
+def arb_limits(cfg):
+    """Env-overridable thresholds for the arb scanner."""
+    return {
+        "min_ex": env_int("MIN_EXCHANGES", cfg.get("min_exchanges", MIN_EXCHANGES)),
+        "spread": env_float("SPREAD_ALERT_PCT", cfg.get("spread_alert_pct",
+                                                        SPREAD_ALERT_PCT)),
+        "max_alerts": env_int("MAX_ALERTS_PER_RUN", cfg.get("max_alerts_per_run",
+                                                            MAX_ALERTS_PER_RUN)),
+        "trap_days": env_float("TRAP_EXPIRY_DAYS", cfg.get("trap_expiry_days",
+                                                           TRAP_EXPIRY_DAYS)),
+    }
 
 
 # ────────────────────────── ARB SCANNER ──────────────────────────
@@ -79,25 +99,85 @@ STATUS_ICON = {"ok": "\u2705", "warn": "\u26a0\ufe0f", "bad": "\u274c"}
 
 def fmt_status(ex, info):
     dep, wd = info["dep"], info["wd"]
+    if dep is None and wd is None:
+        return f"   \U0001f512 <b>{ex}</b>  {info.get('note', 'API priv\u00e9e')}"
     icon = STATUS_ICON["ok"] if (dep and wd) else (STATUS_ICON["warn"] if (dep or wd) else STATUS_ICON["bad"])
     note = f" | {info['note']}" if info.get("note") else ""
     return (f"   {icon} <b>{ex}</b>  D:{'on' if dep else 'off'}"
-            f" W:{'on' if wd else 'off'}{note}\n      nets: {info['net'][0]}")
+            f" W:{'on' if wd else 'off'}{note}"
+            f"      nets: {info['net'][0] if info['net'] else 'n/a'}")
+
+
+def _alert_extra(r):
+    """Fees/net, depth and name-collision enrichment for one alert. Best-effort."""
+    lines = []
+    net = calc_net(r["high"], r["low"], r["high_ex"], r["low_ex"])
+    lines.append(f"   \U0001f9ee net of fees <b>+{net:.2f}%</b>"
+                 f" (gross +{r['spread']:.2f}%, taker fees "
+                 f"{taker_fee(r['low_ex']) * 100:.2f}/{taker_fee(r['high_ex']) * 100:.2f}%)")
+
+    d1 = depth_estimate(r["low_ex"], r["coin"])
+    d2 = depth_estimate(r["high_ex"], r["coin"])
+    if d1 or d2:
+        pieces = []
+        if d1:
+            pieces.append(f"buy {r['low_ex']} ~${d1['full_usd']:,}")
+        if d2:
+            pieces.append(f"sell {r['high_ex']} ~${d2['full_usd']:,}")
+        lines.append(f"   \U0001f4e7 book depth: " + " \u00b7 ".join(pieces))
+
+    st = coin_status(r["coin"])
+    if st:
+        legs = (r["low_ex"], r["high_ex"])
+        compact = []
+        worried = []
+        for ex in sorted(st):
+            dep, wd = st[ex]["dep"], st[ex]["wd"]
+            if dep is None and wd is None:
+                compact.append(f"{ex} \U0001f512")
+            elif dep and wd:
+                compact.append(f"{ex} \u2705")
+            else:
+                side = []
+                if not dep:
+                    side.append("D")
+                if not wd:
+                    side.append("W")
+                compact.append(f"{ex} \u26a0{'/'.join(side)}")
+                if ex not in legs:
+                    worried.append(ex)
+        lines.append(f"   \U0001f6f0\ufe0f D/W: {' \u00b7 '.join(compact)}")
+        for ex in legs:
+            if ex in st:
+                lines.append(fmt_status(ex, st[ex]))
+        if worried:
+            lines.append(f"      \u26a0\ufe0f also off elsewhere: {', '.join(worried)}")
+
+    n1 = currency_name(r["low_ex"], r["coin"])
+    n2 = currency_name(r["high_ex"], r["coin"])
+    if n1 or n2:
+        if names_diverge(n1, n2):
+            lines.append(f"   \u26a0\ufe0f noms divergents: {r['low_ex']}='{n1}'"
+                         f" vs {r['high_ex']}='{n2}' \u00b7 coins diff\u00e9rents ?")
+    return lines
 
 
 def run_arb(token, chat_id):
-    traps = set()
-    if os.path.exists(TRAP_FILE):
-        try:
-            traps = set(json.load(open(TRAP_FILE)))
-        except Exception:
-            traps = set()
+    cfg = load_cfg()
+    lim = arb_limits(cfg)
+
+    try:
+        positions_mod.check_positions(token, chat_id, cfg)
+    except Exception as e:
+        log("ARB", "positions check error:", e)
+
+    traps = traps_mod.load_traps(TRAP_FILE, lim["trap_days"])
 
     maps = {}
     offline = []
     for ex in EXCHANGES:
         maps[ex] = fetch_exchange(ex)
-        print(f"{ex}: {len(maps[ex])} pairs")
+        log(ex, f"{len(maps[ex])} pairs")
         if not maps[ex]:
             offline.append(ex)
 
@@ -105,52 +185,59 @@ def run_arb(token, chat_id):
     for ex, m in maps.items():
         for c in m:
             counts[c] = counts.get(c, 0) + 1
-    universe = [c for c, n in counts.items() if n >= MIN_EXCHANGES]
+    universe = [c for c, n in counts.items() if n >= lim["min_ex"]]
 
-    new_alerts, watch, all_flagged = [], [], set()
+    new_alerts, watch, all_flagged = [], [], []
     for c in sorted(universe):
         prices = {ex: p for ex, m in maps.items() if c in m and (p := m[c]) > 0}
-        if len(prices) < MIN_EXCHANGES:
+        if len(prices) < lim["min_ex"]:
             continue
         vals = list(prices.values())
         hi, lo = max(vals), min(vals)
         spread = (hi - lo) / lo * 100
-        if spread >= SPREAD_ALERT_PCT:
-            all_flagged.add(c)
+        if spread >= lim["spread"]:
+            all_flagged.append(c)
             if c in traps:
+                continue
+            if len(new_alerts) >= lim["max_alerts"]:
                 continue
             new_alerts.append({"coin": c, "spread": spread, "low": lo,
                                "low_ex": min(prices, key=prices.get),
                                "high": hi, "high_ex": max(prices, key=prices.get),
                                "median": median(vals)})
-        elif spread >= 0.5 and c not in traps:
+        elif spread >= 0.5 and c not in traps and len(watch) < 5:
             watch.append({"coin": c, "spread": spread,
                           "low_ex": min(prices, key=prices.get),
                           "high_ex": max(prices, key=prices.get)})
     new_alerts.sort(key=lambda r: r["spread"], reverse=True)
     watch.sort(key=lambda r: r["spread"], reverse=True)
 
-    traps |= all_flagged
-    with open(TRAP_FILE, "w") as f:
-        json.dump(sorted(traps), f)
+    traps_mod.save_traps(TRAP_FILE, traps_mod.mark_flagged(traps, all_flagged))
+
+    limited = len(all_flagged) > lim["max_alerts"]
+    for r in new_alerts:
+        try:
+            store_mod.spread_log(r["coin"], r["spread"], calc_net(
+                r["high"], r["low"], r["high_ex"], r["low_ex"]),
+                r["low_ex"], r["high_ex"], r["low"], r["high"], r["median"])
+        except Exception as e:
+            log("ARB", "spread_log error:", e)
 
     lines = [f"\U0001f4ca <b>ARB SCAN</b> \u00b7 {now_s()}",
              f"\U0001f310 {len(universe)} coins \u00b7 {len(EXCHANGES)} exchanges"
-             f" \u00b7 {len(EXCHANGES) - len(offline)}/9 feeds"]
+             f" \u00b7 {len(EXCHANGES) - len(offline)}/{len(EXCHANGES)} feeds"]
 
     if new_alerts:
         lines.append("")
-        lines.append(f"\U0001f6a8 <b>NEW ALERTS ({len(new_alerts)})</b>")
+        label = f"\U0001f6a8 <b>NEW ALERTS ({len(new_alerts)})</b>"
+        if limited:
+            label += f" \u00b7 max {lim['max_alerts']}/run"
+        lines.append(label)
         for r in new_alerts[:5]:
             lines.append(f"\n\U0001f525 {esc(r['coin'])}  <b>+{r['spread']:.1f}%</b>")
             lines.append(f"   \U0001f4e4 buy  {r['low']:.6g} \u00b7 <b>{r['low_ex']}</b>")
             lines.append(f"   \U0001f4e5 sell {r['high']:.6g} \u00b7 <b>{r['high_ex']}</b>")
-            st = coin_status(r["coin"])
-            if st:
-                lines.append(f"   \U0001f6f0\ufe0f <b>deposit / withdraw</b>")
-                for ex in ("KUCOIN", "GATE", "HTX", "BITGET"):
-                    if ex in st:
-                        lines.append(fmt_status(ex, st[ex]))
+            lines.extend(_alert_extra(r))
         lines.append("\u2501" * 18)
     else:
         lines.append("")
@@ -158,7 +245,7 @@ def run_arb(token, chat_id):
 
     if watch:
         lines.append("")
-        lines.append(f"\U0001f440 <b>WATCHLIST (0.5\u20131%)</b>")
+        lines.append("\U0001f440 <b>WATCHLIST (0.5\u20131%)</b>")
         for r in watch[:5]:
             lines.append(f"   {r['coin']}  +{r['spread']:.1f}%  ({r['low_ex']}\u2192{r['high_ex']})")
 
@@ -182,7 +269,7 @@ def run_arb(token, chat_id):
         gainers.sort(key=lambda r: r[1], reverse=True)
         if gainers:
             lines.append("")
-            lines.append(f"\U0001f4c8 <b>TOP GAINERS 24h</b> (BN)")
+            lines.append("\U0001f4c8 <b>TOP GAINERS 24h</b> (BN)")
             for i, (b, ch, q) in enumerate(gainers[:5], 1):
                 spike = volume_spike(b)
                 v = f" \u00b7 <b>vol x{spike:.1f}</b>" if spike else ""
@@ -192,7 +279,7 @@ def run_arb(token, chat_id):
         lines.append("")
         lines.append(f"\u26a0\ufe0f offline feeds: {', '.join(offline)}")
 
-    print(f"[ARB] {len(new_alerts)} alerts, {len(watch)} watch, {len(gainers)} gainers")
+    log(f"[ARB] {len(new_alerts)} alerts, {len(watch)} watch, {len(gainers)} gainers")
     telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
@@ -240,7 +327,7 @@ def run_buy(token, chat_id):
     fired_alerts, changed = alerts_mod.check_price_alerts(cfg)
 
     if not (strong or normal or fired_alerts):
-        print("[BUY] no new signals")
+        log("[BUY] no new signals")
         return False
 
     for k, v in updates.items():
@@ -289,7 +376,7 @@ def run_buy(token, chat_id):
     lines.append("\u2b50 = sur ta watchlist / portefeuille \u00b7 "
                  "Signaux seulement, vérifie avant de trader.")
 
-    print(f"[BUY] {len(strong)} strong, {len(normal)} normal, {len(fired_alerts)} alerts")
+    log(f"[BUY] {len(strong)} strong, {len(normal)} normal, {len(fired_alerts)} alerts")
     telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
@@ -350,6 +437,16 @@ def run_daily(token, chat_id):
     res.sort(key=lambda r: -r["score"])
     res = res[: cfg.get("daily_top_n", 20)]
 
+    # log picks + open virtual positions (19:00-style daily)
+    for r in res:
+        try:
+            store_mod.daily_log(r["coin"], r["score"], r["rating"],
+                                r["price"], r["chg"], r["rsi"], r["vol_x"],
+                                r.get("qv"))
+        except Exception as e:
+            log("DAILY", "daily_log error:", e)
+    positions_mod.open_picks(res, cfg)
+
     news_targets = set(r["coin"] for r in res[: cfg.get("daily_news_top", 8)])
     news_targets |= {"BTC", "ETH"}
     news_targets |= set(str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []))
@@ -390,11 +487,12 @@ def run_daily(token, chat_id):
                     "Bearish": "\U0001f44e", "Mild bearish": "\U0001f53d"}.get(lbl, "\u26aa")
             news_s = f"  {icon} {esc(lbl)}"
         price = fmt_price(r["price"])
-        vol = f"\U0001f4c8 vol\u00d7{r['vol_x']:.1f}" if r["vol_x"] >= 1.2 else f"\U0001f4c9 vol\u00d7{r['vol_x']:.1f}"
+        vol = (f"\U0001f4c8 vol\u00d7{r['vol_x']:.1f}" if r["vol_x"] >= 1.2
+               else f"\U0001f4c9 vol\u00d7{r['vol_x']:.1f}")
         dir3 = "\u2191" if r["chg"] >= 0 else "\u2193"
         trend = "E20\u2191 " if r["above_e20"] else ""
         macd = " MACD\u2191" if r["macd_bull"] else ""
-        sfl = f" \u2b50" if star_flag else ""
+        sfl = " \u2b50" if star_flag else ""
         lines.append(f"{i:>2}. {badge} <b>{esc(r['coin'])}</b>{sfl}  {price}  "
                      f"RSI {r['rsi']:>4}  {vol}  {dir3}{r['chg']:+.1f}%  "
                      f"score {r['score']:>3}{trend}{macd}{news_s}")
@@ -433,7 +531,7 @@ def run_daily(token, chat_id):
     lines.append(f"{len(sb)} strong, {len(b)} buy sur {len(pool)} coins. "
                  "Signaux seulement — vérifie avant de trader.")
 
-    print(f"[DAILY] {len(sb)} STRONG BUY, {len(b)} BUY, {len(stk_good)} stocks")
+    log(f"[DAILY] {len(sb)} STRONG BUY, {len(b)} BUY, {len(stk_good)} stocks")
     telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
@@ -444,7 +542,7 @@ def run_price(token, chat_id):
     cfg = load_cfg()
     fired, changed = alerts_mod.check_price_alerts(cfg)
     if not fired:
-        print("[PRICE] no alerts")
+        log("[PRICE] no alerts")
         return False
     lines = [f"\U0001f514 <b>PRICE ALERTS</b> \u00b7 {now_s()}", ""]
     lines.extend(fired[:10])
@@ -468,25 +566,73 @@ def run_portfolio(token, chat_id):
     return True
 
 
+def run_check(token, chat_id):
+    """Follow-up pass: position SL/TP crossings + recent-spread recheck."""
+    cfg = load_cfg()
+    sent = 0
+    try:
+        sent = positions_mod.check_positions(token, chat_id, cfg)
+    except Exception as e:
+        log("CHECK", "positions error:", e)
+    try:
+        fu = store_mod.followup_spreads(hours_back=6,
+                                        threshold=cfg.get("spread_alert_pct", 1.0))
+        if fu and token and chat_id:
+            lines = [f"\U0001f504 <b>SPREAD FOLLOW-UP (6h)</b> \u00b7 {now_s()}", ""]
+            for coin, ts, net, still in fu[-8:]:
+                flag = "encore ouvert" if still else "referm\u00e9"
+                lines.append(f"   {coin}  net {net:+.2f}% \u00b7 {flag} \u00b7 alerte {ts[11:16]}")
+            telegram_msg(token, chat_id, "\n".join(lines))
+            sent += 1
+    except Exception as e:
+        log("CHECK", "followup error:", e)
+    log(f"[CHECK] {sent} message(s)")
+    return sent > 0
+
+
+def run_report(fmt):
+    """Summary of the historical log (no telegram required; tries anyway)."""
+    text = store_mod.build_report_text()
+    try:
+        with open("state/report.html", "w", encoding="utf-8") as f:
+            f.write(store_mod.build_report_html())
+        log(f"[REPORT] state/report.html written (format={fmt})")
+    except Exception as e:
+        log("REPORT", "html write error:", e)
+    print(text)
+    return text
+
+
 # ────────────────────────── MAIN ──────────────────────────
 
-MODES = ["arb", "daily", "buy", "price", "backtest", "portfolio", "all"]
+MODES = ["arb", "daily", "buy", "price", "backtest", "portfolio",
+         "check", "report", "all"]
 
 
 def main():
     ap = ArgumentParser()
     ap.add_argument("--mode", choices=MODES, default="buy")
     ap.add_argument("--all", action="store_true")
+    ap.add_argument("--report-format", choices=["text", "html"], default="text")
+    ap.add_argument("--json-logs", action="store_true")
     args = ap.parse_args()
+
+    if args.json_logs:
+        set_json_logs(True)
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    mode = "all" if args.all else args.mode
+
+    if mode == "report":
+        run_report(args.report_format)
+        return
+
     if not token or not chat_id:
         print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
         sys.exit(1)
 
     os.makedirs(STATE_DIR, exist_ok=True)
-    mode = "all" if args.all else args.mode
     if mode == "all":
         run_daily(token, chat_id)
         run_buy(token, chat_id)
@@ -502,6 +648,8 @@ def main():
         run_backtest(token, chat_id)
     elif mode == "portfolio":
         run_portfolio(token, chat_id)
+    elif mode == "check":
+        run_check(token, chat_id)
 
 
 if __name__ == "__main__":
