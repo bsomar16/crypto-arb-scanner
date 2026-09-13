@@ -4,14 +4,13 @@
 import json
 import os
 import sys
-import time
 import urllib.request
 from datetime import datetime, timezone
 from statistics import median
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 1.0
-DIGEST_PCT = 0.5
+TRAP_FILE = "traps.json"
 
 EXCHANGES = {
     "BINANCE": "https://data-api.binance.vision/api/v3/ticker/price",
@@ -23,21 +22,6 @@ EXCHANGES = {
     "KUCOIN": "https://api.kucoin.com/api/v1/market/allTickers",
     "HTX": "https://api.huobi.pro/market/tickers",
     "COINEX": "https://api.coinex.com/v2/spot/ticker",
-}
-
-BINANCE_FALLBACKS = [
-    "https://api.binance.com/api/v3/ticker/price",
-    "https://data-api.binance.vision/api/v3/ticker/price",
-]
-
-KNOWN_TRAPS = {
-    "ELON": "T", "XTER": "T", "RON_L": "T", "DATA": "T", "ARC": "T",
-    "FUN": "T", "BEAM": "T", "REEF": "T", "PROS": "T", "HNT": "T",
-    "NFP": "T", "BAL": "T", "ACS": "T", "EDGE": "T", "RVV": "T",
-    "LIT": "T", "VELO": "T", "UP": "T", "POLS": "T", "ELF": "T",
-    "WAVES": "T", "XMR": "T", "ACE": "T", "SNT": "T", "SCRT": "T",
-    "PYR": "T", "LRC": "T", "LSK": "T", "PROM": "T", "ICX": "T",
-    "STRAX": "T", "ZIL": "T", "MUBARAK": "T", "STEEM": "T", "AGLD": "T",
 }
 
 
@@ -53,11 +37,11 @@ def fetch_exchange(name):
         m = {}
         if name == "BINANCE":
             for t in data:
-                if t["symbol"].endswith("USDT") and "USDT" not in t["symbol"][:-4]:
-                    base = t["symbol"][:-4]
-                    if "USDT" in base:
-                        continue
-                    m[base] = float(t["price"])
+                s = t["symbol"]
+                if s.endswith("USDT") and s != "USDTUSDT":
+                    base = s[:-4]
+                    if "USDT" not in base:
+                        m[base] = float(t["price"])
         elif name == "BITGET":
             for t in data.get("data", []):
                 if t["symbol"].endswith("USDT"):
@@ -68,15 +52,16 @@ def fetch_exchange(name):
                     m[t["instId"][:-5]] = float(t["last"])
         elif name == "GATE":
             for t in data:
-                if t["currency_pair"].endswith("_USDT"):
-                    base = t["currency_pair"][:-5]
-                    if "_" in base:
-                        continue
-                    m[base] = float(t["last"])
+                cp = t["currency_pair"]
+                if cp.endswith("_USDT") and "_" not in cp[:-5]:
+                    m[cp[:-5]] = float(t["last"])
         elif name == "MEXC":
             for t in data:
-                if t["symbol"].endswith("USDT") and "USDT" not in t["symbol"][:-4]:
-                    m[t["symbol"][:-4]] = float(t["price"])
+                s = t["symbol"]
+                if s.endswith("USDT") and s != "USDTUSDT":
+                    base = s[:-4]
+                    if "USDT" not in base:
+                        m[base] = float(t["price"])
         elif name == "POLONIEX":
             for t in data:
                 if t["symbol"].endswith("_USDT"):
@@ -95,22 +80,34 @@ def fetch_exchange(name):
                     m[t["market"][:-4]] = float(t["last"])
         return m
     except Exception:
-        if name == "BINANCE":
-            alt = EXCHANGES["BINANCE"]
-            if alt.startswith("https://data-api.binance.vision"):
-                alt2 = "https://api.binance.com/api/v3/ticker/price"
-            else:
-                alt2 = "https://data-api.binance.vision/api/v3/ticker/price"
-            try:
-                data = http_json(alt2, timeout=20)
-                m = {}
-                for t in data:
-                    if t["symbol"].endswith("USDT") and "USDT" not in t["symbol"][:-4]:
-                        m[t["symbol"][:-4]] = float(t["price"])
-                return m
-            except Exception:
-                return {}
         return {}
+
+
+def fetch_binance_24h():
+    """Top movers from Binance 24hr ticker (vision mirror)."""
+    try:
+        data = http_json("https://data-api.binance.vision/api/v3/ticker/24hr",
+                         timeout=25)
+        rows = []
+        for t in data:
+            s = t["symbol"]
+            if not (s.endswith("USDT") and s != "USDTUSDT"):
+                continue
+            base = s[:-4]
+            if "USDT" in base or "FDUSD" in base or "BUSD" in base:
+                continue
+            try:
+                q = float(t["quoteVolume"])
+                ch = float(t["priceChangePercent"])
+            except (ValueError, KeyError):
+                continue
+            if q < 500000:
+                continue
+            rows.append((base, ch, q))
+        rows.sort(key=lambda r: r[1], reverse=True)
+        return rows
+    except Exception:
+        return []
 
 
 def telegram_msg(token, chat_id, text):
@@ -130,6 +127,13 @@ def main():
         print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
         sys.exit(1)
 
+    traps = set()
+    if os.path.exists(TRAP_FILE):
+        try:
+            traps = set(json.load(open(TRAP_FILE)))
+        except Exception:
+            traps = set()
+
     maps = {}
     offline = []
     for ex in EXCHANGES:
@@ -144,8 +148,9 @@ def main():
             counts[c] = counts.get(c, 0) + 1
     universe = [c for c, n in counts.items() if n >= MIN_EXCHANGES]
 
-    suspects = []
-    digest_rows = []
+    new_alerts = []
+    watch = []
+    all_flagged = set()
     for c in sorted(universe):
         prices = {ex: p for ex, m in maps.items() if c in m and (p := m[c]) > 0}
         if len(prices) < MIN_EXCHANGES:
@@ -153,50 +158,60 @@ def main():
         vals = list(prices.values())
         hi, lo = max(vals), min(vals)
         spread = (hi - lo) / lo * 100
-        if c in KNOWN_TRAPS:
-            continue
         if spread >= SPREAD_ALERT_PCT:
+            all_flagged.add(c)
+            if c in traps:
+                continue
             lo_ex = min(prices, key=prices.get)
             hi_ex = max(prices, key=prices.get)
             med = median(vals)
-            suspects.append({
-                "coin": c, "spread": spread,
-                "low": lo, "low_ex": lo_ex,
-                "high": hi, "high_ex": hi_ex,
-                "median": med, "n": len(prices),
-            })
-        elif spread >= DIGEST_PCT:
+            new_alerts.append({"coin": c, "spread": spread, "low": lo,
+                               "low_ex": lo_ex, "high": hi,
+                               "high_ex": hi_ex, "median": med})
+        elif spread >= 0.5 and c not in traps:
             lo_ex = min(prices, key=prices.get)
             hi_ex = max(prices, key=prices.get)
-            digest_rows.append({
-                "coin": c, "spread": spread, "low_ex": lo_ex,
-                "high_ex": hi_ex,
-            })
-    suspects.sort(key=lambda r: r["spread"], reverse=True)
-    digest_rows.sort(key=lambda r: r["spread"], reverse=True)
+            watch.append({"coin": c, "spread": spread, "low_ex": lo_ex,
+                          "high_ex": hi_ex})
+    new_alerts.sort(key=lambda r: r["spread"], reverse=True)
+    watch.sort(key=lambda r: r["spread"], reverse=True)
+
+    # persist new flagged coins so they never re-alert
+    traps |= all_flagged
+    with open(TRAP_FILE, "w") as f:
+        json.dump(sorted(traps), f)
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [f"<b>Arb scan {now}</b> | {len(universe)} coins / {len(EXCHANGES)} exchanges"]
     if offline:
-        lines.append(f"<b>WARN: offline feeds</b>: {', '.join(offline)} (geo-blocked or down)")
-        lines.append("Coverage below excludes these venues.")
-    if suspects:
+        lines.append(f"<b>WARN offline:</b> {', '.join(offline)}")
+    if new_alerts:
         lines.append("")
-        lines.append("<b>ALERTS ({})</b>".format(len(suspects)))
-        for r in suspects[:10]:
+        lines.append(f"<b>NEW ALERTS ({len(new_alerts)})</b>")
+        for r in new_alerts[:10]:
             lines.append(
                 f'<a href="https://www.tradingview.com/symbols/{r["coin"]}USDT/">'
                 f'{r["coin"]}</a> +{r["spread"]:.1f}% | '
-                f'buy {r["low"]:.6g}@{r["low_ex"]} sell {r["high"]:.6g}@{r["high_ex"]}'
+                f'buy {r["low"]:.5g}@{r["low_ex"]} sell {r["high"]:.5g}@{r["high_ex"]}'
             )
     else:
         lines.append("")
         lines.append("No new candidates above 1%.")
-    if digest_rows:
+    if watch:
         lines.append("")
-        lines.append(f"<b>Watchlist (0.5-1%)</b>")
-        for r in digest_rows[:10]:
+        lines.append("<b>Watchlist (0.5-1%)</b>")
+        for r in watch[:8]:
             lines.append(f'{r["coin"]} +{r["spread"]:.1f}% ({r["low_ex"]}->{r["high_ex"]})')
+
+    movers = fetch_binance_24h()
+    if movers:
+        lines.append("")
+        lines.append("<b>Top movers (24h, vol>500k USDT)</b>")
+        g = movers[:4]
+        l = [r for r in movers if r[1] < 0][-4:]
+        l = l[::-1]
+        lines.append("G:" + " ".join(f'{r[0]} {r[1]:+.1f}%' for r in g))
+        lines.append("L:" + " ".join(f'{r[0]} {r[1]:+.1f}%' for r in l))
 
     text = "\n".join(lines)
     print(text)
