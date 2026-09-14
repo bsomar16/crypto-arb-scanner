@@ -301,9 +301,16 @@ def run_buy(token, chat_id):
     if updates:
         save_json("state/fired_signals.json", fired)
 
+    opened = 0
+    try:
+        opened = positions_mod.open_picks(res, cfg, source="buy")
+    except Exception as e:
+        log("BUY", "positions open error:", e)
+
+    extra = f" \u00b7 \U0001f3af {opened} suivis" if opened else ""
     lines = [f"\U0001f680 <b>BUY SIGNALS</b> \u00b7 {now_s()}",
-             f"\U0001f310 Binance {interval} \u00b7 {len(cands)} coins scanned "
-             f"\u00b7 {len(strong) + len(normal)} new setups", ""]
+             f"\U0001f310 Binance {interval} \u00b7 {len(cands)} coins scanned"
+             f" \u00b7 {len(strong) + len(normal)} new setups{extra}", ""]
 
     def rows(bucket, head):
         if not bucket:

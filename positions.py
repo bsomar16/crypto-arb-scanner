@@ -49,7 +49,7 @@ def save(positions):
     save_json(POS_FILE, positions)
 
 
-def open_picks(picks, cfg):
+def open_picks(picks, cfg, source="daily"):
     """Open virtual longs for BUY/STRONG BUY picks (idempotent per coin)."""
     t = thresholds(cfg)
     max_open = int(_cfg_num(cfg, "max_open_positions", "MAX_OPEN_POSITIONS",
@@ -76,15 +76,16 @@ def open_picks(picks, cfg):
             "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
             "status": "open", "close_ts": None, "close_price": None,
             "rating": r.get("rating", "BUY"), "score": r.get("score"),
+            "source": source,
             "last_price": entry, "last_pct": 0.0,
         }
         positions.append(pos)
         open_coins.add(coin)
         opened += 1
-        store.position_event("open", coin, entry, price=entry)
+        store.position_event("open", coin, entry, price=entry, note=f"source={source}")
     if opened:
         save(positions)
-        log("POSITIONS", f"opened {opened} new virtual longs")
+        log("POSITIONS", f"opened {opened} new virtual longs ({source})")
     return positions
 
 
