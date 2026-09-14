@@ -102,14 +102,20 @@ def telegram_msg(token, chat_id, text):
         _send(token, chat_id, text)
         return
     chunk = ""
-    for part in text.split("\n"):
-        if len(chunk) + len(part) + 1 > 3900:
+
+    def flush():
+        nonlocal chunk
+        if chunk.strip():
             _send(token, chat_id, chunk.rstrip())
-            chunk = part
-        else:
+        chunk = ""
+
+    for raw in text.split("\n"):
+        pieces = [raw[i:i + 3800] for i in range(0, len(raw), 3800)] or [""]
+        for part in pieces:
+            if len(chunk) + len(part) + 1 > 3900:
+                flush()
             chunk = part if not chunk else chunk + "\n" + part
-    if chunk.strip():
-        _send(token, chat_id, chunk)
+    flush()
 
 
 def _send(token, chat_id, text):
