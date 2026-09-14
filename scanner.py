@@ -43,7 +43,12 @@ DEFAULTS = {
     "min_daily_qv": 1500000,
     "buy_scan_top_n": 60,
     "buy_min_vol": 5000000,
+    "buy_min_vol_x": 1.25,
     "buy_interval": "1h",
+    "buy_fast_top_n": 120,
+    "buy_fast_top_n_shown": 10,
+    "buy_fast_min_hour_vol": 300000,
+    "buy_fast_min_vol_x": 1.8,
     "daily_news_top": 8,
     "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX",
                   "LINK", "TON", "TRX", "DOT", "LTC", "MATIC", "PEPE", "FET",
@@ -255,24 +260,46 @@ def run_arb(token, chat_id):
 def run_buy(token, chat_id):
     cfg = load_cfg()
     interval = cfg.get("buy_interval", "1h")
+    fast_interval = "15m"
+    fast_top = int(cfg.get("buy_fast_top_n", 120))
+    fast_hour_vol = int(cfg.get("buy_fast_min_hour_vol", 300000))
+    fast_vol_x = float(cfg.get("buy_fast_min_vol_x", 1.8))
+    base_floor = int(cfg.get("buy_min_vol", 5000000)) * 0.1
+
     t24 = fetch_binance_24h()
     q = crypto_quote(t24)
-    cands = [sym for sym, _ in
-             sorted(q.items(), key=lambda kv: -kv[1])[:cfg.get("buy_scan_top_n", 60)]]
+    chg = {}
+    for x in t24:
+        s = x.get("symbol", "")
+        if s.endswith("USDT") and s != "USDTUSDT":
+            b = s[:-4]
+            try:
+                chg[b] = float(x.get("priceChangePercent", 0))
+            except (ValueError, TypeError):
+                pass
+
+    rank = sorted(q.items(), key=lambda kv: -kv[1])
+    cands = [sym for sym, _ in rank[:cfg.get("buy_scan_top_n", 60)]]
 
     star = set(str(w).upper() for w in cfg.get("watchlist", []))
     star |= set(str(h.get("symbol", "")).upper() for h in cfg.get("holdings", [])
                 if h.get("symbol"))
     for e in sorted(star - set(cands)):
-        if q.get(e, 0) >= int(cfg.get("buy_min_vol", 5000000)) * 0.2:
+        if q.get(e, 0) >= base_floor * 2:
             cands.append(e)
+
+    fast_cands = [sym for sym, _ in rank[:fast_top] if sym not in cands]
+    for e in sorted(star - set(cands) - set(fast_cands)):
+        if q.get(e, 0) >= base_floor:
+            fast_cands.append(e)
 
     fired = load_json("state/fired_signals.json", {}) or {}
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     updates = {}
 
-    def scan(sym):
-        s = intraday_signal(sym, interval=interval)
+    def scan(sym, interval, min_hour_vol, min_vol_x):
+        s = intraday_signal(sym, interval=interval, min_vol_x=min_vol_x,
+                            min_hour_vol=min_hour_vol, chg24=chg.get(sym))
         if not s:
             return None
         key = f"{sym}|{interval}"
@@ -284,15 +311,27 @@ def run_buy(token, chat_id):
         s["star"] = sym in star
         return s
 
+    tasks = ([(interval, sym, 0, float(cfg.get("buy_min_vol_x", 1.25)))
+              for sym in cands] +
+             [(fast_interval, sym, fast_hour_vol, fast_vol_x)
+              for sym in fast_cands])
     with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
-        res = [r for r in ex.map(scan, cands) if r]
-    res.sort(key=lambda r: -r["st"])
+        hits = [r for r in ex.map(lambda t: scan(t[0], t[1], t[2], t[3]),
+                                  tasks) if r]
 
-    strong = [r for r in res if r["st"] >= 5 and r["vol_x"] >= 1.5]
-    normal = [r for r in res if r["st"] < 5 or r["vol_x"] < 1.5]
+    confirmed = [r for r in hits if r["interval"] == interval]
+    known = {r["coin"] for r in confirmed}
+    early = [r for r in hits if r["interval"] == fast_interval
+             and r["coin"] not in known]
+    early.sort(key=lambda r: (-r["st"], -r["vol_x"]))
+    early = early[:cfg.get("buy_fast_top_n_shown", 10)]
+    confirmed.sort(key=lambda r: -r["st"])
+    strong = [r for r in confirmed if r["st"] >= 5 and r["vol_x"] >= 1.5]
+    normal = [r for r in confirmed if r["st"] < 5 or r["vol_x"] < 1.5]
+    all_setups = confirmed + early
     fired_alerts, changed = alerts_mod.check_price_alerts(cfg)
 
-    if not (strong or normal or fired_alerts):
+    if not (all_setups or fired_alerts):
         log("[BUY] no new signals")
         return False
 
@@ -303,14 +342,15 @@ def run_buy(token, chat_id):
 
     opened = 0
     try:
-        opened = positions_mod.open_picks(res, cfg, source="buy")
+        opened = positions_mod.open_picks(all_setups, cfg, source="buy")
     except Exception as e:
         log("BUY", "positions open error:", e)
 
     extra = f" \u00b7 \U0001f3af {opened} suivis" if opened else ""
     lines = [f"\U0001f680 <b>BUY SIGNALS</b> \u00b7 {now_s()}",
-             f"\U0001f310 Binance {interval} \u00b7 {len(cands)} coins scanned"
-             f" \u00b7 {len(strong) + len(normal)} new setups{extra}", ""]
+             f"\U0001f310 Binance {interval}+{fast_interval}"
+             f" \u00b7 {len(tasks)} coins scanned"
+             f" \u00b7 {len(all_setups)} new setups{extra}", ""]
 
     def rows(bucket, head):
         if not bucket:
@@ -318,9 +358,11 @@ def run_buy(token, chat_id):
         lines.append(head)
         for i, r in enumerate(bucket, 1):
             sflag = " \u2b50" if r.get("star") else ""
+            hv = f"  \U0001f4b0${r['hour_vol']/1e6:.1f}M/h" \
+                if r.get("hour_vol") else ""
             lines.append(f"{i:>2}. <b>{esc(r['coin'])}</b>{sflag}  "
                          f"{fmt_price(r['price'])}  RSI {r['rsi']:.0f}  "
-                         f"{r['chg24']:+.1f}%  vol\u00d7{r['vol_x']:.1f}")
+                         f"{r['chg24']:+.1f}%  vol\u00d7{r['vol_x']:.1f}{hv}")
             flags = []
             if r.get("e9_e21"):
                 flags.append("EMA9>21")
@@ -333,9 +375,8 @@ def run_buy(token, chat_id):
                          f" T3 {fmt_price(r['t3'])}{extra}")
         lines.append("")
 
+    rows(early, "\U0001f7e2 <b>EARLY MOVERS 15m ({})</b>".format(len(early)))
     rows(strong, "\U0001f7e9 <b>STRONG ({})</b>".format(len(strong)))
-    if strong and normal:
-        lines.append("")
     rows(normal, "\U0001f7e1 <b>NEW ({})</b>".format(len(normal)))
 
     if fired_alerts:
@@ -349,7 +390,8 @@ def run_buy(token, chat_id):
     lines.append("\u2b50 = sur ta watchlist / portefeuille \u00b7 "
                  "Signaux seulement, vérifie avant de trader.")
 
-    log(f"[BUY] {len(strong)} strong, {len(normal)} normal, {len(fired_alerts)} alerts")
+    log(f"[BUY] {len(strong)} strong, {len(normal)} normal, "
+        f"{len(early)} early, {len(fired_alerts)} alerts")
     telegram_msg(token, chat_id, "\n".join(lines))
     return True
 

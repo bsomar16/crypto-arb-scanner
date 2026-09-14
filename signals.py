@@ -115,7 +115,8 @@ def analyze_coin_daily(coin, fng_nudge=0.0, min_bars=35, vol_map=None):
         return None
 
 
-def intraday_signal(coin, interval="1h", limit=120, min_vol_x=1.25):
+def intraday_signal(coin, interval="1h", limit=120, min_vol_x=1.25,
+                    min_hour_vol=0, chg24=None):
     """Detect a fresh momentum break on one symbol. Returns dict or None."""
     try:
         data = http_json(
@@ -127,6 +128,13 @@ def intraday_signal(coin, interval="1h", limit=120, min_vol_x=1.25):
         highs = [float(k[2]) for k in data]
         lows = [float(k[3]) for k in data]
         vols = [float(k[5]) for k in data]
+        if min_hour_vol:
+            qvols = [float(k[7]) for k in data]
+            hour_vol = sum(qvols[-4:])
+            if hour_vol < min_hour_vol:
+                return None
+        else:
+            hour_vol = None
 
         e9 = ind.ema(closes, 9)
         e20 = ind.ema(closes, 20)
@@ -139,9 +147,10 @@ def intraday_signal(coin, interval="1h", limit=120, min_vol_x=1.25):
         avg_v = sum(vols[:-2]) / len(vols[:-2])
         vol_ratio = last_v / avg_v if avg_v > 0 else 0.0
 
-        t24 = http_json(f"{BN}/api/v3/ticker/24hr?symbol={coin}USDT",
-                        timeout=12)
-        chg24 = float(t24["priceChangePercent"])
+        if chg24 is None:
+            t24 = http_json(f"{BN}/api/v3/ticker/24hr?symbol={coin}USDT",
+                            timeout=12)
+            chg24 = float(t24["priceChangePercent"])
 
         st = 0.0
         if e9[-1] > e21[-1]:
@@ -166,12 +175,15 @@ def intraday_signal(coin, interval="1h", limit=120, min_vol_x=1.25):
             return None
 
         a = ind.atr(highs, lows, closes) or price * 0.01
-        return {"coin": coin, "interval": interval, "price": price,
-                "rsi": round(r, 1), "vol_x": round(vol_ratio, 2),
-                "chg24": round(chg24, 2), "st": round(st, 1),
-                "entry": price, "stop": price - 1.5 * a,
-                "t1": price + a, "t2": price + 2 * a, "t3": price + 3 * a,
-                "atr": round(a, 4),
-                "e9_e21": e9[-1] > e21[-1], "macd_rising": hist[-1] > hist[-2]}
+        out = {"coin": coin, "interval": interval, "price": price,
+               "rsi": round(r, 1), "vol_x": round(vol_ratio, 2),
+               "chg24": round(chg24, 2), "st": round(st, 1),
+               "entry": price, "stop": price - 1.5 * a,
+               "t1": price + a, "t2": price + 2 * a, "t3": price + 3 * a,
+               "atr": round(a, 4),
+               "e9_e21": e9[-1] > e21[-1], "macd_rising": hist[-1] > hist[-2]}
+        if hour_vol is not None:
+            out["hour_vol"] = hour_vol
+        return out
     except Exception:
         return None
