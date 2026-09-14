@@ -10,7 +10,7 @@
 - Each alert shows just the **BUY & SELL legs**: price, order-book depth and **deposit/withdraw + network status**
 - Tracks **virtual positions** on daily BUY/STRONG BUY picks: SL / TP1 / TP2 / TP3 crossings and expiry are alerted separately, and outcomes feed the historical log
 - Keeps a **historical log** (`state/run_log.jsonl`) of every spread alert, daily pick and position event — aggregated in a `--mode report`
-- Intraday BUY signals, daily report (with Fear & Greed), weekly backtest, portfolio and price-alert modes
+- Intraday BUY signals come in two tiers: **🟢 EARLY MOVERS** (15m, wide ~120-coin bin, current-hour-volume floored) and **🟩 STRONG / 🟡 NEW** (1h, top-60 by 24h volume) — so a coin rising *now* is caught before it climbs the 24h volume ranking
 
 ## Modes
 
@@ -64,6 +64,9 @@ python scanner.py --mode all         # daily + buy
   | Position expiry (days) | `POSITION_EXPIRY_DAYS` | 14 |
   | Max open positions | `MAX_OPEN_POSITIONS` | 40 |
   | Per-exchange taker fee | `FEE_BINANCE`, `FEE_GATE`, … | ~0.10-0.25% |
+  | Early-mover bin size | `BUY_FAST_TOP_N` | 120 |
+  | Early-mover hour-vol floor ($) | `BUY_FAST_MIN_HOUR_VOL` | 300000 |
+  | Early-mover vol spike min | `BUY_FAST_MIN_VOL_X` | 1.8 |
 
   Example: `SPREAD_ALERT_PCT=1.5 MIN_EXCHANGES=5 python scanner.py --mode arb`
 
