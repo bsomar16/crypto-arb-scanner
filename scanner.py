@@ -201,19 +201,19 @@ def run_arb(token, chat_id):
              f"\U0001f310 {len(universe)} coins \u00b7 {len(EXCHANGES)} exchanges"
              f" \u00b7 {len(EXCHANGES) - len(offline)}/{len(EXCHANGES)} feeds"]
 
-    if new_alerts:
-        lines.append("")
-        label = f"\U0001f6a8 <b>NEW ALERTS ({len(new_alerts)})</b>"
-        if limited:
-            label += f" \u00b7 max {lim['max_alerts']}/run"
-        lines.append(label)
-        total = len(new_alerts)
-        for i, r in enumerate(new_alerts, 1):
-            lines.extend(_alert_block(r, i, total, r["net"]))
-        lines.append("\u2501" * 18)
-    else:
-        lines.append("")
-        lines.append("No new cross-exchange gaps. \u2705")
+    if not new_alerts:
+        log(f"[ARB] {len(new_alerts)} alerts, 0 gainers")
+        return False
+
+    lines.append("")
+    label = f"\U0001f6a8 <b>NEW ALERTS ({len(new_alerts)})</b>"
+    if limited:
+        label += f" \u00b7 max {lim['max_alerts']}/run"
+    lines.append(label)
+    total = len(new_alerts)
+    for i, r in enumerate(new_alerts, 1):
+        lines.extend(_alert_block(r, i, total, r["net"]))
+    lines.append("\u2501" * 18)
 
     movers = fetch_binance_24h()
     gainers = []

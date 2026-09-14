@@ -17,7 +17,7 @@
 ```
 python scanner.py --mode daily       # 08:00 UTC report + opens virtual positions
 python scanner.py --mode buy         # intraday BUY signals (every hour)
-python scanner.py --mode arb         # every 15 min: spread alerts + position re-check
+python scanner.py --mode arb         # every 15 min: scan silently, Telegram only on +8% win
 python scanner.py --mode check       # follow-up: positions SL/TP + recent-spread recheck
 python scanner.py --mode report      # history summary (text or --report-format html)
 python scanner.py --mode price       # config price alerts
