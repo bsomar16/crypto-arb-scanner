@@ -311,13 +311,12 @@ def run_buy(token, chat_id):
         s["star"] = sym in star
         return s
 
-    tasks = ([(interval, sym, 0, float(cfg.get("buy_min_vol_x", 1.25)))
+    tasks = ([(sym, interval, 0, float(cfg.get("buy_min_vol_x", 1.25)))
               for sym in cands] +
-             [(fast_interval, sym, fast_hour_vol, fast_vol_x)
+             [(sym, fast_interval, fast_hour_vol, fast_vol_x)
               for sym in fast_cands])
     with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
-        hits = [r for r in ex.map(lambda t: scan(t[0], t[1], t[2], t[3]),
-                                  tasks) if r]
+        hits = [r for r in ex.map(lambda t: scan(*t), tasks) if r]
 
     confirmed = [r for r in hits if r["interval"] == interval]
     known = {r["coin"] for r in confirmed}
