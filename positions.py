@@ -86,7 +86,7 @@ def open_picks(picks, cfg, source="daily"):
     if opened:
         save(positions)
         log("POSITIONS", f"opened {opened} new virtual longs ({source})")
-    return positions
+    return opened
 
 
 def _fmt_msg(event, coin, pos, price):
