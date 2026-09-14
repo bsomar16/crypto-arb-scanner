@@ -6,12 +6,11 @@
 
 - Pulls USDT spot prices from **9 exchanges**: Binance, Bitget, OKX, Gate, MEXC, KuCoin, HTX, CoinEx
 - Compares coins present on **4+ exchanges**
-- Alerts to Telegram when a coin clears a **1% cross-exchange spread** (new candidate, filtered against known traps with an expiry window)
-- Each alert shows the **net spread after taker fees**, an **order-book depth estimate**, **deposit/withdraw status** and a **symbol-name collision check**
+- Alerts to Telegram when a pair clears a **+8% win after taker fees** (new candidate, filtered against known traps with an expiry window)
+- Each alert shows just the **BUY & SELL legs**: price, order-book depth and **deposit/withdraw + network status**
 - Tracks **virtual positions** on daily BUY/STRONG BUY picks: SL / TP1 / TP2 / TP3 crossings and expiry are alerted separately, and outcomes feed the historical log
 - Keeps a **historical log** (`state/run_log.jsonl`) of every spread alert, daily pick and position event — aggregated in a `--mode report`
 - Intraday BUY signals, daily report (with Fear & Greed), weekly backtest, portfolio and price-alert modes
-- Includes a 0.5-1% watchlist section in the same message
 
 ## Modes
 

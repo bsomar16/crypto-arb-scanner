@@ -28,7 +28,7 @@ import store as store_mod
 import positions as positions_mod
 
 MIN_EXCHANGES = 4
-SPREAD_ALERT_PCT = 1.0
+SPREAD_ALERT_PCT = 8.0
 MAX_ALERTS_PER_RUN = 10
 TRAP_EXPIRY_DAYS = 7.0
 TRAP_FILE = "traps.json"
@@ -94,71 +94,48 @@ def arb_limits(cfg):
 
 # ────────────────────────── ARB SCANNER ──────────────────────────
 
-STATUS_ICON = {"ok": "\u2705", "warn": "\u26a0\ufe0f", "bad": "\u274c"}
+def fmt_dollar(v):
+    v = float(v or 0)
+    if v >= 1e6:
+        return f"{v / 1e6:.1f}M"
+    if v >= 1e3:
+        return f"{v / 1e3:.1f}k"
+    return f"{v:.0f}"
 
 
-def fmt_status(ex, info):
-    dep, wd = info["dep"], info["wd"]
-    if dep is None and wd is None:
-        return f"   \U0001f512 <b>{ex}</b>  {info.get('note', 'API priv\u00e9e')}"
-    icon = STATUS_ICON["ok"] if (dep and wd) else (STATUS_ICON["warn"] if (dep or wd) else STATUS_ICON["bad"])
-    note = f" | {info['note']}" if info.get("note") else ""
-    return (f"   {icon} <b>{ex}</b>  D:{'on' if dep else 'off'}"
-            f" W:{'on' if wd else 'off'}{note}"
-            f"      nets: {info['net'][0] if info['net'] else 'n/a'}")
+def dw_status_line(ex, st):
+    """Deposit/withdraw status for one leg: 'D/W Active (net)' or 'Private API'."""
+    info = (st or {}).get(ex)
+    if not info or (info.get("dep") is None and info.get("wd") is None):
+        return "\U0001f512 Private API"
+    nets = info.get("net") or []
+    net_s = f" ({nets[0]})" if nets and nets[0] else ""
+    dep, wd = info.get("dep"), info.get("wd")
+    if dep and wd:
+        return f"\u2705 D/W Active{net_s}"
+    sides = ("D off" if not dep else "D on")
+    sides += " \u00b7 " + ("W off" if not wd else "W on")
+    return f"\u26a0\ufe0f {sides}{net_s}"
 
 
-def _alert_extra(r):
-    """Fees/net, depth and name-collision enrichment for one alert. Best-effort."""
-    lines = []
-    net = calc_net(r["high"], r["low"], r["high_ex"], r["low_ex"])
-    lines.append(f"   \U0001f9ee net of fees <b>+{net:.2f}%</b>"
-                 f" (gross +{r['spread']:.2f}%, taker fees "
-                 f"{taker_fee(r['low_ex']) * 100:.2f}/{taker_fee(r['high_ex']) * 100:.2f}%)")
-
-    d1 = depth_estimate(r["low_ex"], r["coin"])
-    d2 = depth_estimate(r["high_ex"], r["coin"])
-    if d1 or d2:
-        pieces = []
-        if d1:
-            pieces.append(f"buy {r['low_ex']} ~${d1['full_usd']:,}")
-        if d2:
-            pieces.append(f"sell {r['high_ex']} ~${d2['full_usd']:,}")
-        lines.append(f"   \U0001f4e7 book depth: " + " \u00b7 ".join(pieces))
-
+def _alert_block(r, idx, total, net):
+    """Per-alert body: BUY & SELL legs only (price, depth, D/W status)."""
+    lines = ["", f"\U0001f6a8 <b>ARB ALERT: {esc(r['coin'])} (+{net:.1f}%)</b>",
+             f"\u23f1\ufe0f Run: {idx} of {total}", ""]
+    if not total:
+        return lines
     st = coin_status(r["coin"])
-    if st:
-        legs = (r["low_ex"], r["high_ex"])
-        compact = []
-        worried = []
-        for ex in sorted(st):
-            dep, wd = st[ex]["dep"], st[ex]["wd"]
-            if dep is None and wd is None:
-                compact.append(f"{ex} \U0001f512")
-            elif dep and wd:
-                compact.append(f"{ex} \u2705")
-            else:
-                side = []
-                if not dep:
-                    side.append("D")
-                if not wd:
-                    side.append("W")
-                compact.append(f"{ex} \u26a0{'/'.join(side)}")
-                if ex not in legs:
-                    worried.append(ex)
-        lines.append(f"   \U0001f6f0\ufe0f D/W: {' \u00b7 '.join(compact)}")
-        for ex in legs:
-            if ex in st:
-                lines.append(fmt_status(ex, st[ex]))
-        if worried:
-            lines.append(f"      \u26a0\ufe0f also off elsewhere: {', '.join(worried)}")
-
-    n1 = currency_name(r["low_ex"], r["coin"])
-    n2 = currency_name(r["high_ex"], r["coin"])
-    if n1 or n2:
-        if names_diverge(n1, n2):
-            lines.append(f"   \u26a0\ufe0f noms divergents: {r['low_ex']}='{n1}'"
-                         f" vs {r['high_ex']}='{n2}' \u00b7 coins diff\u00e9rents ?")
+    d1 = (depth_estimate(r["low_ex"], r["coin"]) or {}).get("full_usd", 0)
+    d2 = (depth_estimate(r["high_ex"], r["coin"]) or {}).get("full_usd", 0)
+    lines += [f"\U0001f7e2 BUY: {r['low_ex']}",
+              f"\u2022 Price: {fmt_price(r['low'])}",
+              f"\u2022 Depth: ~${fmt_dollar(d1)}",
+              f"\u2022 Status: {dw_status_line(r['low_ex'], st)}",
+              "",
+              f"\U0001f534 SELL: {r['high_ex']}",
+              f"\u2022 Price: {fmt_price(r['high'])}",
+              f"\u2022 Depth: ~${fmt_dollar(d2)}",
+              f"\u2022 Status: {dw_status_line(r['high_ex'], st)}"]
     return lines
 
 
@@ -187,39 +164,36 @@ def run_arb(token, chat_id):
             counts[c] = counts.get(c, 0) + 1
     universe = [c for c, n in counts.items() if n >= lim["min_ex"]]
 
-    new_alerts, watch, all_flagged = [], [], []
+    new_alerts, all_flagged = [], []
     for c in sorted(universe):
         prices = {ex: p for ex, m in maps.items() if c in m and (p := m[c]) > 0}
         if len(prices) < lim["min_ex"]:
             continue
         vals = list(prices.values())
         hi, lo = max(vals), min(vals)
+        hi_ex, lo_ex = max(prices, key=prices.get), min(prices, key=prices.get)
         spread = (hi - lo) / lo * 100
-        if spread >= lim["spread"]:
+        net = calc_net(hi, lo, hi_ex, lo_ex)
+        if net >= lim["spread"]:
             all_flagged.append(c)
             if c in traps:
                 continue
             if len(new_alerts) >= lim["max_alerts"]:
                 continue
-            new_alerts.append({"coin": c, "spread": spread, "low": lo,
-                               "low_ex": min(prices, key=prices.get),
-                               "high": hi, "high_ex": max(prices, key=prices.get),
+            new_alerts.append({"coin": c, "spread": spread, "net": net,
+                               "low": lo, "low_ex": lo_ex,
+                               "high": hi, "high_ex": hi_ex,
                                "median": median(vals)})
-        elif spread >= 0.5 and c not in traps and len(watch) < 5:
-            watch.append({"coin": c, "spread": spread,
-                          "low_ex": min(prices, key=prices.get),
-                          "high_ex": max(prices, key=prices.get)})
-    new_alerts.sort(key=lambda r: r["spread"], reverse=True)
-    watch.sort(key=lambda r: r["spread"], reverse=True)
+    new_alerts.sort(key=lambda r: r["net"], reverse=True)
 
     traps_mod.save_traps(TRAP_FILE, traps_mod.mark_flagged(traps, all_flagged))
 
     limited = len(all_flagged) > lim["max_alerts"]
     for r in new_alerts:
         try:
-            store_mod.spread_log(r["coin"], r["spread"], calc_net(
-                r["high"], r["low"], r["high_ex"], r["low_ex"]),
-                r["low_ex"], r["high_ex"], r["low"], r["high"], r["median"])
+            store_mod.spread_log(r["coin"], r["spread"], r["net"],
+                                 r["low_ex"], r["high_ex"], r["low"], r["high"],
+                                 r["median"])
         except Exception as e:
             log("ARB", "spread_log error:", e)
 
@@ -233,21 +207,13 @@ def run_arb(token, chat_id):
         if limited:
             label += f" \u00b7 max {lim['max_alerts']}/run"
         lines.append(label)
-        for r in new_alerts[:5]:
-            lines.append(f"\n\U0001f525 {esc(r['coin'])}  <b>+{r['spread']:.1f}%</b>")
-            lines.append(f"   \U0001f4e4 buy  {r['low']:.6g} \u00b7 <b>{r['low_ex']}</b>")
-            lines.append(f"   \U0001f4e5 sell {r['high']:.6g} \u00b7 <b>{r['high_ex']}</b>")
-            lines.extend(_alert_extra(r))
+        total = len(new_alerts)
+        for i, r in enumerate(new_alerts, 1):
+            lines.extend(_alert_block(r, i, total, r["net"]))
         lines.append("\u2501" * 18)
     else:
         lines.append("")
         lines.append("No new cross-exchange gaps. \u2705")
-
-    if watch:
-        lines.append("")
-        lines.append("\U0001f440 <b>WATCHLIST (0.5\u20131%)</b>")
-        for r in watch[:5]:
-            lines.append(f"   {r['coin']}  +{r['spread']:.1f}%  ({r['low_ex']}\u2192{r['high_ex']})")
 
     movers = fetch_binance_24h()
     gainers = []
@@ -279,7 +245,7 @@ def run_arb(token, chat_id):
         lines.append("")
         lines.append(f"\u26a0\ufe0f offline feeds: {', '.join(offline)}")
 
-    log(f"[ARB] {len(new_alerts)} alerts, {len(watch)} watch, {len(gainers)} gainers")
+    log(f"[ARB] {len(new_alerts)} alerts, {len(gainers)} gainers")
     telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
@@ -576,7 +542,7 @@ def run_check(token, chat_id):
         log("CHECK", "positions error:", e)
     try:
         fu = store_mod.followup_spreads(hours_back=6,
-                                        threshold=cfg.get("spread_alert_pct", 1.0))
+                                        threshold=cfg.get("spread_alert_pct", 8.0))
         if fu and token and chat_id:
             lines = [f"\U0001f504 <b>SPREAD FOLLOW-UP (6h)</b> \u00b7 {now_s()}", ""]
             for coin, ts, net, still in fu[-8:]:
