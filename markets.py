@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Market data sources: 9 crypto exchanges, Binance mirror (geo-safe), Yahoo stocks."""
+"""Market data sources: 8 crypto exchanges, Binance mirror (geo-safe), Yahoo stocks."""
 
 import json
 import os
@@ -15,7 +15,6 @@ EXCHANGES = {
     "POLONIEX": "https://api.poloniex.com/markets/ticker24h",
     "KUCOIN": "https://api.kucoin.com/api/v1/market/allTickers",
     "HTX": "https://api.huobi.pro/market/tickers",
-    "COINEX": "https://api.coinex.com/v2/spot/ticker",
 }
 
 BN = "https://data-api.binance.vision"
@@ -25,11 +24,10 @@ BN = "https://data-api.binance.vision"
 FEE_TAKER = {
     "BINANCE": 0.0010, "BITGET": 0.0010, "OKX": 0.0010, "GATE": 0.0015,
     "MEXC": 0.0010, "POLONIEX": 0.0015, "KUCOIN": 0.0010, "HTX": 0.0020,
-    "COINEX": 0.0025,
 }
 
 # Exchanges with no public deposit/withdraw status endpoint (need API keys).
-API_PRIVATE_STATUS = ("BINANCE", "OKX", "MEXC", "COINEX")
+API_PRIVATE_STATUS = ("BINANCE", "OKX", "MEXC")
 
 
 def taker_fee(ex):
@@ -77,8 +75,6 @@ def _depth_url(ex, symbol):
         return f"https://api.kucoin.com/api/v1/market/orderbook/level2_20?symbol={symbol}-USDT"
     if ex == "HTX":
         return f"https://api.huobi.pro/market/depth?symbol={symbol}usdt&type=step0&depth=20"
-    if ex == "COINEX":
-        return f"https://api.coinex.com/v1/spot/depth?market={symbol}USDT&limit=20"
     return None
 
 
@@ -108,10 +104,6 @@ def fetch_orderbook(ex, symbol, limit=20):
             bids = _norm_levels(r.get("bids", []))
         elif ex == "HTX":
             r = d.get("tick", {})
-            asks = _norm_levels(r.get("asks", []))
-            bids = _norm_levels(r.get("bids", []))
-        elif ex == "COINEX":
-            r = d.get("data", {})
             asks = _norm_levels(r.get("asks", []))
             bids = _norm_levels(r.get("bids", []))
         else:
@@ -179,11 +171,6 @@ def currency_name(ex, coin):
             d = http_json(f"https://api.gateio.ws/api/v4/spot/currencies/{coin}",
                           timeout=12)
             return d.get("name")
-        if ex == "COINEX":
-            d = http_json("https://api.coinex.com/v1/spot/currencies", timeout=20)
-            for c in d.get("data", []):
-                if str(c.get("asset", "")).upper() == coin.upper():
-                    return c.get("name")
         if ex == "POLONIEX":
             d = http_json(f"https://api.poloniex.com/currencies/{coin}", timeout=12)
             return (d.get("name") or d.get("shortName")) if isinstance(d, dict) else None
@@ -265,10 +252,6 @@ def fetch_exchange(name):
             for t in data.get("data", []):
                 if t["symbol"].endswith("usdt"):
                     m[t["symbol"][:-4].upper()] = float(t["close"])
-        elif name == "COINEX":
-            for t in data.get("data", []):
-                if t["market"].endswith("USDT"):
-                    m[t["market"][:-4]] = float(t["last"])
         return m
     except Exception:
         return {}

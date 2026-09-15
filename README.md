@@ -4,7 +4,7 @@
 
 ## What it does
 
-- Pulls USDT spot prices from **9 exchanges**: Binance, Bitget, OKX, Gate, MEXC, KuCoin, HTX, CoinEx
+- Pulls USDT spot prices from **8 exchanges**: Binance, Bitget, OKX, Gate, MEXC, Poloniex, KuCoin, HTX
 - Compares coins present on **4+ exchanges**
 - Alerts to Telegram when a pair clears a **+8% win after taker fees** (new candidate, filtered against known traps with an expiry window)
 - Each alert shows just the **BUY & SELL legs**: price, order-book depth and **deposit/withdraw + network status**
