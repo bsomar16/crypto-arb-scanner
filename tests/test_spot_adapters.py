@@ -29,9 +29,11 @@ class SpotAdapterSafetyTests(unittest.TestCase):
             "bybit": {"b": [["100", "2"]], "a": [["101", "2"]]},
             "okx": {"bids": [["100", "2"]], "asks": [["101", "2"]]},
         }
-        with patch("adapters.binance.request_json", return_value=fixtures["binance"]) as b,
-             patch("adapters.bybit.request_json", return_value={"retCode": 0, "result": fixtures["bybit"]}) as y,
-             patch("adapters.okx.request_json", return_value={"code": "0", "data": [fixtures["okx"]]}) as o:
+        with (
+            patch("adapters.binance.request_json", return_value=fixtures["binance"]) as b,
+            patch("adapters.bybit.request_json", return_value={"retCode": 0, "result": fixtures["bybit"]}) as y,
+            patch("adapters.okx.request_json", return_value={"code": "0", "data": [fixtures["okx"]]}) as o,
+        ):
             BinanceSpotAdapter().get_order_book("BTCUSDT")
             BybitSpotAdapter().get_order_book("BTCUSDT")
             OKXSpotAdapter().get_order_book("BTC-USDT")
