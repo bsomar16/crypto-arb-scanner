@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 
 from execution_engine import ExecutionEngine
-from exchange_adapter import NetworkInfo
+from exchange_adapter import NetworkInfo, SpotMarket
 from two_leg_executor import TwoLegExecutor
 from two_leg_execution import LegState
 import trade_journal
@@ -21,6 +21,9 @@ class FakeAdapter:
         self.withdraw_fee = withdraw_fee
         self.deposit_enabled = deposit_enabled
         self.withdraw_enabled = withdraw_enabled
+
+    def get_spot_markets(self):
+        return [SpotMarket("SOLUSDT", "SOL", "USDT", 0.001, 5.0, 0.001, 0.01)]
 
     def place_spot_order(self, symbol, side, quantity, *, price=None, order_type="LIMIT", client_order_id=None):
         oid = client_order_id or "order-1"
@@ -126,6 +129,13 @@ class TwoLegExecutorTests(unittest.TestCase):
             self.executor.submit_buy(self.intent, self.coordinator, self.adapter, revalidate=lambda _: False)
         self.assertEqual(self.intent.status, "FAILED")
         self.assertEqual(self.adapter.orders, {})
+
+    def test_buy_order_is_quantized_to_spot_rules(self):
+        coordinator = self.executor.coordinator(self.intent, 1.0009)
+        self.assertEqual(self.executor.submit_buy(self.intent, coordinator, self.adapter, price=100.009, revalidate=lambda _: True), LegState.BUY_SUBMITTED)
+        order = self.adapter.orders[coordinator.intent.buy_order_id]
+        self.assertEqual(coordinator.intent.requested_qty, 1.0)
+        self.assertEqual(order["price"], 100.0)
 
     def test_journal_records_real_state_transitions_without_poll_duplicates(self):
         self.executor.submit_buy(self.intent, self.coordinator, self.adapter, revalidate=lambda _: True)
