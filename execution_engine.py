@@ -102,11 +102,10 @@ class ExecutionEngine:
 
     def revalidate_before_adapter(self, intent: ExecutionIntent,
                                   revalidator: Callable[[ExecutionIntent], bool]) -> ExecutionIntent:
-        """Mandatory final gate immediately before any real adapter call."""
         if not self.enabled:
             raise PermissionError("live execution is disabled")
-        if intent.status != "READY_FOR_ADAPTER":
-            raise ValueError(f"intent is not ready for adapter: {intent.status}")
+        if intent.status not in ACTIVE - {"PENDING_CONFIRMATION", "DRY_RUN_CONFIRMED"}:
+            raise ValueError(f"intent is not in an executable state: {intent.status}")
         if not revalidator(intent):
             return self._fail(intent, "final execution revalidation failed", "FAILED", ValueError)
         intent.last_revalidated_ms = int(time.time() * 1000)
@@ -120,6 +119,12 @@ class ExecutionEngine:
         self._intents[intent.id] = asdict(intent)
         self._write(intent)
         return intent
+
+    def sync_two_leg_state(self, intent: ExecutionIntent, target: str) -> ExecutionIntent:
+        """Mirror the provider-neutral two-leg state into persistent engine state."""
+        if intent.status == target:
+            return intent
+        return self.transition(intent, target)
 
     def validate_order(self, exchange: str, symbol: str, quantity: float, side: str, *, confirmed: bool,
                        market_type: str = "SPOT") -> None:
