@@ -60,9 +60,7 @@ class TwoLegExecutorTests(unittest.TestCase):
         destination = FakeAdapter()
         self.assertEqual(self.executor.submit_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
         tid = self.coordinator.intent.transfer_id
-        self.assertIsNone(tid)
-        # The provider transfer id is created in the tracker; recover it by active transfer.
-        tid = self.executor.transfers.active()[0].id
+        self.assertIsNotNone(tid)
         with self.assertRaises(ValueError):
             self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=False)
         self.assertEqual(self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=True), LegState.TRANSFER_CONFIRMED)
