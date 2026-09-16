@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -6,6 +7,7 @@ from types import SimpleNamespace
 from execution_engine import ExecutionEngine
 from two_leg_executor import TwoLegExecutor
 from two_leg_execution import LegState
+import trade_journal
 
 
 class FakeAdapter:
@@ -34,6 +36,8 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.old = os.environ.get("EXECUTION_ENABLED")
         os.environ["EXECUTION_ENABLED"] = "true"
         self.tmp = tempfile.TemporaryDirectory()
+        self.old_journal = trade_journal.PATH
+        trade_journal.PATH = os.path.join(self.tmp.name, "trade_journal.jsonl")
         self.engine = ExecutionEngine({"execution_max_notional_usdt": 300}, self.tmp.name)
         self.opportunity = SimpleNamespace(
             symbol="SOLUSDT", buy_exchange="binance", sell_exchange="bybit",
@@ -47,6 +51,7 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.adapter = FakeAdapter()
 
     def tearDown(self):
+        trade_journal.PATH = self.old_journal
         if self.old is None:
             os.environ.pop("EXECUTION_ENABLED", None)
         else:
@@ -71,6 +76,18 @@ class TwoLegExecutorTests(unittest.TestCase):
             self.executor.submit_buy(self.intent, self.coordinator, self.adapter, revalidate=lambda _: False)
         self.assertEqual(self.intent.status, "FAILED")
         self.assertEqual(self.adapter.orders, {})
+
+    def test_journal_records_real_state_transitions_without_poll_duplicates(self):
+        self.executor.submit_buy(self.intent, self.coordinator, self.adapter, revalidate=lambda _: True)
+        self.adapter.orders[self.coordinator.intent.buy_order_id] = {"status": "FILLED", "executedQty": 1.0, "price": 100}
+        self.executor.reconcile_buy(self.intent, self.coordinator, self.adapter)
+        self.executor.reconcile_buy(self.intent, self.coordinator, self.adapter)
+        rows = trade_journal.read()
+        transitions = [r for r in rows if r.get("event") == "execution_transition" and r.get("leg") == "buy"]
+        orders = [r for r in rows if r.get("event") == "buy_order"]
+        self.assertEqual([(r.get("state_from"), r.get("state_to")) for r in transitions], [("READY_FOR_ADAPTER", "BUY_SUBMITTED"), ("BUY_SUBMITTED", "BUY_FILLED")])
+        self.assertEqual(len(orders), 2)
+        self.assertEqual(orders[-1]["executed_qty"], 1.0)
 
 
 if __name__ == "__main__":
