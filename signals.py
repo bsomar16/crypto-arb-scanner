@@ -3,6 +3,7 @@
 
 import indicators as ind
 from botutil import http_json
+import signal_history
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
@@ -137,5 +138,12 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=1.15, min_hour_vo
         potential=min(float(max_potential_pct),potential); target=price*(1+potential/100); rr=potential/risk_pct if risk_pct>0 else 0
         if score<min_score or rr<min_rr: return None
         if trend["state"]=="BEARISH" and setup!="REVERSAL": return None
-        return {"coin":coin,"interval":interval,"price":price,"entry":price,"stop":stop,"t1":price+stop_dist,"t2":price+2*stop_dist,"t3":target,"rsi":round(r,1),"vol_x":round(vol_ratio,2),"chg24":round(float(chg24 or 0),2),"st":round(score,1),"score":round(score,1),"potential_pct":round(potential,1),"risk_pct":round(risk_pct,2),"rr":round(rr,2),"atr":round(a,6),"resistance":resistance,"support":support,"setup_type":setup,"trend_4h":trend["state"],"e9_e21":e9[-1]>e21[-1],"macd_rising":macd_rising,"reasons":reasons}
+        result={"coin":coin,"interval":interval,"price":price,"entry":price,"stop":stop,"t1":price+stop_dist,"t2":price+2*stop_dist,"t3":target,"target":target,"rsi":round(r,1),"vol_x":round(vol_ratio,2),"chg24":round(float(chg24 or 0),2),"st":round(score,1),"score":round(score,1),"potential_pct":round(potential,1),"risk_pct":round(risk_pct,2),"rr":round(rr,2),"atr":round(a,6),"resistance":resistance,"support":support,"setup_type":setup,"trend_4h":trend["state"],"e9_e21":e9[-1]>e21[-1],"macd_rising":macd_rising,"reasons":reasons}
+        stats=signal_history.comparable_stats(result, min_samples=20)
+        result["historical_win_pct"]=stats["win_pct"]
+        result["historical_sample"]=stats["sample"]
+        result["historical_wins"]=stats["wins"]
+        result["historical_losses"]=stats["losses"]
+        result["historical_scope"]=stats["scope"]
+        return result
     except Exception: return None
