@@ -61,6 +61,7 @@ class TwoLegIntent:
     sell_order_id: Optional[str] = None
     transfer_id: Optional[str] = None
     filled_qty: float = 0.0
+    transfer_requested_qty: float = 0.0
     transferred_qty: float = 0.0
     sell_filled_qty: float = 0.0
     buy_fee_quote: float = 0.0
@@ -143,6 +144,7 @@ class TwoLegCoordinator:
         transfer_amount = self.intent.filled_qty if amount is None else float(amount)
         if transfer_amount <= 0 or transfer_amount > self.intent.filled_qty + 1e-12:
             return self._fail("invalid transfer amount")
+        self.intent.transfer_requested_qty = transfer_amount
         self.intent.transferred_qty = transfer_amount
         self.intent.state = LegState.TRANSFER_PENDING
         self._save("TRANSFER_SUBMITTED")
@@ -151,7 +153,8 @@ class TwoLegCoordinator:
     def accept_transfer(self, transfer: TransferStatus) -> LegState:
         if self.intent.state != LegState.TRANSFER_PENDING:
             raise ValueError("transfer update is invalid for current state")
-        if transfer.amount <= 0 or transfer.amount > self.intent.filled_qty + 1e-12:
+        expected = self.intent.transfer_requested_qty or self.intent.filled_qty
+        if transfer.amount <= 0 or transfer.amount > expected + 1e-12:
             return self._fail("invalid transfer quantity")
         self.intent.transfer_id = transfer.transfer_id
         self.intent.transferred_qty = transfer.amount
@@ -159,7 +162,6 @@ class TwoLegCoordinator:
         if status in {"CONFIRMED", "COMPLETED"}:
             if not transfer.destination_balance_confirmed:
                 return self._fail("destination deposit/balance is not confirmed")
-            expected = self.intent.transferred_qty
             if transfer.amount + 1e-12 < expected:
                 return self._fail("confirmed transfer does not cover intended transferred quantity")
             self.intent.state = LegState.TRANSFER_CONFIRMED
