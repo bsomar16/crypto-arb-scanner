@@ -2,24 +2,32 @@ import os
 import unittest
 from unittest.mock import patch
 
+from adapter_factory import create_spot_adapter
 from adapters.binance import BinanceSpotAdapter
 from adapters.bybit import BybitSpotAdapter
 from adapters.okx import OKXSpotAdapter
+from adapters.bitget_spot import BitgetSpotAdapter
+from adapters.mexc_spot import MexcSpotAdapter
 
 
 class SpotAdapterSafetyTests(unittest.TestCase):
-    def test_credentials_are_not_required_for_construction(self):
-        self.assertEqual(BinanceSpotAdapter().name, "binance")
-        self.assertEqual(BybitSpotAdapter().name, "bybit")
-        self.assertEqual(OKXSpotAdapter().name, "okx")
+    def test_all_five_adapters_construct_without_network_access(self):
+        self.assertEqual(create_spot_adapter("binance").name, "binance")
+        self.assertEqual(create_spot_adapter("bybit").name, "bybit")
+        self.assertEqual(create_spot_adapter("okx").name, "okx")
+        self.assertEqual(create_spot_adapter("bitget").name, "bitget")
+        self.assertEqual(create_spot_adapter("mexc").name, "mexc")
 
     def test_live_order_is_disabled_by_default(self):
-        for adapter, symbol in [
+        adapters = [
             (BinanceSpotAdapter(), "BTCUSDT"),
             (BybitSpotAdapter(), "BTCUSDT"),
             (OKXSpotAdapter(), "BTC-USDT"),
-        ]:
-            with patch.dict(os.environ, {"EXECUTION_ENABLED": "false"}, clear=False):
+            (BitgetSpotAdapter(), "BTCUSDT"),
+            (MexcSpotAdapter(), "BTCUSDT"),
+        ]
+        with patch.dict(os.environ, {"EXECUTION_ENABLED": "false"}, clear=False):
+            for adapter, symbol in adapters:
                 with self.assertRaises(RuntimeError):
                     adapter.place_spot_order(symbol, "BUY", 0.001, price=1.0)
 
