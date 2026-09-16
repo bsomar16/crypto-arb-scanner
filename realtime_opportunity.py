@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Executable-SPOT-arbitrage opportunity calculations.
 
-The engine is intentionally conservative. It uses live BBO quantities as a
-minimum executable-liquidity check, includes configured SPOT taker fees, and
-only permits a transfer route when its network/status metadata is explicit.
+The engine is intentionally conservative. BBO evaluation is retained for fast
+candidate discovery; full-depth evaluation is available before confirmation
+so a spread is not treated as executable merely because the top quote is large.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional, Sequence
 
 from realtime_market import BBO
+from orderbook_depth import simulate_round_trip
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,9 @@ class Opportunity:
     executable_notional_usdt: float
     transfer_required: bool
     network: Optional[str]
+    depth_validated: bool = False
+    average_buy: Optional[float] = None
+    average_sell: Optional[float] = None
 
 
 class OpportunityEngine:
@@ -45,35 +49,11 @@ class OpportunityEngine:
     def _route(self, asset: str, buy_ex: str, sell_ex: str):
         return self.routes.get(f"{buy_ex}->{sell_ex}:{asset.upper()}")
 
-    def evaluate(self, buy: BBO, sell: BBO, now_ms: Optional[int] = None) -> Optional[Opportunity]:
-        if buy.exchange == sell.exchange or buy.symbol != sell.symbol:
-            return None
-        now_ms = now_ms or int(time.time() * 1000)
-        stale = max(now_ms - buy.ts_ms, now_ms - sell.ts_ms)
-        if stale < 0 or stale > self.max_age_ms:
-            return None
-        if buy.ask <= 0 or sell.bid <= buy.ask:
-            return None
-
-        # BBO quantities are a hard lower bound on what can be executed at the
-        # quoted prices. Do not call a spread executable if either side cannot
-        # support the configured notional.
-        buy_capacity = buy.ask * max(buy.ask_qty, 0.0)
-        sell_capacity = sell.bid * max(sell.bid_qty, 0.0)
-        executable = min(buy_capacity, sell_capacity)
-        if executable < self.notional_usdt:
-            return None
-
+    def _costs(self, buy: BBO, sell: BBO):
         buy_fee = self.fees.get(buy.exchange)
         sell_fee = self.fees.get(sell.exchange)
         if buy_fee is None or sell_fee is None:
             return None
-
-        gross = (sell.bid / buy.ask - 1.0) * 100.0
-        trading = buy_fee + sell_fee
-
-        # Pre-funded is the default monitoring assumption. If a route is marked
-        # required, it must be explicitly enabled and have a compatible network.
         asset = buy.symbol[:-4] if buy.symbol.endswith("USDT") else buy.symbol
         route = self._route(asset, buy.exchange, sell.exchange)
         transfer_required = bool(route and route.get("required"))
@@ -83,33 +63,55 @@ class OpportunityEngine:
             if route.get("enabled") is not True:
                 return None
             networks = route.get("compatible_networks") or []
-            if not networks:
+            if not networks or route.get("deposit_enabled") is not True or route.get("withdrawal_enabled") is not True:
                 return None
             network = networks[0]
             withdrawal_pct = float(route.get("withdrawal_fee_pct", 0.0))
-            if route.get("deposit_enabled") is not True or route.get("withdrawal_enabled") is not True:
-                return None
+        return buy_fee + sell_fee, withdrawal_pct, transfer_required, network
 
+    def evaluate(self, buy: BBO, sell: BBO, now_ms: Optional[int] = None) -> Optional[Opportunity]:
+        if buy.exchange == sell.exchange or buy.symbol != sell.symbol:
+            return None
+        now_ms = now_ms or int(time.time() * 1000)
+        stale = max(now_ms - buy.ts_ms, now_ms - sell.ts_ms)
+        if stale < 0 or stale > self.max_age_ms or buy.ask <= 0 or sell.bid <= buy.ask:
+            return None
+        executable = min(buy.ask * max(buy.ask_qty, 0.0), sell.bid * max(sell.bid_qty, 0.0))
+        if executable < self.notional_usdt:
+            return None
+        costs = self._costs(buy, sell)
+        if costs is None:
+            return None
+        trading, withdrawal_pct, transfer_required, network = costs
+        gross = (sell.bid / buy.ask - 1.0) * 100.0
         net = gross - trading - withdrawal_pct - self.slippage_pct
         if net < self.min_net_pct:
             return None
+        return Opportunity(buy.symbol, buy.exchange, sell.exchange, buy.ask, sell.bid, gross, trading,
+                           withdrawal_pct, self.slippage_pct, net, stale, executable,
+                           transfer_required, network)
 
-        return Opportunity(
-            symbol=buy.symbol,
-            buy_exchange=buy.exchange,
-            sell_exchange=sell.exchange,
-            buy_ask=buy.ask,
-            sell_bid=sell.bid,
-            gross_pct=gross,
-            trading_fee_pct=trading,
-            withdrawal_cost_pct=withdrawal_pct,
-            slippage_reserve_pct=self.slippage_pct,
-            net_pct=net,
-            stale_ms=stale,
-            executable_notional_usdt=executable,
-            transfer_required=transfer_required,
-            network=network,
-        )
+    def evaluate_depth(self, buy: BBO, sell: BBO, asks: Iterable[Sequence[float]],
+                       bids: Iterable[Sequence[float]], now_ms: Optional[int] = None) -> Optional[Opportunity]:
+        """Validate the same opportunity against complete order-book depth."""
+        base = self.evaluate(buy, sell, now_ms)
+        if base is None:
+            return None
+        fill = simulate_round_trip(asks, bids, self.notional_usdt)
+        if not fill.complete or fill.spent_quote <= 0 or fill.received_quote <= 0:
+            return None
+        costs = self._costs(buy, sell)
+        if costs is None:
+            return None
+        trading, withdrawal_pct, transfer_required, network = costs
+        gross = (fill.received_quote / fill.spent_quote - 1.0) * 100.0
+        net = gross - trading - withdrawal_pct - self.slippage_pct
+        if net < self.min_net_pct:
+            return None
+        return Opportunity(base.symbol, base.buy_exchange, base.sell_exchange, base.buy_ask,
+                           base.sell_bid, gross, trading, withdrawal_pct, self.slippage_pct,
+                           net, base.stale_ms, fill.spent_quote, transfer_required, network,
+                           True, fill.average_buy, fill.average_sell)
 
 
 def best_opportunities(book: Dict[str, Dict[str, BBO]], engine: OpportunityEngine):
