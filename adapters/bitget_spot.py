@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from exchange_adapter import ExchangeAdapter, NetworkInfo, SpotMarket
+from execution_guard import ExecutionRequest, validate_spot_request
 
 
 class BitgetSpotAdapter(ExchangeAdapter):
@@ -40,7 +41,7 @@ class BitgetSpotAdapter(ExchangeAdapter):
 
     def get_spot_markets(self):
         data = self._request("GET", "/api/v2/spot/public/symbols")
-        return [SpotMarket(str(x.get("symbol", "")).upper(), str(x.get("baseCoin", "")).upper(), str(x.get("quoteCoin", "")).upper(), float(x.get("minTradeAmount", 0) or 0), float(x.get("minTradeUSDT", 0) or 0), 0.0, 0.0) for x in (data or [])]
+        return [SpotMarket(str(x.get("symbol", "")).upper(), str(x.get("baseCoin", "")).upper(), str(x.get("quoteCoin", "")).upper(), float(x.get("minTradeAmount", 0) or 0), float(x.get("minTradeUSDT", 0) or 0), float(x.get("minTradeAmount", 0) or 0), float(x.get("pricePrecision", 0) or 0)) for x in (data or [])]
 
     def get_order_book(self, symbol, depth=20):
         return self._request("GET", "/api/v2/spot/market/orderbook", {"symbol": symbol.upper(), "type": "step0", "limit": min(depth, 150)})
@@ -56,7 +57,7 @@ class BitgetSpotAdapter(ExchangeAdapter):
 
     def get_networks(self, asset):
         data = self._request("GET", "/api/v2/spot/public/coins", {"coin": asset.upper()})
-        return [NetworkInfo(str(x.get("chain", "")), bool(x.get("rechargeable", True)), bool(x.get("withdrawable", True)), float(x.get("withdrawFee", 0) or 0), float(x.get("minWithdrawAmount", 0) or 0)) for x in (data or [])]
+        return [NetworkInfo(str(x.get("chain", "")), bool(x.get("rechargeable", True)), bool(x.get("withdrawable", True)), float(x.get("withdrawFee", 0) or 0), float(x.get("minWithdrawAmount", 0) or 0), bool(x.get("tag", False) or x.get("needTag", False)), raw_chain=str(x.get("chain", ""))) for x in (data or [])]
 
     def get_deposit_address(self, asset, network):
         data = self._request("GET", "/api/v2/spot/wallet/deposit-address", {"coin": asset.upper(), "chain": network}, auth=True)
@@ -68,8 +69,11 @@ class BitgetSpotAdapter(ExchangeAdapter):
         side = side.upper(); order_type = order_type.upper()
         if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"):
             raise ValueError("Bitget adapter accepts SPOT BUY/SELL only")
+        validate_spot_request(ExecutionRequest("SPOT", side, symbol, self.name, quantity, True, False))
         body = {"category": "SPOT", "symbol": symbol.upper(), "qty": str(quantity), "side": side.lower(), "orderType": order_type.lower()}
-        if order_type == "LIMIT": body.update({"price": str(price), "timeInForce": "gtc"})
+        if order_type == "LIMIT":
+            if price is None: raise ValueError("LIMIT order requires price")
+            body.update({"price": str(price), "timeInForce": "gtc"})
         else: body["timeInForce"] = "ioc"
         if client_order_id: body["clientOid"] = client_order_id
         return self._request("POST", "/api/v3/trade/place-order", body=body, auth=True)
@@ -79,6 +83,7 @@ class BitgetSpotAdapter(ExchangeAdapter):
 
     def withdraw_spot(self, asset, amount, address, network, *, client_withdrawal_id=None):
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true": raise RuntimeError("Live withdrawals are disabled")
+        validate_spot_request(ExecutionRequest("SPOT", "SELL", f"{asset.upper()}USDT", self.name, amount, True, True))
         body = {"coin": asset.upper(), "transferType": "on_chain", "address": address, "chain": network, "size": str(amount)}
         if client_withdrawal_id: body["clientOid"] = client_withdrawal_id
         return self._request("POST", "/api/v2/spot/wallet/withdrawal", body=body, auth=True)
