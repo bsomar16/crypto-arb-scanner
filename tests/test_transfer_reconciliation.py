@@ -18,8 +18,6 @@ class FakeAdapter:
 class TestTransferReconciliation(unittest.TestCase):
     def test_binance_completed_transfer(self):
         source=FakeAdapter('binance', withdraw={'id':'w1','coin':'SOL','network':'SOL','amount':'1','status':6,'txId':'tx1'})
-        # Binance deposit history uses numeric status; success is treated by explicit completed fixture string in test adapter.
-        source.withdraw['status']='SUCCESS'
         dest=FakeAdapter('binance', deposit={'id':'d1','coin':'SOL','network':'SOL','amount':'1','status':'SUCCESS','txId':'tx1','address':'ADDR'})
         result=reconcile_transfer(source,dest,transfer_id='w1',asset='SOL',network='SOL',expected_amount=1,expected_address='ADDR')
         self.assertEqual(result.status,'COMPLETED')
@@ -38,8 +36,8 @@ class TestTransferReconciliation(unittest.TestCase):
         self.assertEqual(result.status,'FAILED')
 
     def test_destination_shortfall_blocks_sell(self):
-        source=FakeAdapter('okx', withdraw={'wdId':'w1','ccy':'SOL','chain':'SOL','amt':'1','state':'5','txId':'tx1'})
-        dest=FakeAdapter('okx', deposit={'depId':'d1','ccy':'SOL','chain':'SOL','amt':'0.99','state':'2','txId':'tx1'})
+        source=FakeAdapter('okx', withdraw={'wdId':'w1','ccy':'SOL','chain':'SOL','amt':'1','state':'COMPLETED','txId':'tx1'})
+        dest=FakeAdapter('okx', deposit={'depId':'d1','ccy':'SOL','chain':'SOL','amt':'0.99','state':'COMPLETED','txId':'tx1'})
         result=reconcile_transfer(source,dest,transfer_id='w1',asset='SOL',network='SOL',expected_amount=1)
         self.assertEqual(result.status,'FAILED')
 
