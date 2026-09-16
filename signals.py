@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Crypto signal engine: multi-timeframe scalp + small-trade setups."""
+"""Crypto signal engine: multi-timeframe scalp + small-trade setups.
+
+The engine uses price structure, momentum, volume acceleration, volatility,
+liquidity proxies and higher-timeframe alignment. Potential is a target
+projection, never a probability or guarantee of profit.
+"""
 
 import indicators as ind
 from botutil import http_json
 
 BN = "https://data-api.binance.vision"
+VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
 
 
 def rating(s):
-    if s >= 80: return "VERY STRONG"
-    if s >= 70: return "STRONG BUY"
-    if s >= 55: return "BUY"
-    if s >= 45: return "WATCH"
+    if s >= 85: return "VERY STRONG"
+    if s >= 75: return "STRONG BUY"
+    if s >= 65: return "BUY"
+    if s >= 55: return "WATCH"
     return "AVOID"
 
 
@@ -83,72 +89,173 @@ def _pct(a, b):
     return (a / b - 1.0) * 100.0 if b else 0.0
 
 
-def intraday_signal(coin, interval="1h", limit=160, min_vol_x=1.15,
+def _fetch_klines(coin, interval, limit):
+    data = http_json(f"{BN}/api/v3/klines?symbol={coin}USDT&interval={interval}&limit={limit}", timeout=15)
+    if len(data) < 70:
+        return None
+    return data
+
+
+def _trend_filter(coin):
+    """Return 4h trend state and alignment score."""
+    data = _fetch_klines(coin, "4h", 100)
+    if not data:
+        return None
+    closes = [float(k[4]) for k in data]
+    e20 = ind.ema(closes, 20)[-1]
+    e50 = ind.ema(closes, 50)[-1]
+    m, sig, hist = ind.macd(closes)
+    bullish = closes[-1] > e20 and e20 > e50 and m[-1] >= sig[-1]
+    bearish = closes[-1] < e20 and e20 < e50 and m[-1] < sig[-1]
+    if bullish:
+        return {"state": "BULLISH", "score": 12}
+    if bearish:
+        return {"state": "BEARISH", "score": -10}
+    return {"state": "MIXED", "score": 3}
+
+
+def _setup_type(price, resistance, support, e20, vol_ratio, macd_rising, rsi):
+    near_res = resistance > 0 and abs(price / resistance - 1) <= 0.006
+    near_support = support > 0 and abs(price / support - 1) <= 0.012
+    if price > resistance and vol_ratio >= 1.25:
+        return "BREAKOUT"
+    if price > e20 and near_res and macd_rising:
+        return "MOMENTUM"
+    if price > e20 and (near_support or price <= e20 * 1.012):
+        return "PULLBACK"
+    if rsi < 45 and macd_rising and near_support:
+        return "REVERSAL"
+    return "MOMENTUM"
+
+
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=1.15,
                     min_hour_vol=0, chg24=None, min_potential_pct=5.0,
                     max_potential_pct=80.0, min_score=55, min_rr=1.5):
-    """Detect a momentum setup and estimate its upside potential.
+    """Return a trade setup for 5m/15m/1h.
 
-    Potential is a model projection, never a guarantee. Targets use ATR and
-    recent structure; live price/liquidity must be rechecked before trading.
+    24h volume is used only to define the liquid candidate universe. It is not
+    the BUY trigger. The trigger combines structure, momentum, volume
+    acceleration, volatility and 4h trend alignment.
     """
+    if interval not in {"5m", "15m", "1h"}:
+        return None
     try:
-        data = http_json(f"{BN}/api/v3/klines?symbol={coin}USDT&interval={interval}&limit={limit}", timeout=15)
-        if len(data) < 70: return None
+        data = _fetch_klines(coin, interval, limit)
+        if not data:
+            return None
+        # Ignore the currently forming candle to avoid unstable signals.
+        data = data[:-1]
         closes = [float(k[4]) for k in data]
         highs = [float(k[2]) for k in data]
         lows = [float(k[3]) for k in data]
         vols = [float(k[5]) for k in data]
         qvols = [float(k[7]) for k in data]
-        if min_hour_vol and sum(qvols[-4:]) < min_hour_vol: return None
+        if len(closes) < 70:
+            return None
+        if min_hour_vol and sum(qvols[-4:]) < min_hour_vol:
+            return None
 
-        e9, e20, e21 = ind.ema(closes, 9), ind.ema(closes, 20), ind.ema(closes, 21)
+        e9 = ind.ema(closes, 9)
+        e20 = ind.ema(closes, 20)
+        e21 = ind.ema(closes, 21)
         m, sig, hist = ind.macd(closes)
         r = ind.rsi(closes, 14) or 50
+        a = ind.atr(highs, lows, closes) or closes[-1] * 0.01
         price = closes[-1]
-        last_v = (vols[-1] + vols[-2]) / 2
-        avg_v = sum(vols[:-2]) / len(vols[:-2])
-        vol_ratio = last_v / avg_v if avg_v > 0 else 0.0
-        if chg24 is None:
-            t24 = http_json(f"{BN}/api/v3/ticker/24hr?symbol={coin}USDT", timeout=12)
-            chg24 = float(t24["priceChangePercent"])
 
-        st = 0.0
-        if e9[-1] > e21[-1]: st += 1.25
-        if price > e20[-1]: st += 1.25
-        if m[-1] > sig[-1]: st += 1.0 if hist[-1] > hist[-2] else 0.5
-        if 48 <= r <= 72: st += 1.0
-        elif 40 <= r < 48: st += 0.5
-        elif r > 78: st -= 0.5
-        if vol_ratio >= 1.5: st += 1.0
-        elif vol_ratio >= 1.25: st += 0.5
+        recent_vol = sum(vols[-2:]) / 2
+        base_vol = sum(vols[-22:-2]) / 20
+        vol_ratio = recent_vol / base_vol if base_vol > 0 else 0.0
+        if vol_ratio < min_vol_x:
+            return None
 
-        resistance = max(highs[-21:-1]) if len(highs) >= 21 else price
-        a = ind.atr(highs, lows, closes) or price * 0.01
-        stop_dist = max(1.2 * a, price * 0.008)
+        # Structure is deliberately based on closed candles before the signal.
+        resistance = max(highs[-21:-1])
+        support = min(lows[-21:-1])
+        range_high = max(highs[-12:-1])
+        range_low = min(lows[-12:-1])
+        macd_rising = hist[-1] > hist[-2]
+        ema_bull = e9[-1] > e21[-1] and price > e20[-1]
+
+        trend = _trend_filter(coin)
+        if not trend:
+            return None
+
+        setup = _setup_type(price, resistance, support, e20[-1], vol_ratio, macd_rising, r)
+        if setup == "REVERSAL":
+            structure_score = 14 if near_support := (abs(price / support - 1) <= 0.012) else 5
+        elif setup == "BREAKOUT":
+            structure_score = 22 if price >= range_high else 12
+        elif setup == "PULLBACK":
+            structure_score = 18
+        else:
+            structure_score = 15
+
+        score = 0.0
+        reasons = []
+        if ema_bull:
+            score += 18; reasons.append("EMA structure bullish")
+        elif price > e20[-1]:
+            score += 10; reasons.append("price above EMA20")
+        else:
+            score -= 5
+        if m[-1] > sig[-1]:
+            score += 12; reasons.append("MACD bullish")
+        if macd_rising:
+            score += 7; reasons.append("MACD histogram rising")
+        if 48 <= r <= 70:
+            score += 10; reasons.append("RSI healthy")
+        elif 40 <= r < 48:
+            score += 5; reasons.append("RSI recovering")
+        elif r > 78:
+            score -= 8; reasons.append("RSI extended")
+        if vol_ratio >= 2.0:
+            score += 15; reasons.append(f"volume x{vol_ratio:.1f}")
+        elif vol_ratio >= 1.5:
+            score += 11; reasons.append(f"volume x{vol_ratio:.1f}")
+        else:
+            score += 7; reasons.append(f"volume x{vol_ratio:.1f}")
+        score += structure_score
+        if trend["score"] > 0:
+            score += trend["score"]; reasons.append(f"4h {trend['state'].lower()}")
+        elif trend["score"] < 0:
+            score += trend["score"]; reasons.append("4h bearish conflict")
+        score = max(0.0, min(100.0, score))
+
+        stop_mult = {"5m": 1.25, "15m": 1.5, "1h": 1.8}[interval]
+        stop_dist = max(stop_mult * a, price * 0.006)
         stop = price - stop_dist
-        structural_target = resistance if resistance > price else price + 2.5 * a
-        volatility_target = price + 3.0 * a
-        target = max(structural_target, volatility_target)
-        potential = min(float(max_potential_pct), max(0.0, _pct(target, price)))
-        if potential < min_potential_pct:
-            target = price + max(3.0 * a, price * min_potential_pct / 100.0)
-            potential = min(float(max_potential_pct), _pct(target, price))
-
         risk_pct = _pct(price, stop)
-        rr = potential / risk_pct if risk_pct > 0 else 0.0
-        score = min(100.0, st / 5.75 * 100.0)
-        fires = (st >= 3.75 and vol_ratio >= min_vol_x and price > e20[-1]
-                 and score >= min_score and potential >= min_potential_pct and rr >= min_rr)
-        if not fires: return None
 
-        t1 = price + stop_dist * 1.5
-        t2 = price + stop_dist * 2.5
-        return {"coin": coin, "interval": interval, "price": price,
-                "rsi": round(r, 1), "vol_x": round(vol_ratio, 2),
-                "chg24": round(chg24, 2), "st": round(st, 2), "score": round(score, 1),
-                "entry": price, "stop": stop, "t1": t1, "t2": t2, "t3": target,
-                "potential_pct": round(potential, 1), "risk_pct": round(risk_pct, 1),
-                "rr": round(rr, 2), "atr": round(a, 4), "resistance": resistance,
-                "e9_e21": e9[-1] > e21[-1], "macd_rising": hist[-1] > hist[-2]}
+        # Targets combine nearby structure with ATR. Do not invent a target
+        # below the configured minimum; such a setup is rejected instead.
+        structure_target = resistance if resistance > price else range_high
+        volatility_target = price + {"5m": 3.0, "15m": 4.0, "1h": 5.0}[interval] * a
+        target = max(structure_target, volatility_target)
+        potential = _pct(target, price)
+        if potential < min_potential_pct:
+            return None
+        potential = min(float(max_potential_pct), potential)
+        target = price * (1 + potential / 100.0)
+        rr = potential / risk_pct if risk_pct > 0 else 0.0
+        if score < min_score or rr < min_rr:
+            return None
+        if trend["state"] == "BEARISH" and setup != "REVERSAL":
+            return None
+
+        t1 = price + stop_dist * 1.0
+        t2 = price + stop_dist * 2.0
+        return {
+            "coin": coin, "interval": interval, "price": price,
+            "entry": price, "stop": stop, "t1": t1, "t2": t2, "t3": target,
+            "rsi": round(r, 1), "vol_x": round(vol_ratio, 2),
+            "chg24": round(float(chg24 or 0), 2), "st": round(score, 1),
+            "score": round(score, 1), "potential_pct": round(potential, 1),
+            "risk_pct": round(risk_pct, 2), "rr": round(rr, 2), "atr": round(a, 6),
+            "resistance": resistance, "support": support,
+            "setup_type": setup, "trend_4h": trend["state"],
+            "e9_e21": e9[-1] > e21[-1], "macd_rising": macd_rising,
+            "reasons": reasons,
+        }
     except Exception:
         return None
