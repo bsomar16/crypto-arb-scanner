@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional
 
 from execution_engine import ExecutionEngine, ExecutionIntent
 from execution_monitor import reconcile_order
+from order_constraints import OrderConstraintError, normalize_spot_order
 from transfer_tracker import Transfer, TransferTracker
 from two_leg_execution import LegFill, LegState, TransferStatus, TwoLegCoordinator, TwoLegIntent
 import trade_journal
@@ -38,6 +39,36 @@ class TwoLegExecutor:
                              avg_price=snapshot.avg_price, fee_quote=snapshot.fee_quote,
                              mode="live" if self.engine.enabled else "dry_run")
 
+    @staticmethod
+    def _spot_market(adapter: Any, symbol: str) -> Any:
+        target = symbol.upper()
+        for market in adapter.get_spot_markets():
+            if str(market.symbol).upper() == target:
+                return market
+        raise RuntimeError(f"SPOT market metadata not found for {adapter.name}/{symbol}")
+
+    def _normalize_buy_order(self, adapter: Any, symbol: str, quantity: float, price: Optional[float]) -> tuple[float, Optional[float]]:
+        market = self._spot_market(adapter, symbol)
+        try:
+            normalized = normalize_spot_order(market, quantity, price)
+        except OrderConstraintError as exc:
+            raise RuntimeError(f"buy order violates SPOT market constraints: {exc}") from exc
+        return normalized.quantity, normalized.price
+
+    def _normalize_sell_order(self, adapter: Any, symbol: str, quantity: float, price: Optional[float]) -> tuple[float, Optional[float]]:
+        market = self._spot_market(adapter, symbol)
+        try:
+            normalized = normalize_spot_order(market, quantity, price)
+        except OrderConstraintError as exc:
+            raise RuntimeError(f"sell order violates SPOT market constraints: {exc}") from exc
+        # Do not silently leave base-asset dust on the destination exchange.
+        if normalized.quantity + 1e-12 < quantity:
+            raise RuntimeError(
+                f"sell quantity {quantity} is not aligned to {adapter.name} SPOT step {market.qty_step}; "
+                "refusing to create unsold dust"
+            )
+        return normalized.quantity, normalized.price
+
     def coordinator(self, execution_intent: ExecutionIntent, quantity: float) -> TwoLegCoordinator:
         state_path = self.transfers.path.parent / "two_leg_intents.jsonl"
         restored = self._load_latest(execution_intent.id, state_path)
@@ -63,10 +94,15 @@ class TwoLegExecutor:
         self.engine.revalidate_before_adapter(execution_intent, revalidate)
         coordinator.revalidate_buy = lambda _: revalidate(execution_intent)
         before = coordinator.intent.state.value
+        normalized_qty, normalized_price = self._normalize_buy_order(
+            adapter, execution_intent.symbol, coordinator.intent.requested_qty,
+            price if price is not None else execution_intent.buy_price,
+        )
+        coordinator.intent.requested_qty = normalized_qty
         coordinator.prepare_buy()
         client_id = "arb-" + execution_intent.id[:24]
-        raw = adapter.place_spot_order(execution_intent.symbol, "BUY", coordinator.intent.requested_qty,
-                                       price=price or execution_intent.buy_price, order_type=order_type,
+        raw = adapter.place_spot_order(execution_intent.symbol, "BUY", normalized_qty,
+                                       price=normalized_price, order_type=order_type,
                                        client_order_id=client_id)
         order_id = str(raw.get("orderId") or raw.get("order_id") or raw.get("id") or client_id)
         status = str(raw.get("status") or "NEW").upper()
@@ -75,7 +111,8 @@ class TwoLegExecutor:
                        float(raw.get("price", 0) or 0), float(raw.get("fee", raw.get("feeQuote", 0)) or 0))
         state = coordinator.accept_buy(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
-        self._journal_transition(execution_intent, before, state.value, leg="buy", order_id=order_id)
+        self._journal_transition(execution_intent, before, state.value, leg="buy", order_id=order_id,
+                                 normalized_qty=normalized_qty, normalized_price=normalized_price)
         self._journal_order(execution_intent, "buy", fill)
         return state
 
@@ -126,9 +163,6 @@ class TwoLegExecutor:
         balances = source_adapter.get_spot_balances()
         available = float(balances.get(asset.upper(), 0) or 0)
         fee = max(0.0, float(getattr(source_network, "withdrawal_fee", 0) or 0))
-        # Do not silently consume pre-existing inventory or assume the trading
-        # fee was paid in quote currency. The filled base quantity must still
-        # be available plus the withdrawal fee before submission.
         if available + 1e-12 < amount + fee:
             raise RuntimeError(
                 f"insufficient source balance for transfer plus withdrawal fee: "
@@ -208,10 +242,14 @@ class TwoLegExecutor:
         self.engine.revalidate_before_adapter(execution_intent, revalidate)
         coordinator.revalidate_sell = lambda _: revalidate(execution_intent)
         before = coordinator.intent.state.value
+        normalized_qty, normalized_price = self._normalize_sell_order(
+            adapter, execution_intent.symbol, coordinator.intent.transferred_qty,
+            price if price is not None else execution_intent.sell_price,
+        )
         coordinator.prepare_sell()
         client_id = "arb-" + execution_intent.id[:24] + "-s"
-        raw = adapter.place_spot_order(execution_intent.symbol, "SELL", coordinator.intent.transferred_qty,
-                                       price=price or execution_intent.sell_price, order_type=order_type,
+        raw = adapter.place_spot_order(execution_intent.symbol, "SELL", normalized_qty,
+                                       price=normalized_price, order_type=order_type,
                                        client_order_id=client_id)
         order_id = str(raw.get("orderId") or raw.get("order_id") or raw.get("id") or client_id)
         status = str(raw.get("status") or "NEW").upper()
@@ -220,7 +258,8 @@ class TwoLegExecutor:
                        float(raw.get("price", 0) or 0), float(raw.get("fee", raw.get("feeQuote", 0)) or 0))
         state = coordinator.accept_sell(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
-        self._journal_transition(execution_intent, before, state.value, leg="sell", order_id=order_id)
+        self._journal_transition(execution_intent, before, state.value, leg="sell", order_id=order_id,
+                                 normalized_qty=normalized_qty, normalized_price=normalized_price)
         self._journal_order(execution_intent, "sell", fill)
         return state
 
