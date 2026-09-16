@@ -77,22 +77,41 @@ class OKXSpotAdapter(ExchangeAdapter):
                                         params={"instType": "SPOT", "instId": symbol.upper()}))
         if not rows:
             raise RuntimeError("OKX did not return a trading fee")
-        # OKX returns maker/taker rates as negative percentages, e.g. -0.1.
-        return abs(float(rows[0].get("feeType", rows[0].get("takerU", rows[0].get("taker", 0))))) if False else abs(float(rows[0].get("taker", 0)))
+        return abs(float(rows[0].get("taker", 0)))
 
     def get_networks(self, asset: str) -> List[NetworkInfo]:
         rows = self._rows(self._private("GET", "/api/v5/asset/currencies", params={"ccy": asset.upper()}))
-        return [NetworkInfo(str(r.get("chain", "")).replace(asset.upper() + "-", ""),
-                            bool(r.get("canDep", False)), bool(r.get("canWd", False)),
-                            float(r.get("fee", 0) or 0), float(r.get("minWd", 0) or 0)) for r in rows]
+        out = []
+        for r in rows:
+            chain = str(r.get("chain", ""))
+            memo_required = bool(r.get("needTag", False) or r.get("tagRequired", False) or r.get("needMemo", False))
+            out.append(NetworkInfo(chain.replace(asset.upper() + "-", ""), bool(r.get("canDep", False)),
+                                   bool(r.get("canWd", False)), float(r.get("fee", 0) or 0),
+                                   float(r.get("minWd", 0) or 0), memo_required, raw_chain=chain))
+        return out
 
-    def get_deposit_address(self, asset: str, network: str) -> str:
+    def get_deposit_details(self, asset: str, network: str) -> Dict[str, str]:
         rows = self._rows(self._private("GET", "/api/v5/asset/deposit-address", params={"ccy": asset.upper()}))
         for row in rows:
             chain = str(row.get("chain", ""))
-            if network.upper() in chain.upper() or chain.upper().endswith(network.upper()):
-                return str(row["addr"])
+            if network.upper() not in chain.upper() and not chain.upper().endswith(network.upper()):
+                continue
+            address = str(row.get("addr") or "")
+            if not address:
+                raise RuntimeError("OKX did not return a deposit address")
+            if row.get("tag") not in (None, ""):
+                return {"address": address, "memo": str(row["tag"]), "memo_type": "tag"}
+            if row.get("memo") not in (None, ""):
+                return {"address": address, "memo": str(row["memo"]), "memo_type": "memo"}
+            if row.get("pmtId") not in (None, ""):
+                return {"address": address, "memo": str(row["pmtId"]), "memo_type": "payment_id"}
+            if row.get("addrEx"):
+                raise RuntimeError("OKX destination requires address attachment metadata not representable by the adapter")
+            return {"address": address, "memo": "", "memo_type": ""}
         raise RuntimeError(f"OKX did not return a deposit address for {asset}/{network}")
+
+    def get_deposit_address(self, asset: str, network: str) -> str:
+        return self.get_deposit_details(asset, network)["address"]
 
     def place_spot_order(self, symbol: str, side: str, quantity: float, *, price: Optional[float] = None,
                          order_type: str = "LIMIT", client_order_id: Optional[str] = None) -> Dict[str, Any]:
@@ -115,13 +134,21 @@ class OKXSpotAdapter(ExchangeAdapter):
         return rows[0] if rows else {}
 
     def withdraw_spot(self, asset: str, amount: float, address: str, network: str, *,
+                      memo: Optional[str] = None, memo_type: Optional[str] = None,
                       client_withdrawal_id: Optional[str] = None) -> Dict[str, Any]:
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true":
             raise RuntimeError("live withdrawals are disabled; set EXECUTION_ENABLED=true deliberately")
         validate_spot_request(ExecutionRequest("SPOT", "SELL", f"{asset.upper()}USDT", self.name,
                                                 amount, True, True))
+        if memo_type == "tag":
+            raise ValueError("OKX withdrawal tags require explicit provider-specific routing; use memo/payment metadata")
         body: Dict[str, Any] = {"ccy": asset.upper(), "amt": str(amount), "dest": "4",
                                 "toAddr": address, "chain": network}
+        if memo:
+            if memo_type == "payment_id":
+                body["pmtId"] = memo
+            else:
+                body["memo"] = memo
         if client_withdrawal_id:
             body["clientId"] = client_withdrawal_id
         return self._private("POST", "/api/v5/asset/withdrawal", body=body)
