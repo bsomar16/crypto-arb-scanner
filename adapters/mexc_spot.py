@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib, hmac, json, os, time
+from typing import Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -64,9 +65,15 @@ class MexcSpotAdapter(ExchangeAdapter):
         if not coin: return []
         return [NetworkInfo(str(x.get("network", "")), bool(x.get("depositEnable", False)), bool(x.get("withdrawEnable", False)), float(x.get("withdrawFee", 0) or 0), float(x.get("withdrawMin", 0) or 0), bool(x.get("memoRequired", False) or x.get("needTag", False)), raw_chain=str(x.get("network", ""))) for x in coin.get("networkList", [])]
 
-    def get_deposit_address(self, asset, network):
+    def get_deposit_details(self, asset, network):
         data = self._request("GET", "/api/v3/capital/deposit/address", {"coin": asset.upper(), "network": network}, auth=True)
-        return str(data.get("address", ""))
+        address = str(data.get("address", ""))
+        if not address: raise RuntimeError("MEXC did not return a deposit address")
+        memo = str(data.get("memo") or "")
+        return {"address": address, "memo": memo, "memo_type": "memo" if memo else ""}
+
+    def get_deposit_address(self, asset, network):
+        return self.get_deposit_details(asset, network)["address"]
 
     def place_spot_order(self, symbol, side, quantity, *, price=None, order_type="LIMIT", client_order_id=None):
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true": raise RuntimeError("Live execution is disabled")
@@ -83,9 +90,12 @@ class MexcSpotAdapter(ExchangeAdapter):
     def get_order(self, symbol, order_id):
         return self._request("GET", "/api/v3/order", {"symbol": symbol.upper(), "orderId": order_id}, auth=True)
 
-    def withdraw_spot(self, asset, amount, address, network, *, client_withdrawal_id=None):
+    def withdraw_spot(self, asset, amount, address, network, *, memo: Optional[str] = None, memo_type: Optional[str] = None, client_withdrawal_id=None):
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true": raise RuntimeError("Live withdrawals are disabled")
         validate_spot_request(ExecutionRequest("SPOT", "SELL", f"{asset.upper()}USDT", self.name, amount, True, True))
+        if memo and memo_type not in (None, "memo"):
+            raise ValueError(f"MEXC withdrawal does not accept memo_type={memo_type!r}")
         params = {"coin": asset.upper(), "amount": str(amount), "address": address, "network": network}
+        if memo: params["memo"] = memo
         if client_withdrawal_id: params["withdrawOrderId"] = client_withdrawal_id
-        return self._trade("POST", "/api/v3/capital/withdraw", params)
+        return self._trade("POST", "/api/v3/capital/withdraw/apply", params)
