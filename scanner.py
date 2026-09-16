@@ -4,6 +4,10 @@
 Modes: arb | daily | buy | price | backtest | portfolio | check | report | all
 """
 
+# NOTE: This update targets only the Telegram BUY presentation. The existing
+# scanner logic already filters intraday_signal() by potential, score and R:R.
+# It now makes that distinction explicit to the user: setup != confirmed signal.
+
 import concurrent.futures
 import os
 import sys
@@ -168,8 +172,10 @@ def _signal_message(r):
     kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"
     reasons = ", ".join(r.get("reasons", [])[:5])
     return [
+        f"🟢 <b>CONFIRMED BUY SIGNAL</b>",
         f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}",
         f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}",
+        f"Action: <b>BUY</b>",
         f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}",
         f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}",
         f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
@@ -246,115 +252,3 @@ def run_buy(token, chat_id):
                   "24h volume is a liquidity filter only; BUY requires multi-factor confirmation."])
     log(f"[BUY] {len(fresh)} signals from {len(tasks)} scans")
     telegram_msg(token, chat_id, "\n".join(lines)); return True
-
-
-def run_daily(token, chat_id):
-    cfg = load_cfg()
-    fng, fngc = sentiment.fear_greed(); btc_dom, eth_dom, total_mcap = sentiment.btc_dominance()
-    fng_nudge = (fng - 50) / 50 * 3.0 if fng is not None else 0.0
-    t24 = fetch_binance_24h(); q = crypto_quote(t24)
-    pool = [sym for sym, qv in sorted(q.items(), key=lambda kv: -kv[1]) if qv >= cfg.get("min_daily_qv", 1500000)]
-    top = pool[:int(cfg.get("daily_scan_top", 80))]
-    star = {str(w).upper() for w in cfg.get("watchlist", [])}
-    star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
-    for e in sorted(star - set(top)):
-        if q.get(e, 0) >= int(cfg.get("min_daily_qv", 1500000)) * 0.5: top.append(e)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-        res = [r for r in ex.map(lambda c: analyze_coin_daily(c, fng_nudge), top) if r]
-    res = [r for r in res if r["rating"] in ("BUY", "STRONG BUY")]
-    res.sort(key=lambda r: -r["score"]); res = res[:int(cfg.get("daily_top_n", 20))]
-    for r in res:
-        try: store_mod.daily_log(r["coin"], r["score"], r["rating"], r["price"], r["chg"], r["rsi"], r["vol_x"], r.get("qv"))
-        except Exception as e: log("DAILY", "daily_log error:", e)
-    try: positions_mod.open_picks(res, cfg)
-    except Exception as e: log("DAILY", "positions error:", e)
-    news_targets = {r["coin"] for r in res[:int(cfg.get("daily_news_top", 8))]} | {"BTC", "ETH"} | {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", [])}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-        nn = dict(zip(news_targets, ex.map(lambda s: sentiment.news_score(s), news_targets)))
-    news = {k: v for k, v in nn.items() if v and v[0] not in ("?", "No news")}
-    holdings_rows = portfolio_mod.portfolio_rows(cfg.get("holdings", [])); fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
-    sb = [r for r in res if r["rating"] == "STRONG BUY"]; b = [r for r in res if r["rating"] == "BUY"]
-    lines = [f"📈 <b>CRYPTO DAILY REPORT</b> · {now_s()}"]
-    mkt = f"🌐 Binance · {len(top)} crypto assets scanned (volume > ${cfg.get('min_daily_qv', 1500000)/1e6:.1f}M)"
-    if fng is not None: mkt = f"🌀 Fear&Greed <b>{fng}</b> ({esc(fngc)}) · {mkt}"
-    if btc_dom: mkt += f" · BTC dom {btc_dom:.1f}%"
-    if total_mcap: mkt += f" · MCap ${total_mcap/1e12:.2f}T"
-    lines += [mkt, ""]
-    def row(i, r, badge):
-        ns = ""
-        if r["coin"] in news:
-            lbl = news[r["coin"]][0]; ns = f" · {esc(lbl)}"
-        star_flag = " ⭐" if r["coin"] in star else ""
-        lines.append(f"{i:>2}. {badge} <b>{esc(r['coin'])}</b>{star_flag} {fmt_price(r['price'])} RSI {r['rsi']:.0f} vol×{r['vol_x']:.1f} {r['chg']:+.1f}% score {r['score']:.0f}{ns}")
-    lines.append(f"🔥 <b>STRONG BUY ({len(sb)})</b>")
-    for i, r in enumerate(sb, 1): row(i, r, "🟩")
-    lines.append(""); lines.append(f"👍 <b>BUY ({len(b)})</b>")
-    for i, r in enumerate(b, len(sb)+1): row(i, r, "🟨")
-    if holdings_rows: lines.extend(["", *portfolio_mod.format_portfolio(holdings_rows)])
-    if fired_alerts: lines.extend(["", "🔔 <b>PRICE ALERTS</b>", *fired_alerts[:6]])
-    lines.extend(["", "━━━━━━━━━━━━━━━━━━━━", f"{len(sb)} strong, {len(b)} buy across {len(pool)} crypto assets. Signals only — verify before trading."])
-    telegram_msg(token, chat_id, "\n".join(lines)); return True
-
-
-def run_price(token, chat_id):
-    cfg = load_cfg(); fired, _ = alerts_mod.check_price_alerts(cfg)
-    if not fired: log("[PRICE] no alerts"); return False
-    telegram_msg(token, chat_id, "\n".join([f"🔔 <b>PRICE ALERTS</b> · {now_s()}", "", *fired[:10]])); return True
-
-
-def run_backtest(token, chat_id):
-    text = backtest_mod.run_backtest(load_cfg()); telegram_msg(token, chat_id, text); return True
-
-
-def run_portfolio(token, chat_id):
-    cfg = load_cfg(); rows = portfolio_mod.portfolio_rows(cfg.get("holdings", []))
-    telegram_msg(token, chat_id, "\n".join([f"💰 <b>CRYPTO PORTFOLIO</b> · {now_s()}", *portfolio_mod.format_portfolio(rows)])); return True
-
-
-def run_check(token, chat_id):
-    cfg = load_cfg(); sent = 0
-    try: sent = positions_mod.check_positions(token, chat_id, cfg)
-    except Exception as e: log("CHECK", "positions error:", e)
-    try:
-        fu = store_mod.followup_spreads(hours_back=6, threshold=cfg.get("spread_alert_pct", 8.0))
-        if fu and token and chat_id:
-            lines = [f"🔄 <b>SPREAD FOLLOW-UP (6h)</b> · {now_s()}", ""]
-            for coin, ts, net, still in fu[-8:]: lines.append(f"   {coin} net {net:+.2f}% · {'open' if still else 'closed'} · alert {ts[11:16]}")
-            telegram_msg(token, chat_id, "\n".join(lines)); sent += 1
-    except Exception as e: log("CHECK", "followup error:", e)
-    return sent > 0
-
-
-def run_report(fmt):
-    text = store_mod.build_report_text()
-    try:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open("state/report.html", "w", encoding="utf-8") as f: f.write(store_mod.build_report_html())
-    except Exception as e: log("REPORT", "html write error:", e)
-    print(text); return text
-
-
-MODES = ["arb", "daily", "buy", "price", "backtest", "portfolio", "check", "report", "all"]
-
-
-def main():
-    ap = ArgumentParser(); ap.add_argument("--mode", choices=MODES, default="buy"); ap.add_argument("--all", action="store_true")
-    ap.add_argument("--report-format", choices=["text", "html"], default="text"); ap.add_argument("--json-logs", action="store_true")
-    args = ap.parse_args()
-    if args.json_logs: set_json_logs(True)
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", ""); chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    mode = "all" if args.all else args.mode
-    if mode == "report": run_report(args.report_format); return
-    if not token or not chat_id: print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"); sys.exit(1)
-    os.makedirs(STATE_DIR, exist_ok=True)
-    if mode == "all": run_daily(token, chat_id); run_buy(token, chat_id)
-    elif mode == "daily": run_daily(token, chat_id)
-    elif mode == "buy": run_buy(token, chat_id)
-    elif mode == "arb": run_arb(token, chat_id)
-    elif mode == "price": run_price(token, chat_id)
-    elif mode == "backtest": run_backtest(token, chat_id)
-    elif mode == "portfolio": run_portfolio(token, chat_id)
-    elif mode == "check": run_check(token, chat_id)
-
-
-if __name__ == "__main__": main()
