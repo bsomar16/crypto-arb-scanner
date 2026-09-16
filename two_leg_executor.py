@@ -35,9 +35,9 @@ class TwoLegExecutor:
                              exchange=execution_intent.buy_exchange if leg == "buy" else execution_intent.sell_exchange,
                              order_id=snapshot.order_id, order_status=snapshot.status,
                              requested_qty=snapshot.requested_qty, filled_qty=snapshot.filled_qty,
-                             executed_qty=snapshot.filled_qty,
-                             avg_price=snapshot.avg_price, fee_quote=snapshot.fee_quote,
-                             mode="live" if self.engine.enabled else "dry_run")
+                             executed_qty=snapshot.filled_qty, avg_price=snapshot.avg_price,
+                             fee_quote=snapshot.fee_quote, fee_amount=snapshot.fee_amount,
+                             fee_currency=snapshot.fee_currency, mode="live" if self.engine.enabled else "dry_run")
 
     @staticmethod
     def _spot_market(adapter: Any, symbol: str) -> Any:
@@ -61,7 +61,6 @@ class TwoLegExecutor:
             normalized = normalize_spot_order(market, quantity, price)
         except OrderConstraintError as exc:
             raise RuntimeError(f"sell order violates SPOT market constraints: {exc}") from exc
-        # Do not silently leave base-asset dust on the destination exchange.
         if normalized.quantity + 1e-12 < quantity:
             raise RuntimeError(
                 f"sell quantity {quantity} is not aligned to {adapter.name} SPOT step {market.qty_step}; "
@@ -108,7 +107,9 @@ class TwoLegExecutor:
         status = str(raw.get("status") or "NEW").upper()
         executed = float(raw.get("executedQty", raw.get("cumExecQty", raw.get("filledQty", 0))) or 0)
         fill = LegFill(order_id, status, coordinator.intent.requested_qty, executed,
-                       float(raw.get("price", 0) or 0), float(raw.get("fee", raw.get("feeQuote", 0)) or 0))
+                       float(raw.get("avgPrice", raw.get("price", 0)) or 0),
+                       float(raw.get("fee", raw.get("feeQuote", 0)) or 0),
+                       float(raw.get("feeAmount", 0) or 0), str(raw.get("feeCurrency") or raw.get("feeCcy") or ""))
         state = coordinator.accept_buy(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
         self._journal_transition(execution_intent, before, state.value, leg="buy", order_id=order_id,
@@ -124,7 +125,7 @@ class TwoLegExecutor:
         if before == LegState.BUY_FILLED.value and snap.status == "FILLED":
             return coordinator.intent.state
         fill = LegFill(coordinator.intent.buy_order_id, snap.status, coordinator.intent.requested_qty,
-                       snap.executed_qty, snap.avg_price)
+                       snap.executed_qty, snap.avg_price, 0.0, snap.fee_amount, snap.fee_currency)
         state = coordinator.accept_buy(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
         self._journal_transition(execution_intent, before, state.value, leg="buy", order_id=coordinator.intent.buy_order_id)
@@ -145,7 +146,6 @@ class TwoLegExecutor:
     def _validate_transfer_route(self, execution_intent: ExecutionIntent, source_adapter: Any,
                                  destination_adapter: Any, asset: str, network: str,
                                  amount: float) -> None:
-        """Fail closed before a withdrawal can be submitted."""
         source_network = self._network(source_adapter.get_networks(asset), network)
         if source_network is None:
             raise RuntimeError(f"source exchange does not expose validated network {asset}/{network}")
@@ -153,21 +153,25 @@ class TwoLegExecutor:
             raise RuntimeError(f"source withdrawal is disabled for {asset}/{network}")
         if amount < float(getattr(source_network, "min_withdrawal", 0) or 0):
             raise RuntimeError(f"transfer amount is below source minimum withdrawal for {asset}/{network}")
-
         destination_network = self._network(destination_adapter.get_networks(asset), network)
         if destination_network is None:
             raise RuntimeError(f"destination exchange does not expose validated network {asset}/{network}")
         if not bool(getattr(destination_network, "deposit_enabled", False)):
             raise RuntimeError(f"destination deposit is disabled for {asset}/{network}")
-
         balances = source_adapter.get_spot_balances()
         available = float(balances.get(asset.upper(), 0) or 0)
         fee = max(0.0, float(getattr(source_network, "withdrawal_fee", 0) or 0))
         if available + 1e-12 < amount + fee:
-            raise RuntimeError(
-                f"insufficient source balance for transfer plus withdrawal fee: "
-                f"available={available}, required={amount + fee}"
-            )
+            raise RuntimeError(f"insufficient source balance for transfer plus withdrawal fee: available={available}, required={amount + fee}")
+
+    def _transferable_buy_qty(self, coordinator: TwoLegCoordinator, asset: str) -> float:
+        """Reduce the transferable base quantity only when the actual fill fee is in base."""
+        amount = coordinator.intent.filled_qty
+        if coordinator.intent.buy_fee_currency.upper() == asset.upper():
+            amount -= coordinator.intent.buy_fee_amount
+        if amount <= 0:
+            raise RuntimeError("actual buy fill leaves no transferable base quantity after fees")
+        return amount
 
     def submit_transfer(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator,
                         source_adapter: Any, destination_adapter: Any, asset: str, *,
@@ -177,7 +181,8 @@ class TwoLegExecutor:
         self.engine.revalidate_before_adapter(execution_intent, revalidate)
         coordinator.revalidate_transfer = lambda _: revalidate(execution_intent)
         before = coordinator.intent.state.value
-        state = coordinator.begin_transfer()
+        transfer_amount = self._transferable_buy_qty(coordinator, asset)
+        state = coordinator.begin_transfer(transfer_amount)
         if state != LegState.TRANSFER_PENDING:
             self.engine.sync_two_leg_state(execution_intent, state.value)
             self._journal_transition(execution_intent, before, state.value, leg="transfer")
@@ -185,9 +190,8 @@ class TwoLegExecutor:
         network = execution_intent.network
         if not network:
             return self._fail_transfer(execution_intent, coordinator, "no validated transfer network")
-
         self._validate_transfer_route(execution_intent, source_adapter, destination_adapter,
-                                      asset, network, coordinator.intent.filled_qty)
+                                      asset, network, coordinator.intent.transferred_qty)
         details = destination_adapter.get_deposit_details(asset, network)
         address = str(details.get("address", ""))
         memo = str(details.get("memo") or "")
@@ -199,21 +203,22 @@ class TwoLegExecutor:
         if destination_requires_memo and not memo:
             self._fail_transfer(execution_intent, coordinator, "destination requires memo/tag but did not return one")
             raise RuntimeError("destination requires memo/tag but did not return one")
-
         transfer_id = "tr-" + uuid.uuid4().hex
-        raw = source_adapter.withdraw_spot(asset, coordinator.intent.filled_qty, address, network,
+        raw = source_adapter.withdraw_spot(asset, coordinator.intent.transferred_qty, address, network,
                                            memo=memo or None, memo_type=memo_type or None,
                                            client_withdrawal_id=transfer_id)
         provider_id = str(raw.get("id") or raw.get("withdrawalId") or raw.get("txId") or transfer_id)
         now = int(time.time() * 1000)
-        self.transfers.create(Transfer(id=provider_id, asset=asset.upper(), amount=coordinator.intent.filled_qty,
+        self.transfers.create(Transfer(id=provider_id, asset=asset.upper(), amount=coordinator.intent.transferred_qty,
             source_exchange=execution_intent.buy_exchange, destination_exchange=execution_intent.sell_exchange,
             network=network, status="SUBMITTED", txid=str(raw.get("txId") or raw.get("txid") or "") or None,
             created_ms=now, updated_ms=now))
-        coordinator.accept_transfer(TransferStatus(provider_id, "SUBMITTED", coordinator.intent.filled_qty))
+        coordinator.accept_transfer(TransferStatus(provider_id, "SUBMITTED", coordinator.intent.transferred_qty))
         self.engine.sync_two_leg_state(execution_intent, coordinator.intent.state.value)
-        self._journal_transition(execution_intent, before, coordinator.intent.state.value, leg="transfer", transfer_id=provider_id, memo_type=memo_type)
-        trade_journal.record("transfer_submitted", execution_intent.id, asset=asset.upper(), amount=coordinator.intent.filled_qty,
+        self._journal_transition(execution_intent, before, coordinator.intent.state.value, leg="transfer", transfer_id=provider_id, memo_type=memo_type,
+                                 amount=coordinator.intent.transferred_qty, buy_fee_currency=coordinator.intent.buy_fee_currency,
+                                 buy_fee_amount=coordinator.intent.buy_fee_amount)
+        trade_journal.record("transfer_submitted", execution_intent.id, asset=asset.upper(), amount=coordinator.intent.transferred_qty,
                              source_exchange=execution_intent.buy_exchange, destination_exchange=execution_intent.sell_exchange,
                              network=network, transfer_id=provider_id, memo_type=memo_type, mode="live")
         return coordinator.intent.state
@@ -255,7 +260,9 @@ class TwoLegExecutor:
         status = str(raw.get("status") or "NEW").upper()
         executed = float(raw.get("executedQty", raw.get("cumExecQty", raw.get("filledQty", 0))) or 0)
         fill = LegFill(order_id, status, coordinator.intent.transferred_qty, executed,
-                       float(raw.get("price", 0) or 0), float(raw.get("fee", raw.get("feeQuote", 0)) or 0))
+                       float(raw.get("avgPrice", raw.get("price", 0)) or 0),
+                       float(raw.get("fee", raw.get("feeQuote", 0)) or 0),
+                       float(raw.get("feeAmount", 0) or 0), str(raw.get("feeCurrency") or raw.get("feeCcy") or ""))
         state = coordinator.accept_sell(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
         self._journal_transition(execution_intent, before, state.value, leg="sell", order_id=order_id,
@@ -271,7 +278,7 @@ class TwoLegExecutor:
         if before == LegState.SELL_FILLED.value and snap.status == "FILLED":
             return coordinator.intent.state
         fill = LegFill(coordinator.intent.sell_order_id, snap.status, coordinator.intent.transferred_qty,
-                       snap.executed_qty, snap.avg_price)
+                       snap.executed_qty, snap.avg_price, 0.0, snap.fee_amount, snap.fee_currency)
         state = coordinator.accept_sell(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
         self._journal_transition(execution_intent, before, state.value, leg="sell", order_id=coordinator.intent.sell_order_id)
