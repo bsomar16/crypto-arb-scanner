@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Controlled SPOT execution state machine.
 
-Live execution is opt-in. Every order requires explicit confirmation and is
-revalidated immediately before adapter execution. No derivatives are exposed.
+Live execution is opt-in. Every order requires explicit confirmation and live
+execution also requires a fresh revalidation callback immediately before the
+adapter boundary. No derivatives are exposed.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from execution_guard import ExecutionRequest, validate_spot_request
-from execution_recovery import ExecutionSafety, recover_active_intents
+from execution_recovery import ACTIVE, ExecutionSafety, recover_active_intents
 
 
 @dataclass
@@ -47,7 +48,7 @@ class ExecutionEngine:
         self.state = Path(state_dir)
         self.state.mkdir(parents=True, exist_ok=True)
         self.safety = ExecutionSafety(cfg, state_dir)
-        self._intents = recover_active_intents(str(self.state / "execution_intents.jsonl"))
+        self._intents = recover_active_intents(self.state / "execution_intents.jsonl")
 
     def create_intent(self, opportunity: Any) -> ExecutionIntent:
         if opportunity.net_pct < float(self.cfg.get("realtime_min_net_pct", 0.5)):
@@ -88,11 +89,27 @@ class ExecutionEngine:
         if now - intent.created_ms > self.confirm_ttl_ms:
             return self._fail(intent, "confirmation expired", "EXPIRED", TimeoutError)
         self.safety.assert_allowed(intent.notional_usdt, max(0, len(self._intents) - 1), self._daily_notional(exclude=intent.id))
+        if self.enabled and revalidator is None:
+            raise PermissionError("live execution requires a fresh revalidation callback")
         if revalidator is not None and not revalidator(intent):
             return self._fail(intent, "opportunity revalidation failed", "FAILED", ValueError)
         intent.last_revalidated_ms = now
         intent.status = "READY_FOR_ADAPTER" if self.enabled else "DRY_RUN_CONFIRMED"
         intent.confirmed_ms = now
+        self._intents[intent.id] = asdict(intent)
+        self._write(intent)
+        return intent
+
+    def revalidate_before_adapter(self, intent: ExecutionIntent,
+                                  revalidator: Callable[[ExecutionIntent], bool]) -> ExecutionIntent:
+        """Mandatory final gate immediately before any real adapter call."""
+        if not self.enabled:
+            raise PermissionError("live execution is disabled")
+        if intent.status != "READY_FOR_ADAPTER":
+            raise ValueError(f"intent is not ready for adapter: {intent.status}")
+        if not revalidator(intent):
+            return self._fail(intent, "final execution revalidation failed", "FAILED", ValueError)
+        intent.last_revalidated_ms = int(time.time() * 1000)
         self._intents[intent.id] = asdict(intent)
         self._write(intent)
         return intent
