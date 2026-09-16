@@ -10,7 +10,7 @@ from execution_guard import ExecutionRequest, validate_spot_request
 
 
 class BitgetSpotAdapter(ExchangeAdapter):
-    """Bitget UTA SPOT adapter. No margin/futures parameters are exposed."""
+    """Bitget SPOT adapter. No margin/futures parameters are exposed."""
     name = "bitget"
     base_url = os.getenv("BITGET_BASE_URL", "https://api.bitget.com")
 
@@ -41,7 +41,20 @@ class BitgetSpotAdapter(ExchangeAdapter):
 
     def get_spot_markets(self):
         data = self._request("GET", "/api/v2/spot/public/symbols")
-        return [SpotMarket(str(x.get("symbol", "")).upper(), str(x.get("baseCoin", "")).upper(), str(x.get("quoteCoin", "")).upper(), float(x.get("minTradeAmount", 0) or 0), float(x.get("minTradeUSDT", 0) or 0), float(x.get("minTradeAmount", 0) or 0), float(x.get("pricePrecision", 0) or 0)) for x in (data or [])]
+        out = []
+        for x in (data or []):
+            if str(x.get("status", "")).lower() != "online":
+                continue
+            qty_precision = int(x.get("quantityPrecision", 0) or 0)
+            price_precision = int(x.get("pricePrecision", 0) or 0)
+            qty_step = 10 ** (-qty_precision)
+            price_tick = 10 ** (-price_precision)
+            out.append(SpotMarket(
+                str(x.get("symbol", "")).upper(), str(x.get("baseCoin", "")).upper(),
+                str(x.get("quoteCoin", "")).upper(), float(x.get("minTradeAmount", 0) or 0),
+                float(x.get("minTradeUSDT", 0) or 0), qty_step, price_tick,
+            ))
+        return out
 
     def get_order_book(self, symbol, depth=20):
         return self._request("GET", "/api/v2/spot/market/orderbook", {"symbol": symbol.upper(), "type": "step0", "limit": min(depth, 150)})
