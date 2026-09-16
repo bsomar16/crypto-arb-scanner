@@ -39,6 +39,9 @@ class FakeAdapter:
     def get_deposit_address(self, asset, network):
         return "destination-address"
 
+    def get_deposit_details(self, asset, network):
+        return {"address": self.get_deposit_address(asset, network), "memo": ""}
+
     def withdraw_spot(self, asset, amount, address, network, *, client_withdrawal_id=None):
         self.withdrawals.append((asset, amount, address, network))
         return {"id": client_withdrawal_id or "withdraw-1"}
