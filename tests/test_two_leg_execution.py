@@ -33,7 +33,9 @@ class TwoLegExecutionTests(unittest.TestCase):
 
     def test_restart_persisted_state_can_continue(self):
         saved = {}
-        c = TwoLegCoordinator(TwoLegIntent("i1", "SOLUSDT", "BINANCE", "BYBIT", 1.0), saved.__setitem__)
+        def persist(intent):
+            saved[intent.intent_id] = intent
+        c = TwoLegCoordinator(TwoLegIntent("i1", "SOLUSDT", "BINANCE", "BYBIT", 1.0), persist)
         c.accept_buy(LegFill("b1", "FILLED", 1.0, 1.0))
         c.begin_transfer()
         self.assertEqual(saved["i1"].state, LegState.TRANSFER_PENDING)
