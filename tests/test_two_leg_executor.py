@@ -12,10 +12,11 @@ import trade_journal
 
 
 class FakeAdapter:
-    def __init__(self, *, memo_required=False, balance=10.0, withdraw_fee=0.01, deposit_enabled=True, withdraw_enabled=True):
+    def __init__(self, *, memo_required=False, memo="", balance=10.0, withdraw_fee=0.01, deposit_enabled=True, withdraw_enabled=True):
         self.orders = {}
         self.withdrawals = []
         self.memo_required = memo_required
+        self.memo = memo
         self.balance = balance
         self.withdraw_fee = withdraw_fee
         self.deposit_enabled = deposit_enabled
@@ -40,10 +41,11 @@ class FakeAdapter:
         return "destination-address"
 
     def get_deposit_details(self, asset, network):
-        return {"address": self.get_deposit_address(asset, network), "memo": ""}
+        return {"address": self.get_deposit_address(asset, network), "memo": self.memo,
+                "memo_type": "tag" if self.memo else ""}
 
-    def withdraw_spot(self, asset, amount, address, network, *, client_withdrawal_id=None):
-        self.withdrawals.append((asset, amount, address, network))
+    def withdraw_spot(self, asset, amount, address, network, *, memo=None, memo_type=None, client_withdrawal_id=None):
+        self.withdrawals.append((asset, amount, address, network, memo, memo_type))
         return {"id": client_withdrawal_id or "withdraw-1"}
 
 
@@ -89,6 +91,12 @@ class TwoLegExecutorTests(unittest.TestCase):
             self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=False)
         self.assertEqual(self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=True), LegState.TRANSFER_CONFIRMED)
         self.assertEqual(self.executor.submit_sell(self.intent, self.coordinator, destination, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
+
+    def test_transfer_propagates_destination_memo(self):
+        self._buy_filled()
+        destination = FakeAdapter(memo_required=True, memo="123456")
+        self.assertEqual(self.executor.submit_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
+        self.assertEqual(self.adapter.withdrawals[0][4:], ("123456", "tag"))
 
     def test_transfer_blocks_required_destination_memo(self):
         self._buy_filled()
