@@ -158,11 +158,13 @@ class TwoLegExecutor:
         address = str(details.get("address", ""))
         memo = str(details.get("memo") or "")
         memo_type = str(details.get("memo_type") or "")
-        destination_requires_memo = bool(getattr(self._network(destination_adapter.get_networks(asset), network), "memo_required", False))
+        destination_network = self._network(destination_adapter.get_networks(asset), network)
+        destination_requires_memo = bool(getattr(destination_network, "memo_required", False))
         if not address:
             return self._fail_transfer(execution_intent, coordinator, "destination did not return a deposit address")
         if destination_requires_memo and not memo:
-            return self._fail_transfer(execution_intent, coordinator, "destination requires memo/tag but did not return one")
+            self._fail_transfer(execution_intent, coordinator, "destination requires memo/tag but did not return one")
+            raise RuntimeError("destination requires memo/tag but did not return one")
 
         transfer_id = "tr-" + uuid.uuid4().hex
         raw = source_adapter.withdraw_spot(asset, coordinator.intent.filled_qty, address, network,
