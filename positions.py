@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Crypto position tracking for paper signals and future live execution.
-
-Positions are independent from the 15-minute signal scanner. Lifecycle events
-are journaled exactly once and live execution metadata can be attached after a
-real fill.
-"""
+"""Crypto position tracking for paper signals and future live execution."""
 from __future__ import annotations
 
 import uuid
@@ -14,6 +9,7 @@ from botutil import fmt_price, log, esc, env_float, telegram_msg, load_json, sav
 import store
 import signal_history
 import trade_journal
+import risk_engine
 
 POS_FILE = "state/positions.json"
 POSITION_EXPIRY_DEFAULT = 14
@@ -61,6 +57,7 @@ def _journal_open(pos):
         rating=pos.get("rating"), score=pos.get("score"),
         potential_pct=pos.get("potential_pct"), risk_pct=pos.get("risk_pct"), rr=pos.get("rr"),
         mode=pos.get("mode", "paper"), exchange=pos.get("exchange"),
+        notional_usdt=pos.get("notional_usdt"),
     )
 
 
@@ -68,6 +65,7 @@ def open_picks(picks, cfg, source="daily"):
     """Open virtual/paper long tracking records from confirmed signal picks."""
     t = thresholds(cfg)
     max_open = int(_cfg_num(cfg, "max_open_positions", "MAX_OPEN_POSITIONS", MAX_OPEN_DEFAULT))
+    default_notional = max(0.0, _cfg_num(cfg, "default_position_notional_usdt", "DEFAULT_POSITION_NOTIONAL_USDT", 300.0))
     positions = load()
     open_coins = {p["coin"] for p in positions if p.get("status") == "open"}
     opened = 0
@@ -84,6 +82,15 @@ def open_picks(picks, cfg, source="daily"):
         tp1 = float(r.get("t1", fallback["tp1"]))
         tp2 = float(r.get("t2", fallback["tp2"]))
         tp3 = float(r.get("t3", fallback["tp3"]))
+        requested_notional = r.get("notional_usdt", default_notional)
+        try:
+            notional = float(requested_notional)
+        except (TypeError, ValueError):
+            notional = default_notional
+        allowed, reason = risk_engine.check_new_position(positions, notional, cfg)
+        if not allowed:
+            log("RISK", f"blocked {coin}: {reason}")
+            continue
         pos = {
             "position_id": _position_id(coin, source),
             "coin": coin, "entry": entry,
@@ -95,13 +102,14 @@ def open_picks(picks, cfg, source="daily"):
             "tp3_pct": max(0.0, tp3 / entry - 1) if entry else 0.0,
             "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
             "status": "open", "close_ts": None, "close_price": None,
-            "realized_pnl_pct": None, "rating": r.get("rating", "BUY"),
-            "score": r.get("score"), "potential_pct": r.get("potential_pct"),
+            "realized_pnl_pct": None, "realized_pnl_usdt": None,
+            "rating": r.get("rating", "BUY"), "score": r.get("score"), "potential_pct": r.get("potential_pct"),
             "risk_pct": r.get("risk_pct"), "rr": r.get("rr"),
             "setup_type": r.get("setup_type"), "interval": r.get("interval"),
             "source": source, "mode": "paper", "exchange": r.get("exchange"),
             "order_id": r.get("order_id"), "entry_fill_qty": r.get("entry_fill_qty"),
-            "entry_fee": r.get("entry_fee"), "last_price": entry, "last_pct": 0.0,
+            "entry_fee": r.get("entry_fee"), "notional_usdt": notional,
+            "last_price": entry, "last_pct": 0.0,
         }
         positions.append(pos)
         open_coins.add(coin)
@@ -129,6 +137,8 @@ def attach_execution(position_id, exchange=None, order_id=None, fill_qty=None, f
             pos["order_id"] = str(order_id)
         if fill_qty is not None:
             pos["entry_fill_qty"] = float(fill_qty)
+            if float(pos.get("entry") or 0) > 0:
+                pos["notional_usdt"] = float(fill_qty) * float(pos.get("entry") or 0)
         if fee is not None:
             pos["entry_fee"] = float(fee)
         if fill_price is not None and float(fill_price) > 0:
@@ -140,11 +150,14 @@ def attach_execution(position_id, exchange=None, order_id=None, fill_qty=None, f
                 pos["tp1"] = new_entry * (1 + float(pos.get("tp1_pct", 0.05)))
                 pos["tp2"] = new_entry * (1 + float(pos.get("tp2_pct", 0.10)))
                 pos["tp3"] = new_entry * (1 + float(pos.get("tp3_pct", 0.20)))
+            if fill_qty is not None:
+                pos["notional_usdt"] = float(fill_qty) * new_entry
         pos["mode"] = "live"
         changed = True
         trade_journal.record("entry_fill", position_id, coin=pos.get("coin"), status=pos.get("status"),
                              exchange=pos.get("exchange"), order_id=pos.get("order_id"),
-                             fill_qty=pos.get("entry_fill_qty"), fill_price=pos.get("entry"), fee=pos.get("entry_fee"), mode="live",
+                             fill_qty=pos.get("entry_fill_qty"), fill_price=pos.get("entry"), fee=pos.get("entry_fee"),
+                             notional_usdt=pos.get("notional_usdt"), mode="live",
                              sl=pos.get("sl"), tp1=pos.get("tp1"), tp2=pos.get("tp2"), tp3=pos.get("tp3"))
         break
     if changed:
@@ -203,9 +216,14 @@ def _close(pos, status, price, now, outcome):
     pos["close_ts"] = now.isoformat(timespec="seconds")
     pos["close_price"] = price
     pos["realized_pnl_pct"] = round(((price / pos["entry"]) - 1) * 100 if pos.get("entry") else 0, 4)
+    try:
+        pos["realized_pnl_usdt"] = round(float(pos.get("notional_usdt") or 0) * pos["realized_pnl_pct"] / 100.0, 8)
+    except (TypeError, ValueError):
+        pos["realized_pnl_usdt"] = None
     store.position_event("close", pos["coin"], pos["entry"], price=price, outcome=status)
     trade_journal.record("close", pos["position_id"], coin=pos["coin"], status=status,
                          outcome=outcome, price=price, realized_pnl_pct=pos["realized_pnl_pct"],
+                         realized_pnl_usdt=pos.get("realized_pnl_usdt"), notional_usdt=pos.get("notional_usdt"),
                          tp1_hit=pos.get("tp1_hit"), tp2_hit=pos.get("tp2_hit"), tp3_hit=pos.get("tp3_hit"),
                          exchange=pos.get("exchange"), order_id=pos.get("order_id"), mode=pos.get("mode", "paper"))
 
