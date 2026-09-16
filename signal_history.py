@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Persistent live-signal history and comparable-setup statistics.
 
-Stores emitted signals and later outcomes so live alerts can show a genuine
-historical success rate for similar setups. Statistics are descriptive only.
+Live outcomes are preferred. When live sample size is insufficient, the engine
+can fall back to the compact Binance historical backtest for the same
+coin/timeframe. Historical statistics are descriptive, not predictions.
 """
 
 import json
 import os
-from collections import defaultdict
 from datetime import datetime, timezone
 
 PATH = "state/signal_history.jsonl"
+BACKTEST_STATS_PATH = "state/backtest_stats.json"
 
 
 def _ts():
@@ -24,7 +25,8 @@ def _read():
             for line in f:
                 try:
                     r = json.loads(line)
-                    if isinstance(r, dict): rows.append(r)
+                    if isinstance(r, dict):
+                        rows.append(r)
                 except json.JSONDecodeError:
                     continue
     except (FileNotFoundError, OSError):
@@ -66,45 +68,73 @@ def record_outcome(signal, outcome, exit_price=None):
     if any(r.get("kind") == "outcome" and r.get("id") == sid for r in rows):
         return
     _write({"kind": "outcome", "id": sid, "ts": _ts(),
-            "outcome": str(outcome).upper(),
-            "exit_price": exit_price})
+            "outcome": str(outcome).upper(), "exit_price": exit_price})
+
+
+def _backtest_stats(signal):
+    """Read the latest compact historical result for the same coin/timeframe."""
+    try:
+        with open(BACKTEST_STATS_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        row = (payload.get("stats") or {}).get(
+            f"{signal.get('coin')}|{signal.get('interval')}")
+        if not row:
+            return None
+        sample = int(row.get("wins", 0) or 0) + int(row.get("losses", 0) or 0)
+        if sample <= 0 or row.get("win_pct") is None:
+            return None
+        return {"win_pct": float(row["win_pct"]), "wins": int(row.get("wins", 0)),
+                "losses": int(row.get("losses", 0)), "sample": sample,
+                "scope": "backtest coin/timeframe",
+                "generated_at": payload.get("generated_at")}
+    except (FileNotFoundError, OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
 
 
 def comparable_stats(signal, min_samples=20):
-    """Return stats for same coin/timeframe/setup, with setup-level fallback."""
+    """Return live comparable stats, otherwise historical backtest stats."""
     rows = _read()
     signals = {r["id"]: r for r in rows if r.get("kind") == "signal" and r.get("id")}
     outcomes = {r["id"]: r for r in rows if r.get("kind") == "outcome" and r.get("id")}
 
-    exact = []
-    fallback = []
+    exact, fallback = [], []
     for sid, out in outcomes.items():
         s = signals.get(sid)
-        if not s: continue
-        if out.get("outcome") not in ("WIN", "LOSS"): continue
-        if s.get("coin") == signal.get("coin") and s.get("interval") == signal.get("interval") and s.get("setup_type") == signal.get("setup_type"):
-            exact.append(out.get("outcome"))
-        if s.get("interval") == signal.get("interval") and s.get("setup_type") == signal.get("setup_type"):
-            fallback.append(out.get("outcome"))
+        if not s or out.get("outcome") not in ("WIN", "LOSS"):
+            continue
+        if (s.get("coin") == signal.get("coin") and
+                s.get("interval") == signal.get("interval") and
+                s.get("setup_type") == signal.get("setup_type")):
+            exact.append(out["outcome"])
+        if (s.get("interval") == signal.get("interval") and
+                s.get("setup_type") == signal.get("setup_type")):
+            fallback.append(out["outcome"])
 
     sample = exact if len(exact) >= min_samples else fallback
     scope = "exact" if len(exact) >= min_samples else "setup/timeframe"
-    if not sample:
-        return {"win_pct": None, "wins": 0, "losses": 0, "sample": 0, "scope": scope}
-    wins = sample.count("WIN")
-    losses = sample.count("LOSS")
-    return {"win_pct": wins / len(sample) * 100, "wins": wins,
-            "losses": losses, "sample": len(sample), "scope": scope}
+    if sample:
+        wins = sample.count("WIN")
+        losses = sample.count("LOSS")
+        return {"win_pct": wins / len(sample) * 100, "wins": wins,
+                "losses": losses, "sample": len(sample), "scope": scope}
+
+    # Do not mix simulated/backtested outcomes into the live outcome log.
+    # They are exposed separately so the alert remains transparent.
+    historical = _backtest_stats(signal)
+    if historical and historical["sample"] >= min_samples:
+        return historical
+    return {"win_pct": None, "wins": 0, "losses": 0, "sample": 0,
+            "scope": scope}
 
 
 def backfill_from_backtest(results):
-    """Import completed backtest trades into history for baseline statistics."""
+    """Import completed backtest trades into live history when explicitly requested."""
     for result in results or []:
         for trade in result.get("trades", []):
             signal = {"coin": result.get("symbol"), "interval": result.get("interval"),
                       "setup_type": trade.get("setup_type"), "entry": trade.get("entry"),
                       "score": trade.get("score", 0), "potential_pct": trade.get("potential_pct", 0),
-                      "rr": trade.get("rr", 0), "stop": trade.get("stop", 0), "target": trade.get("target", 0),
-                      "trend_4h": trade.get("trend_4h")}
+                      "rr": trade.get("rr", 0), "stop": trade.get("stop", 0),
+                      "target": trade.get("target", 0), "trend_4h": trade.get("trend_4h")}
             record_signal(signal)
             record_outcome(signal, trade.get("outcome"), trade.get("exit_price"))
