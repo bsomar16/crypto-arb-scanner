@@ -9,6 +9,7 @@ class Phase5Tests(unittest.TestCase):
     def test_net_opportunity_after_fees(self):
         cfg = {
             "realtime_max_age_ms": 1500,
+            "realtime_notional_usdt": 50,
             "realtime_min_net_pct": 0.5,
             "realtime_slippage_reserve_pct": 0.2,
             "spot_taker_fee_pct": {"binance": 0.1, "bybit": 0.1},
