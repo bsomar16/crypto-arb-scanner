@@ -1,4 +1,4 @@
-name: Unit tests
+name: tests
 
 on:
   push:
@@ -11,14 +11,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Run unit tests
+          python-version: '3.12'
+      - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: Compile check
         run: >-
-          python -m py_compile scanner.py botutil.py markets.py signals.py indicators.py traps.py
-          store.py positions.py portfolio.py backtest.py execution_guard.py execution_engine.py
-          execution_recovery.py execution_monitor.py transfer_tracker.py exchange_adapter.py adapter_factory.py
-          realtime_arb.py realtime_market.py realtime_opportunity.py orderbook_depth.py network_routes.py
-          signal_history.py telegram_control.py adapters/http.py adapters/binance.py adapters/bybit.py adapters/okx.py
-          adapters/bitget_spot.py adapters/mexc_spot.py
+          python -m py_compile scanner.py botutil.py markets.py signals.py indicators.py
+          traps.py store.py positions.py portfolio.py backtest.py execution_guard.py
+          execution_engine.py execution_recovery.py execution_monitor.py two_leg_execution.py
+          exchange_adapter.py adapter_factory.py realtime_arb.py realtime_market.py
+          realtime_opportunity.py orderbook_depth.py network_routes.py signal_history.py
+          telegram_control.py adapters/http.py adapters/binance.py adapters/bybit.py
+          adapters/okx.py adapters/bitget_spot.py adapters/mexc_spot.py
