@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +29,38 @@ class ExecutionRecoveryTests(unittest.TestCase):
             intent = e.create_intent(self.opp())
             with self.assertRaises(ValueError):
                 e.confirm(intent, True, revalidator=lambda _: False)
+
+    def test_live_mode_requires_revalidator(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = os.environ.get("EXECUTION_ENABLED")
+            os.environ["EXECUTION_ENABLED"] = "true"
+            try:
+                e = ExecutionEngine(self.cfg(), d)
+                intent = e.create_intent(self.opp())
+                with self.assertRaises(PermissionError):
+                    e.confirm(intent, True)
+            finally:
+                if old is None:
+                    os.environ.pop("EXECUTION_ENABLED", None)
+                else:
+                    os.environ["EXECUTION_ENABLED"] = old
+
+    def test_final_adapter_revalidation_gate(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = os.environ.get("EXECUTION_ENABLED")
+            os.environ["EXECUTION_ENABLED"] = "true"
+            try:
+                e = ExecutionEngine(self.cfg(), d)
+                intent = e.create_intent(self.opp())
+                intent = e.confirm(intent, True, revalidator=lambda _: True)
+                self.assertEqual(intent.status, "READY_FOR_ADAPTER")
+                with self.assertRaises(ValueError):
+                    e.revalidate_before_adapter(intent, lambda _: False)
+            finally:
+                if old is None:
+                    os.environ.pop("EXECUTION_ENABLED", None)
+                else:
+                    os.environ["EXECUTION_ENABLED"] = old
 
     def test_idempotency_returns_existing_active_intent(self):
         with tempfile.TemporaryDirectory() as d:
