@@ -8,7 +8,7 @@ import position_monitor
 
 class PositionMonitorTests(unittest.TestCase):
     @patch.object(position_monitor, "check_positions", return_value=1)
-    @patch.object(position_monitor, "load_config", return_value={"position_monitor_interval_seconds": 5})
+    @patch.object(position_monitor, "_load_config", return_value={"position_monitor_interval_seconds": 5})
     def test_once_runs_one_cycle(self, _cfg, check):
         old_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         old_chat = os.environ.get("TELEGRAM_CHAT_ID")
