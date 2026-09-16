@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Crypto position tracking for paper signals and future live execution.
 
-A position is persisted independently from the 15-minute signal scanner. Each
-TP/SL transition is journaled exactly once, so restart/retry runs do not create
-duplicate lifecycle events. Live execution metadata can be attached later
-without changing the virtual tracking model.
+Positions are independent from the 15-minute signal scanner. Lifecycle events
+are journaled exactly once and live execution metadata can be attached after a
+real fill.
 """
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
 
-from botutil import fmt_price, log, esc, env_float, telegram_msg, load_json, save_json
-from markets import binance_price
+from botutil import fmt_price, log, esc, env_float, telegram_msg, load_json, save_json, http_json
 import store
 import signal_history
 import trade_journal
@@ -62,7 +60,7 @@ def _journal_open(pos):
         tp1=pos["tp1"], tp2=pos["tp2"], tp3=pos["tp3"],
         rating=pos.get("rating"), score=pos.get("score"),
         potential_pct=pos.get("potential_pct"), risk_pct=pos.get("risk_pct"), rr=pos.get("rr"),
-        mode="paper",
+        mode=pos.get("mode", "paper"), exchange=pos.get("exchange"),
     )
 
 
@@ -86,12 +84,15 @@ def open_picks(picks, cfg, source="daily"):
         tp1 = float(r.get("t1", fallback["tp1"]))
         tp2 = float(r.get("t2", fallback["tp2"]))
         tp3 = float(r.get("t3", fallback["tp3"]))
-        signal_history.record_signal(r)
         pos = {
             "position_id": _position_id(coin, source),
             "coin": coin, "entry": entry,
             "entry_ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
+            "sl_pct": max(0.0, 1 - sl / entry) if entry else 0.0,
+            "tp1_pct": max(0.0, tp1 / entry - 1) if entry else 0.0,
+            "tp2_pct": max(0.0, tp2 / entry - 1) if entry else 0.0,
+            "tp3_pct": max(0.0, tp3 / entry - 1) if entry else 0.0,
             "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
             "status": "open", "close_ts": None, "close_price": None,
             "realized_pnl_pct": None, "rating": r.get("rating", "BUY"),
@@ -115,35 +116,70 @@ def open_picks(picks, cfg, source="daily"):
 
 
 def attach_execution(position_id, exchange=None, order_id=None, fill_qty=None, fill_price=None, fee=None):
-    """Attach actual execution metadata to an existing tracked position."""
+    """Attach actual execution metadata and rebase risk levels to the real fill."""
     positions = load()
     changed = False
     for pos in positions:
         if pos.get("position_id") != position_id:
             continue
-        if exchange is not None: pos["exchange"] = exchange
-        if order_id is not None: pos["order_id"] = str(order_id)
-        if fill_qty is not None: pos["entry_fill_qty"] = float(fill_qty)
-        if fill_price is not None:
-            pos["entry"] = float(fill_price)
-            pos["last_price"] = float(fill_price)
-        if fee is not None: pos["entry_fee"] = float(fee)
+        old_entry = float(pos.get("entry") or 0)
+        if exchange is not None:
+            pos["exchange"] = str(exchange).upper()
+        if order_id is not None:
+            pos["order_id"] = str(order_id)
+        if fill_qty is not None:
+            pos["entry_fill_qty"] = float(fill_qty)
+        if fee is not None:
+            pos["entry_fee"] = float(fee)
+        if fill_price is not None and float(fill_price) > 0:
+            new_entry = float(fill_price)
+            pos["entry"] = new_entry
+            pos["last_price"] = new_entry
+            if old_entry > 0:
+                pos["sl"] = new_entry * (1 - float(pos.get("sl_pct", 0.05)))
+                pos["tp1"] = new_entry * (1 + float(pos.get("tp1_pct", 0.05)))
+                pos["tp2"] = new_entry * (1 + float(pos.get("tp2_pct", 0.10)))
+                pos["tp3"] = new_entry * (1 + float(pos.get("tp3_pct", 0.20)))
         pos["mode"] = "live"
         changed = True
         trade_journal.record("entry_fill", position_id, coin=pos.get("coin"), status=pos.get("status"),
                              exchange=pos.get("exchange"), order_id=pos.get("order_id"),
-                             fill_qty=pos.get("entry_fill_qty"), fill_price=pos.get("entry"), fee=pos.get("entry_fee"), mode="live")
+                             fill_qty=pos.get("entry_fill_qty"), fill_price=pos.get("entry"), fee=pos.get("entry_fee"), mode="live",
+                             sl=pos.get("sl"), tp1=pos.get("tp1"), tp2=pos.get("tp2"), tp3=pos.get("tp3"))
         break
     if changed:
         save(positions)
     return changed
 
 
+def _public_price(exchange, coin):
+    ex = str(exchange or "BINANCE").upper()
+    symbol = str(coin or "").upper().replace("/USDT", "").replace("-USDT", "")
+    if not symbol:
+        return None
+    try:
+        if ex == "BINANCE":
+            return float(http_json(f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol}USDT", timeout=8)["price"])
+        if ex == "BYBIT":
+            d = http_json(f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol}USDT", timeout=8)
+            return float(d["result"]["list"][0]["lastPrice"])
+        if ex == "OKX":
+            d = http_json(f"https://www.okx.com/api/v5/market/ticker?instId={symbol}-USDT", timeout=8)
+            return float(d["data"][0]["last"])
+        if ex == "BITGET":
+            d = http_json(f"https://api.bitget.com/api/v2/spot/market/tickers?symbol={symbol}USDT", timeout=8)
+            return float(d["data"][0]["lastPr"])
+        if ex == "MEXC":
+            return float(http_json(f"https://api.mexc.com/api/v3/ticker/price?symbol={symbol}USDT", timeout=8)["price"])
+    except Exception as exc:
+        log("POSITIONS", f"price error {ex} {symbol}:", exc)
+    return None
+
+
 def _fmt_msg(event, coin, pos, price):
     entry = pos["entry"]
     pct = (price / entry - 1) * 100 if entry else 0
-    e = esc(coin)
-    f = fmt_price
+    e = esc(coin); f = fmt_price
     if event == "sl": return f"🛑 STOP LOSS · <b>{e}</b> · entry {f(entry)} → {f(price)} ({pct:+.1f}%)"
     if event == "tp1": return f"✅ TP1 hit · <b>{e}</b> · entry {f(entry)} → {f(price)} ({pct:+.1f}%)"
     if event == "tp2": return f"✅ TP2 hit · <b>{e}</b> · entry {f(entry)} → {f(price)} ({pct:+.1f}%)"
@@ -157,8 +193,8 @@ def _record_target(pos, event, price):
     pos[key] = True
     pct = ((price / pos["entry"]) - 1) * 100 if pos.get("entry") else 0
     store.position_event(event, pos["coin"], pos["entry"], price=price)
-    trade_journal.record(event, pos["position_id"], coin=pos["coin"], status=pos["status"],
-                         price=price, pct=round(pct, 4), tp1_hit=pos.get("tp1_hit"),
+    trade_journal.record("target", pos["position_id"], coin=pos["coin"], status=pos["status"],
+                         target=event, price=price, pct=round(pct, 4), tp1_hit=pos.get("tp1_hit"),
                          tp2_hit=pos.get("tp2_hit"), tp3_hit=pos.get("tp3_hit"))
 
 
@@ -175,7 +211,7 @@ def _close(pos, status, price, now, outcome):
 
 
 def check_positions(token, chat_id, cfg):
-    """Check tracked positions. Intended to run independently of signal scans."""
+    """Check tracked positions independently of signal scans."""
     expiry_days = thresholds(cfg)["expiry_days"]
     positions = load()
     if not positions:
@@ -187,7 +223,7 @@ def check_positions(token, chat_id, cfg):
         if pos.get("status") != "open":
             continue
         coin = pos.get("coin", "")
-        price = binance_price(coin)
+        price = _public_price(pos.get("exchange") or "BINANCE", coin)
         if price is None:
             keep.append(pos)
             continue
@@ -205,16 +241,12 @@ def check_positions(token, chat_id, cfg):
             alerts.append(_fmt_msg("expired", coin, pos, price))
             signal_history.record_outcome(pos, "EXPIRED", price)
             continue
-
-        # Fail closed on a stop. If a single price update jumps through several
-        # targets, record every crossed target instead of waiting for later scans.
         if price <= pos["sl"]:
             _close(pos, "closed_sl", price, now, "LOSS")
             alerts.append(_fmt_msg("sl", coin, pos, price))
-            store.position_event("sl", coin, entry, price=price)
+            trade_journal.record("stop", pos["position_id"], coin=coin, price=price, outcome="LOSS")
             signal_history.record_outcome(pos, "LOSS", price)
             continue
-
         for event, level in (("tp1", pos["tp1"]), ("tp2", pos["tp2"]), ("tp3", pos["tp3"])):
             if price >= level and not pos.get(f"{event}_hit"):
                 _record_target(pos, event, price)
@@ -225,7 +257,6 @@ def check_positions(token, chat_id, cfg):
                     break
         if pos.get("status") == "open":
             keep.append(pos)
-
     save(keep)
     for msg in alerts:
         if msg:
