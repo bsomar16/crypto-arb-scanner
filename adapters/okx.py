@@ -51,10 +51,10 @@ class OKXSpotAdapter(ExchangeAdapter):
         return list(data.get("data", []))
 
     def get_spot_markets(self) -> List[SpotMarket]:
-        rows = self._rows(self._private("GET", "/api/v5/account/instruments", params={"instType": "SPOT"}))
-        return [SpotMarket(r["instId"], r["baseCcy"], r["quoteCcy"], float(r.get("minSz", 0)),
-                           float(r.get("minSz", 0)) * float(r.get("minPx", 0) or 0),
-                           float(r.get("lotSz", 0)), float(r.get("tickSz", 0)))
+        rows = self._rows(request_json("GET", self.base_url + "/api/v5/public/instruments",
+                                       params={"instType": "SPOT"}))
+        return [SpotMarket(r["instId"], r["baseCcy"], r["quoteCcy"], float(r.get("minSz", 0) or 0),
+                           0.0, float(r.get("lotSz", 0) or 0), float(r.get("tickSz", 0) or 0))
                 for r in rows if r.get("state") == "live"]
 
     def get_order_book(self, symbol: str, depth: int = 20) -> Dict[str, Any]:
@@ -77,7 +77,8 @@ class OKXSpotAdapter(ExchangeAdapter):
                                         params={"instType": "SPOT", "instId": symbol.upper()}))
         if not rows:
             raise RuntimeError("OKX did not return a trading fee")
-        return abs(float(rows[0].get("taker", 0)))
+        # Provider-neutral contract returns percentage points, e.g. 0.08 for 0.08%.
+        return abs(float(rows[0].get("taker", 0) or 0)) * 100.0
 
     def get_networks(self, asset: str) -> List[NetworkInfo]:
         rows = self._rows(self._private("GET", "/api/v5/asset/currencies", params={"ccy": asset.upper()}))
