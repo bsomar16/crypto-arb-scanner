@@ -1,12 +1,8 @@
 name: Crypto Signal Bot
 
 on:
-  # Staggered 15-minute scans. BUY runs every 15 minutes; ARB runs every 15 minutes.
-  schedule:
-    - cron: "7,22,37,52 * * * *"   # arbitrage scan
-    - cron: "2,17,32,47 * * * *"   # multi-timeframe BUY signals
-    - cron: "7 8 * * *"            # daily crypto report 08:07 UTC
-    - cron: "10 12 * * 1"          # weekly backtest, Monday 12:10 UTC
+  # Scheduling is handled externally by cron-job.org.
+  # Keep workflow_dispatch for manual/API-triggered runs.
   workflow_dispatch:
     inputs:
       mode:
@@ -29,9 +25,7 @@ permissions:
 
 jobs:
   arb-scan:
-    if: |
-      (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'arb')
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'arb'
     runs-on: ubuntu-latest
     concurrency:
       group: arb-scan
@@ -63,7 +57,6 @@ jobs:
 
   buy-signals:
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '2,17,32,47 * * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'buy') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
     runs-on: ubuntu-latest
@@ -97,7 +90,6 @@ jobs:
 
   daily-picks:
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '7 8 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'daily') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
     runs-on: ubuntu-latest
@@ -130,9 +122,7 @@ jobs:
           done
 
   weekly-backtest:
-    if: |
-      (github.event_name == 'schedule' && github.event.schedule == '10 12 * * 1') ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'backtest')
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'backtest'
     runs-on: ubuntu-latest
     concurrency:
       group: weekly-backtest
