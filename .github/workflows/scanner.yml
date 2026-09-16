@@ -1,12 +1,12 @@
 name: Crypto Signal Bot
 
 on:
-  # Off-peak minutes (avoid exact :00/:15/:30/:45) to reduce GitHub high-load drops.
+  # Staggered 15-minute scans. BUY runs every 15 minutes; ARB runs every 15 minutes.
   schedule:
-    - cron: "7,22,37,52 * * * *"   # arb scan every 15 min (at :07 :22 :37 :52)
-    - cron: "17 * * * *"           # intraday BUY signals every hour (at :17)
-    - cron: "7 8 * * *"           # daily report 08:07 UTC (match config.json daily_hour_utc)
-    - cron: "10 12 * * 1"         # weekly backtest, Monday 12:10 UTC
+    - cron: "7,22,37,52 * * * *"   # arbitrage scan
+    - cron: "2,17,32,47 * * * *"   # multi-timeframe BUY signals
+    - cron: "7 8 * * *"            # daily crypto report 08:07 UTC
+    - cron: "10 12 * * 1"          # weekly backtest, Monday 12:10 UTC
   workflow_dispatch:
     inputs:
       mode:
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run arb scanner
+      - name: Run crypto arbitrage scanner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -63,7 +63,7 @@ jobs:
 
   buy-signals:
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '17 * * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '2,17,32,47 * * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'buy') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
     runs-on: ubuntu-latest
@@ -75,7 +75,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run intraday buy-signal scan
+      - name: Run multi-timeframe crypto BUY scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run daily report
+      - name: Run daily crypto report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -142,15 +142,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run weekly backtest
+      - name: Run weekly crypto backtest
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py --mode backtest
 
   position-check:
-    if: |
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'check')
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'check'
     runs-on: ubuntu-latest
     concurrency:
       group: position-check
@@ -160,7 +159,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Follow-up check (positions + spreads)
+      - name: Follow-up crypto check
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -191,8 +190,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Generate signal report
-        id: report
+      - name: Generate crypto signal report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -200,20 +198,6 @@ jobs:
       - name: Upload report artifact
         uses: actions/upload-artifact@v4
         with:
-          name: signal-report
+          name: crypto-signal-report
           path: state/report.html
           if-no-files-found: warn
-      - name: Commit bot state
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for i in 1 2 3; do
-            if [ -n "$(git status --porcelain)" ]; then
-              git add -A
-              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
-            else
-              echo "No changes"
-              break
-            fi
-            sleep 8
-          done
