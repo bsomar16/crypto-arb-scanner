@@ -145,5 +145,6 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=1.15, min_hour_vo
         result["historical_wins"]=stats["wins"]
         result["historical_losses"]=stats["losses"]
         result["historical_scope"]=stats["scope"]
+        signal_history.record_signal(result)
         return result
     except Exception: return None
