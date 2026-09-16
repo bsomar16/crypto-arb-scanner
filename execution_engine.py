@@ -76,7 +76,10 @@ class ExecutionEngine:
         self._write(intent)
         return intent
 
-    def validate_order(self, exchange: str, symbol: str, quantity: float, side: str, *, confirmed: bool) -> None:
+    def validate_order(self, exchange: str, symbol: str, quantity: float, side: str, *, confirmed: bool,
+                       market_type: str = "SPOT") -> None:
+        if market_type.upper() != "SPOT":
+            raise ValueError("SPOT-ONLY policy: non-SPOT market rejected")
         validate_spot_request(ExecutionRequest(
             product="SPOT", side=side, symbol=symbol, exchange=exchange,
             quantity=quantity, confirmed=confirmed,
