@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "EXPIRED"}
@@ -24,7 +26,6 @@ TRANSITIONS = {
     "SELL_PARTIAL": {"SELL_SUBMITTED", "SELL_FILLED", "FAILED", "CANCELLED"},
     "SELL_FILLED": {"COMPLETED", "FAILED"},
 }
-
 
 @dataclass
 class ExecutionSafety:
@@ -70,3 +71,25 @@ def recover_active_intents(records: list[dict[str, Any]]) -> dict[str, dict[str,
         if intent_id:
             latest[intent_id] = record
     return {k: v for k, v in latest.items() if str(v.get("status")) in ACTIVE}
+
+
+def append_record(path: str | Path, record: dict[str, Any]) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+
+
+def load_records(path: str | Path) -> list[dict[str, Any]]:
+    p = Path(path)
+    if not p.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            records.append(item)
+    return records
