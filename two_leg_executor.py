@@ -7,6 +7,7 @@ It never treats withdrawal submission as destination deposit confirmation.
 """
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from dataclasses import asdict
@@ -16,12 +17,43 @@ from execution_engine import ExecutionEngine, ExecutionIntent
 from execution_monitor import reconcile_order
 from transfer_tracker import Transfer, TransferTracker
 from two_leg_execution import LegFill, LegState, TransferStatus, TwoLegCoordinator, TwoLegIntent
+import trade_journal
 
 
 class TwoLegExecutor:
     def __init__(self, engine: ExecutionEngine, state_dir: str = "state") -> None:
         self.engine = engine
         self.transfers = TransferTracker(state_dir)
+
+    def _journal_transition(self, execution_intent: ExecutionIntent, before: str, after: str, **fields: Any) -> None:
+        """Persist meaningful execution transitions without duplicating polls."""
+        if before == after:
+            return
+        trade_journal.record(
+            "execution_transition",
+            execution_intent.id,
+            symbol=execution_intent.symbol,
+            buy_exchange=execution_intent.buy_exchange,
+            sell_exchange=execution_intent.sell_exchange,
+            state_from=before,
+            state_to=after,
+            mode="live" if self.engine.enabled else "dry_run",
+            **fields,
+        )
+
+    def _journal_order(self, execution_intent: ExecutionIntent, leg: str, snapshot: LegFill) -> None:
+        trade_journal.record(
+            f"{leg}_order",
+            execution_intent.id,
+            symbol=execution_intent.symbol,
+            exchange=execution_intent.buy_exchange if leg == "buy" else execution_intent.sell_exchange,
+            order_id=snapshot.order_id,
+            order_status=snapshot.status,
+            requested_qty=snapshot.requested_qty,
+            executed_qty=snapshot.executed_qty,
+            avg_price=snapshot.avg_price,
+            mode="live" if self.engine.enabled else "dry_run",
+        )
 
     def coordinator(self, execution_intent: ExecutionIntent, quantity: float) -> TwoLegCoordinator:
         state_path = self.transfers.path.parent / "two_leg_intents.jsonl"
@@ -40,7 +72,7 @@ class TwoLegExecutor:
             with state_path.open("a", encoding="utf-8") as fh:
                 row = asdict(item)
                 row["state"] = item.state.value
-                fh.write(__import__("json").dumps(row, separators=(",", ":")) + "\n")
+                fh.write(json.dumps(row, separators=(",", ":")) + "\n")
 
         return TwoLegCoordinator(intent, persist=persist)
 
@@ -62,6 +94,7 @@ class TwoLegExecutor:
             raise ValueError(f"buy leg is not ready: {coordinator.intent.state.value}")
         self.engine.revalidate_before_adapter(execution_intent, revalidate)
         coordinator.revalidate_buy = lambda _: revalidate(execution_intent)
+        before = coordinator.intent.state.value
         coordinator.prepare_buy()
         client_id = "arb-" + execution_intent.id[:24]
         raw = adapter.place_spot_order(
@@ -78,11 +111,14 @@ class TwoLegExecutor:
         fill = LegFill(order_id, status, coordinator.intent.requested_qty, executed, float(raw.get("price", 0) or 0))
         state = coordinator.accept_buy(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
+        self._journal_transition(execution_intent, before, state.value, leg="buy", order_id=order_id)
+        self._journal_order(execution_intent, "buy", fill)
         return state
 
     def reconcile_buy(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, adapter: Any) -> LegState:
         if not coordinator.intent.buy_order_id:
             raise ValueError("buy order id is missing")
+        before = coordinator.intent.state.value
         snap = reconcile_order(adapter, execution_intent.symbol, coordinator.intent.buy_order_id)
         fill = LegFill(
             coordinator.intent.buy_order_id,
@@ -93,6 +129,9 @@ class TwoLegExecutor:
         )
         state = coordinator.accept_buy(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
+        self._journal_transition(execution_intent, before, state.value, leg="buy", order_id=coordinator.intent.buy_order_id)
+        if before != state.value:
+            self._journal_order(execution_intent, "buy", fill)
         return state
 
     def submit_transfer(
@@ -109,9 +148,11 @@ class TwoLegExecutor:
             raise PermissionError("live execution is disabled")
         self.engine.revalidate_before_adapter(execution_intent, revalidate)
         coordinator.revalidate_transfer = lambda _: revalidate(execution_intent)
+        before = coordinator.intent.state.value
         state = coordinator.begin_transfer()
         if state != LegState.TRANSFER_PENDING:
             self.engine.sync_two_leg_state(execution_intent, state.value)
+            self._journal_transition(execution_intent, before, state.value, leg="transfer")
             return state
         network = execution_intent.network
         if not network:
@@ -140,6 +181,17 @@ class TwoLegExecutor:
         ))
         coordinator.accept_transfer(TransferStatus(provider_id, "SUBMITTED", coordinator.intent.filled_qty))
         self.engine.sync_two_leg_state(execution_intent, coordinator.intent.state.value)
+        self._journal_transition(
+            execution_intent, before, coordinator.intent.state.value,
+            leg="transfer", transfer_id=provider_id, asset=asset.upper(),
+            amount=coordinator.intent.filled_qty, network=network,
+        )
+        trade_journal.record(
+            "transfer_submitted", execution_intent.id, symbol=execution_intent.symbol,
+            transfer_id=provider_id, asset=asset.upper(), amount=coordinator.intent.filled_qty,
+            network=network, source_exchange=execution_intent.buy_exchange,
+            destination_exchange=execution_intent.sell_exchange, mode="live",
+        )
         return coordinator.intent.state
 
     def confirm_transfer(
@@ -157,6 +209,7 @@ class TwoLegExecutor:
             raise ValueError("unknown transfer id")
         if status.upper() in {"CONFIRMED", "COMPLETED"} and not destination_balance_confirmed:
             raise ValueError("destination balance confirmation is required")
+        before = coordinator.intent.state.value
         if status.upper() in {"CONFIRMED", "COMPLETED"}:
             current = transfer.status
             if current in {"SUBMITTED", "CONFIRMING"}:
@@ -165,6 +218,11 @@ class TwoLegExecutor:
             transfer_id, status, transfer.amount, tx_hash, destination_balance_confirmed
         ))
         self.engine.sync_two_leg_state(execution_intent, state.value)
+        self._journal_transition(
+            execution_intent, before, state.value, leg="transfer", transfer_id=transfer_id,
+            transfer_status=status, destination_balance_confirmed=destination_balance_confirmed,
+            tx_hash=tx_hash,
+        )
         return state
 
     def submit_sell(
@@ -181,6 +239,7 @@ class TwoLegExecutor:
             raise PermissionError("live execution is disabled")
         self.engine.revalidate_before_adapter(execution_intent, revalidate)
         coordinator.revalidate_sell = lambda _: revalidate(execution_intent)
+        before = coordinator.intent.state.value
         coordinator.prepare_sell()
         client_id = "arb-" + execution_intent.id[:24] + "-s"
         raw = adapter.place_spot_order(
@@ -197,11 +256,14 @@ class TwoLegExecutor:
         fill = LegFill(order_id, status, coordinator.intent.transferred_qty, executed, float(raw.get("price", 0) or 0))
         state = coordinator.accept_sell(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
+        self._journal_transition(execution_intent, before, state.value, leg="sell", order_id=order_id)
+        self._journal_order(execution_intent, "sell", fill)
         return state
 
     def reconcile_sell(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, adapter: Any) -> LegState:
         if not coordinator.intent.sell_order_id:
             raise ValueError("sell order id is missing")
+        before = coordinator.intent.state.value
         snap = reconcile_order(adapter, execution_intent.symbol, coordinator.intent.sell_order_id)
         fill = LegFill(
             coordinator.intent.sell_order_id,
@@ -212,11 +274,16 @@ class TwoLegExecutor:
         )
         state = coordinator.accept_sell(fill)
         self.engine.sync_two_leg_state(execution_intent, state.value)
+        self._journal_transition(execution_intent, before, state.value, leg="sell", order_id=coordinator.intent.sell_order_id)
+        if before != state.value:
+            self._journal_order(execution_intent, "sell", fill)
         return state
 
     def _fail_transfer(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, reason: str) -> LegState:
+        before = coordinator.intent.state.value
         state = coordinator._fail(reason)
         self.engine.sync_two_leg_state(execution_intent, state.value)
+        self._journal_transition(execution_intent, before, state.value, leg="transfer", error=reason)
         return state
 
     @staticmethod
@@ -224,7 +291,6 @@ class TwoLegExecutor:
         if not path.exists():
             return None
         latest = None
-        import json
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
                 row = json.loads(line)
