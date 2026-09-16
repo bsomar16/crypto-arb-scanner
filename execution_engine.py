@@ -53,13 +53,13 @@ class ExecutionEngine:
         if opportunity.net_pct < float(self.cfg.get("realtime_min_net_pct", 0.5)):
             raise ValueError("opportunity below execution threshold")
         notional = min(float(opportunity.executable_notional_usdt), self.max_notional)
-        self.safety.assert_allowed(notional, len(self._intents), self._daily_notional())
         if notional <= 0:
             raise ValueError("opportunity has no executable notional")
         idem = self._idempotency_key(opportunity)
         existing = self._find_by_idempotency(idem)
         if existing is not None:
             return existing
+        self.safety.assert_allowed(notional, len(self._intents), self._daily_notional())
         intent = ExecutionIntent(
             id=uuid.uuid4().hex,
             symbol=opportunity.symbol,
