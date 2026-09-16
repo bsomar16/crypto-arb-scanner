@@ -79,17 +79,22 @@ class BinanceSpotAdapter(ExchangeAdapter):
             for n in coin.get("networkList", []):
                 out.append(NetworkInfo(str(n.get("network", "")), bool(n.get("depositEnable")),
                                       bool(n.get("withdrawEnable")), float(n.get("withdrawFee", 0)),
-                                      float(n.get("withdrawMin", 0))))
+                                      float(n.get("withdrawMin", 0)),
+                                      bool(n.get("sameAddress", False) is False and n.get("addressTagRegex"))))
             return out
         return []
 
-    def get_deposit_address(self, asset: str, network: str) -> str:
+    def get_deposit_details(self, asset: str, network: str) -> Dict[str, str]:
         data = self._signed("GET", "/sapi/v1/capital/deposit/address",
                             {"coin": asset.upper(), "network": network})
-        address = data.get("address")
+        address = str(data.get("address") or "")
         if not address:
             raise RuntimeError("Binance did not return a deposit address")
-        return str(address)
+        tag = str(data.get("tag") or data.get("addressTag") or "")
+        return {"address": address, "memo": tag, "memo_type": "tag" if tag else ""}
+
+    def get_deposit_address(self, asset: str, network: str) -> str:
+        return self.get_deposit_details(asset, network)["address"]
 
     def place_spot_order(self, symbol: str, side: str, quantity: float, *, price: Optional[float] = None,
                          order_type: str = "LIMIT", client_order_id: Optional[str] = None) -> Dict[str, Any]:
@@ -110,6 +115,7 @@ class BinanceSpotAdapter(ExchangeAdapter):
         return self._signed("GET", "/api/v3/order", {"symbol": symbol.upper(), "orderId": order_id})
 
     def withdraw_spot(self, asset: str, amount: float, address: str, network: str, *,
+                      memo: Optional[str] = None, memo_type: Optional[str] = None,
                       client_withdrawal_id: Optional[str] = None) -> Dict[str, Any]:
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true":
             raise RuntimeError("live withdrawals are disabled; set EXECUTION_ENABLED=true deliberately")
@@ -117,6 +123,10 @@ class BinanceSpotAdapter(ExchangeAdapter):
                                                 amount, True, True))
         params: Dict[str, Any] = {"coin": asset.upper(), "amount": amount, "address": address,
                                   "network": network}
+        if memo:
+            if memo_type not in (None, "tag"):
+                raise ValueError(f"Binance withdrawal does not accept memo_type={memo_type!r}")
+            params["addressTag"] = memo
         if client_withdrawal_id:
             params["withdrawOrderId"] = client_withdrawal_id
         return self._signed("POST", "/sapi/v1/capital/withdraw/apply", params)
