@@ -2,13 +2,14 @@
 """Persistent, provider-neutral trade journal for signal and position outcomes.
 
 The journal is append-only JSONL so restarts cannot erase history. It supports
-both virtual/paper positions and future live executions; live order identifiers
-and fills can be attached without changing the statistics model.
+both virtual/paper positions and live executions; live order identifiers and
+fills can be attached without changing the statistics model.
 """
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from statistics import mean
 from typing import Any
 
@@ -24,6 +25,7 @@ def record(event: str, position_id: str, **fields: Any) -> dict:
     for key, value in fields.items():
         if value is not None:
             row[key] = value
+    Path(PATH).parent.mkdir(parents=True, exist_ok=True)
     with open(PATH, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
     return row
