@@ -5,15 +5,21 @@ import unittest
 from types import SimpleNamespace
 
 from execution_engine import ExecutionEngine
+from exchange_adapter import NetworkInfo
 from two_leg_executor import TwoLegExecutor
 from two_leg_execution import LegState
 import trade_journal
 
 
 class FakeAdapter:
-    def __init__(self):
+    def __init__(self, *, memo_required=False, balance=10.0, withdraw_fee=0.01, deposit_enabled=True, withdraw_enabled=True):
         self.orders = {}
         self.withdrawals = []
+        self.memo_required = memo_required
+        self.balance = balance
+        self.withdraw_fee = withdraw_fee
+        self.deposit_enabled = deposit_enabled
+        self.withdraw_enabled = withdraw_enabled
 
     def place_spot_order(self, symbol, side, quantity, *, price=None, order_type="LIMIT", client_order_id=None):
         oid = client_order_id or "order-1"
@@ -22,6 +28,13 @@ class FakeAdapter:
 
     def get_order(self, symbol, order_id):
         return self.orders[order_id]
+
+    def get_spot_balances(self):
+        return {"SOL": self.balance}
+
+    def get_networks(self, asset):
+        return [NetworkInfo("SOL", self.deposit_enabled, self.withdraw_enabled, self.withdraw_fee, 0.001,
+                             self.memo_required, raw_chain="SOL")]
 
     def get_deposit_address(self, asset, network):
         return "destination-address"
@@ -58,10 +71,13 @@ class TwoLegExecutorTests(unittest.TestCase):
             os.environ["EXECUTION_ENABLED"] = self.old
         self.tmp.cleanup()
 
-    def test_buy_reconciliation_transfer_and_sell_gate(self):
+    def _buy_filled(self):
         self.assertEqual(self.executor.submit_buy(self.intent, self.coordinator, self.adapter, revalidate=lambda _: True), LegState.BUY_SUBMITTED)
         self.adapter.orders[self.coordinator.intent.buy_order_id] = {"status": "FILLED", "executedQty": 1.0, "price": 100}
         self.assertEqual(self.executor.reconcile_buy(self.intent, self.coordinator, self.adapter), LegState.BUY_FILLED)
+
+    def test_buy_reconciliation_transfer_and_sell_gate(self):
+        self._buy_filled()
         destination = FakeAdapter()
         self.assertEqual(self.executor.submit_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
         tid = self.coordinator.intent.transfer_id
@@ -70,6 +86,29 @@ class TwoLegExecutorTests(unittest.TestCase):
             self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=False)
         self.assertEqual(self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=True), LegState.TRANSFER_CONFIRMED)
         self.assertEqual(self.executor.submit_sell(self.intent, self.coordinator, destination, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
+
+    def test_transfer_blocks_required_destination_memo(self):
+        self._buy_filled()
+        destination = FakeAdapter(memo_required=True)
+        with self.assertRaises(RuntimeError, msg="memo-required destinations must fail closed"):
+            self.executor.submit_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL", revalidate=lambda _: True)
+        self.assertEqual(self.adapter.withdrawals, [])
+
+    def test_transfer_blocks_insufficient_balance_for_fee(self):
+        self._buy_filled()
+        source = FakeAdapter(balance=1.005, withdraw_fee=0.01)
+        destination = FakeAdapter()
+        with self.assertRaises(RuntimeError, msg="withdrawal must not be submitted when fee cannot be covered"):
+            self.executor.submit_transfer(self.intent, self.coordinator, source, destination, "SOL", revalidate=lambda _: True)
+        self.assertEqual(source.withdrawals, [])
+
+    def test_transfer_blocks_disabled_network(self):
+        self._buy_filled()
+        source = FakeAdapter(withdraw_enabled=False)
+        destination = FakeAdapter()
+        with self.assertRaises(RuntimeError):
+            self.executor.submit_transfer(self.intent, self.coordinator, source, destination, "SOL", revalidate=lambda _: True)
+        self.assertEqual(source.withdrawals, [])
 
     def test_stale_revalidation_blocks_adapter_call(self):
         with self.assertRaises(ValueError):
