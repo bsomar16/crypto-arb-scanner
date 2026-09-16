@@ -1,0 +1,21 @@
+[Unit]
+Description=Crypto SPOT real-time arbitrage monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/crypto-arb-scanner
+ExecStart=/usr/bin/python3 /opt/crypto-arb-scanner/realtime_arb.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/crypto-arb-scanner/.env
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/crypto-arb-scanner/state
+
+[Install]
+WantedBy=multi-user.target
