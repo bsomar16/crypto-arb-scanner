@@ -57,6 +57,15 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     def get_deposit_address(self, asset: str, network: str) -> str: ...
 
+    def get_deposit_details(self, asset: str, network: str) -> Dict[str, str]:
+        """Return destination address metadata.
+
+        Adapters may override this to expose an exchange-required memo/tag.
+        The default deliberately returns no memo so callers can fail closed
+        when network metadata says a memo/tag is mandatory.
+        """
+        return {"address": self.get_deposit_address(asset, network), "memo": ""}
+
     @abstractmethod
     def place_spot_order(self, symbol: str, side: str, quantity: float, *, price: Optional[float] = None,
                          order_type: str = "LIMIT", client_order_id: Optional[str] = None) -> Dict[str, Any]: ...
