@@ -95,6 +95,17 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.assertEqual(self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=True), LegState.TRANSFER_CONFIRMED)
         self.assertEqual(self.executor.submit_sell(self.intent, self.coordinator, destination, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
 
+    def test_base_asset_buy_fee_is_not_withdrawn(self):
+        self.executor.submit_buy(self.intent, self.coordinator, self.adapter, revalidate=lambda _: True)
+        order_id = self.coordinator.intent.buy_order_id
+        self.adapter.orders[order_id] = {"status": "FILLED", "executedQty": 1.0, "avgPrice": 100,
+                                         "feeAmount": 0.002, "feeCurrency": "SOL"}
+        self.assertEqual(self.executor.reconcile_buy(self.intent, self.coordinator, self.adapter), LegState.BUY_FILLED)
+        destination = FakeAdapter()
+        self.assertEqual(self.executor.submit_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
+        self.assertEqual(self.coordinator.intent.transferred_qty, 0.998)
+        self.assertEqual(self.adapter.withdrawals[0][1], 0.998)
+
     def test_transfer_propagates_destination_memo(self):
         self._buy_filled()
         destination = FakeAdapter(memo_required=True, memo="123456")
