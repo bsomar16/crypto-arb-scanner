@@ -58,13 +58,13 @@ class ExchangeAdapter(ABC):
     def get_deposit_address(self, asset: str, network: str) -> str: ...
 
     def get_deposit_details(self, asset: str, network: str) -> Dict[str, str]:
-        """Return destination address metadata.
+        """Return destination address plus exchange routing metadata.
 
-        Adapters may override this to expose an exchange-required memo/tag.
-        The default deliberately returns no memo so callers can fail closed
-        when network metadata says a memo/tag is mandatory.
+        ``memo_type`` may be ``memo``, ``tag`` or ``payment_id``. The default
+        deliberately returns no metadata so callers can fail closed when a
+        destination requires it.
         """
-        return {"address": self.get_deposit_address(asset, network), "memo": ""}
+        return {"address": self.get_deposit_address(asset, network), "memo": "", "memo_type": ""}
 
     @abstractmethod
     def place_spot_order(self, symbol: str, side: str, quantity: float, *, price: Optional[float] = None,
@@ -75,4 +75,5 @@ class ExchangeAdapter(ABC):
 
     @abstractmethod
     def withdraw_spot(self, asset: str, amount: float, address: str, network: str,
-                      *, client_withdrawal_id: Optional[str] = None) -> Dict[str, Any]: ...
+                      *, memo: Optional[str] = None, memo_type: Optional[str] = None,
+                      client_withdrawal_id: Optional[str] = None) -> Dict[str, Any]: ...
