@@ -29,6 +29,9 @@ class NetworkInfo:
     withdrawal_enabled: bool
     withdrawal_fee: float
     min_withdrawal: float
+    memo_required: bool = False
+    confirmation_count: int = 0
+    raw_chain: str = ""
 
 
 class ExchangeAdapter(ABC):
