@@ -95,6 +95,47 @@ class TwoLegExecutor:
             self._journal_order(execution_intent, "buy", fill)
         return state
 
+    @staticmethod
+    def _network(networks: list[Any], network: str) -> Optional[Any]:
+        target = network.strip().upper()
+        for item in networks:
+            name = str(getattr(item, "network", "")).strip().upper()
+            raw = str(getattr(item, "raw_chain", "")).strip().upper()
+            if target == name or (raw and target == raw):
+                return item
+        return None
+
+    def _validate_transfer_route(self, execution_intent: ExecutionIntent, source_adapter: Any,
+                                 destination_adapter: Any, asset: str, network: str,
+                                 amount: float) -> None:
+        """Fail closed before a withdrawal can be submitted."""
+        source_network = self._network(source_adapter.get_networks(asset), network)
+        if source_network is None:
+            raise RuntimeError(f"source exchange does not expose validated network {asset}/{network}")
+        if not bool(getattr(source_network, "withdrawal_enabled", False)):
+            raise RuntimeError(f"source withdrawal is disabled for {asset}/{network}")
+        if amount < float(getattr(source_network, "min_withdrawal", 0) or 0):
+            raise RuntimeError(f"transfer amount is below source minimum withdrawal for {asset}/{network}")
+
+        destination_network = self._network(destination_adapter.get_networks(asset), network)
+        if destination_network is None:
+            raise RuntimeError(f"destination exchange does not expose validated network {asset}/{network}")
+        if not bool(getattr(destination_network, "deposit_enabled", False)):
+            raise RuntimeError(f"destination deposit is disabled for {asset}/{network}")
+        if bool(getattr(destination_network, "memo_required", False)):
+            # Current adapter contract does not guarantee memo/tag retrieval.
+            # Refuse the transfer rather than risking an irreversible loss.
+            raise RuntimeError(f"destination requires memo/tag for {asset}/{network}; transfer blocked")
+
+        balances = source_adapter.get_spot_balances()
+        available = float(balances.get(asset.upper(), 0) or 0)
+        fee = max(0.0, float(getattr(source_network, "withdrawal_fee", 0) or 0))
+        if available + 1e-12 < amount + fee:
+            raise RuntimeError(
+                f"insufficient source balance for transfer plus withdrawal fee: "
+                f"available={available}, required={amount + fee}"
+            )
+
     def submit_transfer(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator,
                         source_adapter: Any, destination_adapter: Any, asset: str, *,
                         revalidate: Callable[[ExecutionIntent], bool]) -> LegState:
@@ -111,7 +152,15 @@ class TwoLegExecutor:
         network = execution_intent.network
         if not network:
             return self._fail_transfer(execution_intent, coordinator, "no validated transfer network")
-        address = destination_adapter.get_deposit_address(asset, network)
+
+        self._validate_transfer_route(execution_intent, source_adapter, destination_adapter,
+                                      asset, network, coordinator.intent.filled_qty)
+        details = destination_adapter.get_deposit_details(asset, network)
+        address = str(details.get("address", ""))
+        if not address:
+            return self._fail_transfer(execution_intent, coordinator, "destination did not return a deposit address")
+        # Memo/tag-required routes are blocked above until adapters can provide
+        # the destination tag through the provider-neutral contract.
         transfer_id = "tr-" + uuid.uuid4().hex
         raw = source_adapter.withdraw_spot(asset, coordinator.intent.filled_qty, address, network,
                                            client_withdrawal_id=transfer_id)
