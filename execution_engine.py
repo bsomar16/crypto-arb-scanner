@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Controlled SPOT execution state machine.
 
-Live execution is opt-in. The engine refuses derivative-style order types and
-requires a fresh opportunity plus explicit confirmation for every execution.
-Withdrawal is always a separate confirmation.
+Live execution is opt-in. Every order must pass the repository's hard SPOT-only
+validator and explicit confirmation. Withdrawal confirmation is separate.
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-from execution_guard import SpotOnlyGuard
+from execution_guard import ExecutionRequest, validate_spot_request
 
 
 @dataclass
@@ -37,7 +37,6 @@ class ExecutionIntent:
 class ExecutionEngine:
     def __init__(self, cfg: dict, state_dir: str = "state"):
         self.cfg = cfg
-        self.guard = SpotOnlyGuard()
         self.enabled = os.getenv("EXECUTION_ENABLED", "false").lower() == "true"
         self.confirm_ttl_ms = int(cfg.get("execution_confirmation_ttl_ms", 30000))
         self.max_notional = float(cfg.get("execution_max_notional_usdt", 300.0))
@@ -72,19 +71,23 @@ class ExecutionEngine:
             intent.status = "EXPIRED"
             self._write(intent)
             raise TimeoutError("execution confirmation expired")
-        if not self.enabled:
-            intent.status = "DRY_RUN_CONFIRMED"
-        else:
-            intent.status = "READY_FOR_ADAPTER"
+        intent.status = "READY_FOR_ADAPTER" if self.enabled else "DRY_RUN_CONFIRMED"
         intent.confirmed_ms = now
         self._write(intent)
         return intent
 
-    def validate_order(self, side: str, market_type: str = "SPOT", order_type: str = "LIMIT") -> None:
-        self.guard.assert_spot_only(market_type=market_type, side=side, order_type=order_type)
+    def validate_order(self, exchange: str, symbol: str, quantity: float, side: str, *, confirmed: bool) -> None:
+        validate_spot_request(ExecutionRequest(
+            product="SPOT", side=side, symbol=symbol, exchange=exchange,
+            quantity=quantity, confirmed=confirmed,
+        ))
+
+    def validate_withdrawal(self, exchange: str, asset: str, quantity: float, *, confirmed: bool) -> None:
+        validate_spot_request(ExecutionRequest(
+            product="SPOT", side="SELL", symbol=asset, exchange=exchange,
+            quantity=quantity, confirmed=confirmed, withdrawal_confirmed=confirmed,
+        ), is_withdrawal=True)
 
     def _write(self, intent: ExecutionIntent) -> None:
-        p = self.state / "execution_intents.jsonl"
-        with p.open("a", encoding="utf-8") as f:
-            import json
+        with (self.state / "execution_intents.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(asdict(intent), separators=(",", ":")) + "\n")
