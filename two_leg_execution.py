@@ -1,8 +1,8 @@
 """Failure-safe coordinator for a confirmed two-leg SPOT arbitrage intent.
 
-This module is provider-neutral. It deliberately does not expose derivatives,
-leverage, borrowing, or shorting. Live adapter calls are supplied by the caller
-and should remain disabled unless the global execution safety gates pass.
+Provider-neutral: exchange I/O is injected through callbacks. The coordinator
+never exposes derivatives and never assumes a withdrawal request means a
+completed destination deposit.
 """
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ class TransferStatus:
     status: str
     amount: float
     tx_hash: Optional[str] = None
+    destination_balance_confirmed: bool = False
 
 
 @dataclass
@@ -59,16 +60,29 @@ class TwoLegIntent:
     transfer_id: Optional[str] = None
     filled_qty: float = 0.0
     transferred_qty: float = 0.0
+    sell_filled_qty: float = 0.0
+    buy_fee_quote: float = 0.0
+    sell_fee_quote: float = 0.0
     error: Optional[str] = None
     events: list[str] = field(default_factory=list)
 
 
 class TwoLegCoordinator:
-    """Small deterministic state machine; external callbacks perform I/O."""
+    """Deterministic state machine; all exchange operations are external callbacks."""
 
-    def __init__(self, intent: TwoLegIntent, persist: Optional[Callable[[TwoLegIntent], None]] = None):
+    def __init__(
+        self,
+        intent: TwoLegIntent,
+        persist: Optional[Callable[[TwoLegIntent], None]] = None,
+        revalidate_buy: Optional[Callable[[TwoLegIntent], bool]] = None,
+        revalidate_transfer: Optional[Callable[[TwoLegIntent], bool]] = None,
+        revalidate_sell: Optional[Callable[[TwoLegIntent], bool]] = None,
+    ):
         self.intent = intent
         self.persist = persist
+        self.revalidate_buy = revalidate_buy
+        self.revalidate_transfer = revalidate_transfer
+        self.revalidate_sell = revalidate_sell
 
     def _save(self, event: str) -> None:
         self.intent.events.append(event)
@@ -81,19 +95,34 @@ class TwoLegCoordinator:
         self._save("FAILED:" + reason)
         return self.intent.state
 
+    def _check(self, callback: Optional[Callable[[TwoLegIntent], bool]], what: str) -> bool:
+        if callback is not None and not callback(self.intent):
+            self._fail(what + " revalidation failed")
+            return False
+        return True
+
+    def prepare_buy(self) -> LegState:
+        if self.intent.state != LegState.READY_FOR_ADAPTER:
+            raise ValueError("buy preparation is invalid for current state")
+        if not self._check(self.revalidate_buy, "buy leg"):
+            return self.intent.state
+        self._save("BUY_REVALIDATED")
+        return self.intent.state
+
     def accept_buy(self, fill: LegFill) -> LegState:
         if self.intent.state not in {LegState.READY_FOR_ADAPTER, LegState.BUY_SUBMITTED, LegState.BUY_PARTIAL}:
             raise ValueError("buy update is invalid for current state")
-        if fill.filled_qty < 0 or fill.filled_qty > fill.requested_qty + 1e-12:
+        if fill.requested_qty <= 0 or fill.filled_qty < 0 or fill.filled_qty > fill.requested_qty + 1e-12:
             return self._fail("invalid buy fill quantity")
         self.intent.buy_order_id = fill.order_id
         self.intent.filled_qty = fill.filled_qty
+        self.intent.buy_fee_quote = max(0.0, fill.fee_quote)
         status = fill.status.upper()
         if status == "FILLED" and fill.filled_qty > 0:
             self.intent.state = LegState.BUY_FILLED
         elif fill.filled_qty > 0:
             self.intent.state = LegState.BUY_PARTIAL
-        elif status in {"CANCELED", "REJECTED", "EXPIRED"}:
+        elif status in {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED"}:
             return self._fail("buy leg " + status.lower())
         else:
             self.intent.state = LegState.BUY_SUBMITTED
@@ -105,6 +134,8 @@ class TwoLegCoordinator:
             raise ValueError("transfer requires a fully filled buy leg")
         if self.intent.filled_qty <= 0:
             return self._fail("buy leg has no filled quantity")
+        if not self._check(self.revalidate_transfer, "transfer"):
+            return self.intent.state
         self.intent.state = LegState.TRANSFER_PENDING
         self._save("TRANSFER_SUBMITTED")
         return self.intent.state
@@ -118,29 +149,50 @@ class TwoLegCoordinator:
         self.intent.transferred_qty = transfer.amount
         status = transfer.status.upper()
         if status in {"CONFIRMED", "COMPLETED"}:
+            if not transfer.destination_balance_confirmed:
+                return self._fail("destination deposit/balance is not confirmed")
             if transfer.amount + 1e-12 < self.intent.filled_qty:
                 return self._fail("confirmed transfer does not cover filled buy quantity")
             self.intent.state = LegState.TRANSFER_CONFIRMED
-        elif status in {"FAILED", "REJECTED", "CANCELED"}:
+        elif status in {"FAILED", "REJECTED", "CANCELED", "CANCELLED"}:
             return self._fail("transfer " + status.lower())
+        else:
+            self._save("TRANSFER:" + status)
+            return self.intent.state
         self._save("TRANSFER:" + status)
+        return self.intent.state
+
+    def prepare_sell(self) -> LegState:
+        if self.intent.state != LegState.TRANSFER_CONFIRMED:
+            raise ValueError("sell preparation requires confirmed destination deposit")
+        if self.intent.transferred_qty <= 0:
+            return self._fail("no confirmed transferred quantity")
+        if not self._check(self.revalidate_sell, "sell leg"):
+            return self.intent.state
+        self._save("SELL_REVALIDATED")
         return self.intent.state
 
     def accept_sell(self, fill: LegFill) -> LegState:
         if self.intent.state not in {LegState.TRANSFER_CONFIRMED, LegState.SELL_SUBMITTED, LegState.SELL_PARTIAL}:
             raise ValueError("sell update is invalid for current state")
         max_qty = self.intent.transferred_qty
-        if fill.filled_qty < 0 or fill.filled_qty > max_qty + 1e-12:
+        if fill.requested_qty <= 0 or fill.filled_qty < 0 or fill.filled_qty > max_qty + 1e-12:
             return self._fail("sell fill exceeds transferred quantity")
         self.intent.sell_order_id = fill.order_id
+        self.intent.sell_filled_qty = fill.filled_qty
+        self.intent.sell_fee_quote = max(0.0, fill.fee_quote)
         status = fill.status.upper()
         if status == "FILLED" and fill.filled_qty > 0:
+            if abs(fill.filled_qty - max_qty) > max(1e-12, max_qty * 1e-8):
+                return self._fail("sell marked filled before selling the confirmed transferred quantity")
             self.intent.state = LegState.SELL_FILLED
-            self.intent.filled_qty = fill.filled_qty
+            self._save("SELL:FILLED")
             self.intent.state = LegState.COMPLETED
-        elif fill.filled_qty > 0:
+            self._save("COMPLETED")
+            return self.intent.state
+        if fill.filled_qty > 0:
             self.intent.state = LegState.SELL_PARTIAL
-        elif status in {"CANCELED", "REJECTED", "EXPIRED"}:
+        elif status in {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED"}:
             return self._fail("sell leg " + status.lower())
         else:
             self.intent.state = LegState.SELL_SUBMITTED
