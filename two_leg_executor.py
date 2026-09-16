@@ -34,6 +34,7 @@ class TwoLegExecutor:
                              exchange=execution_intent.buy_exchange if leg == "buy" else execution_intent.sell_exchange,
                              order_id=snapshot.order_id, order_status=snapshot.status,
                              requested_qty=snapshot.requested_qty, filled_qty=snapshot.filled_qty,
+                             executed_qty=snapshot.filled_qty,
                              avg_price=snapshot.avg_price, fee_quote=snapshot.fee_quote,
                              mode="live" if self.engine.enabled else "dry_run")
 
