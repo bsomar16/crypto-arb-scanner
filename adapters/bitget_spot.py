@@ -59,9 +59,16 @@ class BitgetSpotAdapter(ExchangeAdapter):
         data = self._request("GET", "/api/v2/spot/public/coins", {"coin": asset.upper()})
         return [NetworkInfo(str(x.get("chain", "")), bool(x.get("rechargeable", True)), bool(x.get("withdrawable", True)), float(x.get("withdrawFee", 0) or 0), float(x.get("minWithdrawAmount", 0) or 0), bool(x.get("tag", False) or x.get("needTag", False)), raw_chain=str(x.get("chain", ""))) for x in (data or [])]
 
-    def get_deposit_address(self, asset, network):
+    def get_deposit_details(self, asset, network):
         data = self._request("GET", "/api/v2/spot/wallet/deposit-address", {"coin": asset.upper(), "chain": network}, auth=True)
-        return str(data.get("address", ""))
+        address = str(data.get("address", ""))
+        if not address:
+            raise RuntimeError("Bitget did not return a deposit address")
+        tag = str(data.get("tag") or "")
+        return {"address": address, "memo": tag, "memo_type": "tag" if tag else ""}
+
+    def get_deposit_address(self, asset, network):
+        return self.get_deposit_details(asset, network)["address"]
 
     def place_spot_order(self, symbol, side, quantity, *, price=None, order_type="LIMIT", client_order_id=None):
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true":
@@ -81,9 +88,12 @@ class BitgetSpotAdapter(ExchangeAdapter):
     def get_order(self, symbol, order_id):
         return self._request("GET", "/api/v3/trade/order-info", {"category": "SPOT", "symbol": symbol.upper(), "orderId": order_id}, auth=True)
 
-    def withdraw_spot(self, asset, amount, address, network, *, client_withdrawal_id=None):
+    def withdraw_spot(self, asset, amount, address, network, *, memo: Optional[str] = None, memo_type: Optional[str] = None, client_withdrawal_id=None):
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true": raise RuntimeError("Live withdrawals are disabled")
         validate_spot_request(ExecutionRequest("SPOT", "SELL", f"{asset.upper()}USDT", self.name, amount, True, True))
+        if memo and memo_type not in (None, "tag"):
+            raise ValueError(f"Bitget withdrawal does not accept memo_type={memo_type!r}")
         body = {"coin": asset.upper(), "transferType": "on_chain", "address": address, "chain": network, "size": str(amount)}
+        if memo: body["tag"] = memo
         if client_withdrawal_id: body["clientOid"] = client_withdrawal_id
         return self._request("POST", "/api/v2/spot/wallet/withdrawal", body=body, auth=True)
