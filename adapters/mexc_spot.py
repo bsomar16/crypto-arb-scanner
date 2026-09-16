@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from exchange_adapter import ExchangeAdapter, NetworkInfo, SpotMarket
+from execution_guard import ExecutionRequest, validate_spot_request
 
 
 class MexcSpotAdapter(ExchangeAdapter):
@@ -61,17 +62,21 @@ class MexcSpotAdapter(ExchangeAdapter):
         data = self._request("GET", "/api/v3/capital/config/getall", auth=True)
         coin = next((x for x in data if str(x.get("coin", "")).upper() == asset.upper()), None)
         if not coin: return []
-        return [NetworkInfo(str(x.get("network", "")), bool(x.get("depositEnable", False)), bool(x.get("withdrawEnable", False)), float(x.get("withdrawFee", 0) or 0), float(x.get("withdrawMin", 0) or 0)) for x in coin.get("networkList", [])]
+        return [NetworkInfo(str(x.get("network", "")), bool(x.get("depositEnable", False)), bool(x.get("withdrawEnable", False)), float(x.get("withdrawFee", 0) or 0), float(x.get("withdrawMin", 0) or 0), bool(x.get("memoRequired", False) or x.get("needTag", False)), raw_chain=str(x.get("network", ""))) for x in coin.get("networkList", [])]
 
     def get_deposit_address(self, asset, network):
         data = self._request("GET", "/api/v3/capital/deposit/address", {"coin": asset.upper(), "network": network}, auth=True)
         return str(data.get("address", ""))
 
     def place_spot_order(self, symbol, side, quantity, *, price=None, order_type="LIMIT", client_order_id=None):
+        if os.getenv("EXECUTION_ENABLED", "false").lower() != "true": raise RuntimeError("Live execution is disabled")
         side = side.upper(); order_type = order_type.upper()
         if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"): raise ValueError("MEXC adapter accepts SPOT BUY/SELL only")
+        validate_spot_request(ExecutionRequest("SPOT", side, symbol, self.name, quantity, True, False))
         params = {"symbol": symbol.upper(), "side": side, "type": order_type, "quantity": str(quantity)}
-        if order_type == "LIMIT": params.update({"price": str(price), "timeInForce": "GTC"})
+        if order_type == "LIMIT":
+            if price is None: raise ValueError("LIMIT order requires price")
+            params.update({"price": str(price), "timeInForce": "GTC"})
         if client_order_id: params["newClientOrderId"] = client_order_id
         return self._trade("POST", "/api/v3/order", params)
 
@@ -79,6 +84,8 @@ class MexcSpotAdapter(ExchangeAdapter):
         return self._request("GET", "/api/v3/order", {"symbol": symbol.upper(), "orderId": order_id}, auth=True)
 
     def withdraw_spot(self, asset, amount, address, network, *, client_withdrawal_id=None):
+        if os.getenv("EXECUTION_ENABLED", "false").lower() != "true": raise RuntimeError("Live withdrawals are disabled")
+        validate_spot_request(ExecutionRequest("SPOT", "SELL", f"{asset.upper()}USDT", self.name, amount, True, True))
         params = {"coin": asset.upper(), "amount": str(amount), "address": address, "network": network}
         if client_withdrawal_id: params["withdrawOrderId"] = client_withdrawal_id
         return self._trade("POST", "/api/v3/capital/withdraw", params)
