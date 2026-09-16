@@ -86,14 +86,24 @@ class BybitSpotAdapter(ExchangeAdapter):
         out = []
         for c in rows[0].get("chains", []):
             network = str(c.get("chain", ""))
-            out.append(NetworkInfo(network, c.get("chainDeposit") == "1", c.get("chainWithdraw") == "1", float(c.get("withdrawFee", 0) or 0), float(c.get("withdrawMin", 0) or 0), bool(c.get("sameAddress") is False and c.get("contractAddress") == "" and c.get("tagRequired") == "1"), raw_chain=network))
+            tag_required = str(c.get("tagRequired", "0")) == "1"
+            out.append(NetworkInfo(network, c.get("chainDeposit") == "1", c.get("chainWithdraw") == "1",
+                                   float(c.get("withdrawFee", 0) or 0), float(c.get("withdrawMin", 0) or 0),
+                                   tag_required, raw_chain=network))
         return out
 
-    def get_deposit_address(self, asset: str, network: str) -> str:
+    def get_deposit_details(self, asset: str, network: str) -> Dict[str, str]:
         result = self._result(self._private("GET", "/v5/asset/deposit/query-address", params={"coin": asset.upper(), "chainType": network}))
         rows = result.get("rows", [])
         if not rows: raise RuntimeError("Bybit did not return a deposit address")
-        return str(rows[0].get("address"))
+        row = rows[0]
+        address = str(row.get("addressDeposit") or row.get("address") or "")
+        if not address: raise RuntimeError("Bybit did not return a deposit address")
+        tag = str(row.get("tagDeposit") or "")
+        return {"address": address, "memo": tag, "memo_type": "tag" if tag else ""}
+
+    def get_deposit_address(self, asset: str, network: str) -> str:
+        return self.get_deposit_details(asset, network)["address"]
 
     def place_spot_order(self, symbol: str, side: str, quantity: float, *, price: Optional[float] = None, order_type: str = "LIMIT", client_order_id: Optional[str] = None) -> Dict[str, Any]:
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true": raise RuntimeError("live execution is disabled; set EXECUTION_ENABLED=true deliberately")
@@ -110,9 +120,14 @@ class BybitSpotAdapter(ExchangeAdapter):
         rows = result.get("list", [])
         return rows[0] if rows else {}
 
-    def withdraw_spot(self, asset: str, amount: float, address: str, network: str, *, client_withdrawal_id: Optional[str] = None) -> Dict[str, Any]:
+    def withdraw_spot(self, asset: str, amount: float, address: str, network: str, *,
+                      memo: Optional[str] = None, memo_type: Optional[str] = None,
+                      client_withdrawal_id: Optional[str] = None) -> Dict[str, Any]:
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true": raise RuntimeError("live withdrawals are disabled; set EXECUTION_ENABLED=true deliberately")
         validate_spot_request(ExecutionRequest("SPOT", "SELL", f"{asset.upper()}USDT", self.name, amount, True, True))
+        if memo and memo_type not in (None, "tag"):
+            raise ValueError(f"Bybit withdrawal does not accept memo_type={memo_type!r}")
         body: Dict[str, Any] = {"coin": asset.upper(), "chain": network, "address": address, "amount": str(amount), "accountType": "UNIFIED", "forceChain": 1}
+        if memo: body["tag"] = memo
         if client_withdrawal_id: body["requestId"] = client_withdrawal_id
         return self._result(self._private("POST", "/v5/asset/withdraw/create", body=body))
