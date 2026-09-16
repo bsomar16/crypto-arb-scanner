@@ -91,6 +91,26 @@ class TestSlippedSize(unittest.TestCase):
         self.assertAlmostEqual(size, 2.0 * 100.0)
 
 
+class TestBacktest(unittest.TestCase):
+    def test_conservative_same_candle_stop_and_target(self):
+        import backtest
+        rows = [[0, 0, 106, 94, 100, 0], [1, 0, 106, 94, 100, 0]]
+        signal = {"entry": 100.0, "stop": 95.0, "target": 105.0}
+        result = backtest._evaluate(rows, 0, signal, 1)
+        self.assertEqual(result["outcome"], "LOSS")
+
+    def test_target_before_stop_is_win(self):
+        import backtest
+        rows = [[0, 0, 101, 99, 100, 0], [1, 0, 106, 99, 105, 0]]
+        signal = {"entry": 100.0, "stop": 95.0, "target": 105.0}
+        result = backtest._evaluate(rows, 0, signal, 1)
+        self.assertEqual(result["outcome"], "WIN")
+
+    def test_backtest_intervals(self):
+        import backtest
+        self.assertEqual(backtest.INTERVALS, ("5m", "15m", "1h"))
+
+
 class TestTraps(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(); self.path = os.path.join(self.dir, "traps.json"); self.now = 1_700_000_000.0
