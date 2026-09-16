@@ -4,10 +4,6 @@
 Modes: arb | daily | buy | price | backtest | portfolio | check | report | all
 """
 
-# NOTE: This update targets only the Telegram BUY presentation. The existing
-# scanner logic already filters intraday_signal() by potential, score and R:R.
-# It now makes that distinction explicit to the user: setup != confirmed signal.
-
 import concurrent.futures
 import os
 import sys
@@ -66,26 +62,17 @@ DEFAULTS = {
     "max_open_positions": 40,
 }
 
-
 def load_cfg():
     d = load_json("config.json", {}) or {}
     out = dict(DEFAULTS)
     out.update(d)
     return out
 
-
 def now_s():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-
 def arb_limits(cfg):
-    return {
-        "min_ex": env_int("MIN_EXCHANGES", cfg.get("min_exchanges", MIN_EXCHANGES)),
-        "spread": env_float("SPREAD_ALERT_PCT", cfg.get("spread_alert_pct", SPREAD_ALERT_PCT)),
-        "max_alerts": env_int("MAX_ALERTS_PER_RUN", cfg.get("max_alerts_per_run", MAX_ALERTS_PER_RUN)),
-        "trap_days": env_float("TRAP_EXPIRY_DAYS", cfg.get("trap_expiry_days", TRAP_EXPIRY_DAYS)),
-    }
-
+    return {"min_ex": env_int("MIN_EXCHANGES", cfg.get("min_exchanges", MIN_EXCHANGES)), "spread": env_float("SPREAD_ALERT_PCT", cfg.get("spread_alert_pct", SPREAD_ALERT_PCT)), "max_alerts": env_int("MAX_ALERTS_PER_RUN", cfg.get("max_alerts_per_run", MAX_ALERTS_PER_RUN)), "trap_days": env_float("TRAP_EXPIRY_DAYS", cfg.get("trap_expiry_days", TRAP_EXPIRY_DAYS))}
 
 def fmt_dollar(v):
     v = float(v or 0)
@@ -93,162 +80,186 @@ def fmt_dollar(v):
     if v >= 1e3: return f"{v / 1e3:.1f}k"
     return f"{v:.0f}"
 
-
 def dw_status_line(ex, st):
     info = (st or {}).get(ex)
-    if not info or (info.get("dep") is None and info.get("wd") is None):
-        return "🔒 Private API"
+    if not info or (info.get("dep") is None and info.get("wd") is None): return "🔒 Private API"
     nets = info.get("net") or []
     net_s = f" ({nets[0]})" if nets and nets[0] else ""
     dep, wd = info.get("dep"), info.get("wd")
     if dep and wd: return f"✅ D/W Active{net_s}"
     return f"⚠️ {'D on' if dep else 'D off'} · {'W on' if wd else 'W off'}{net_s}"
 
-
 def _alert_block(r, idx, total, net):
     st = coin_status(r["coin"])
     d1 = (depth_estimate(r["low_ex"], r["coin"]) or {}).get("full_usd", 0)
     d2 = (depth_estimate(r["high_ex"], r["coin"]) or {}).get("full_usd", 0)
-    return [
-        "", f"🚨 <b>ARB ALERT: {esc(r['coin'])} (+{net:.1f}%)</b>",
-        f"⏱ Run: {idx} of {total}", "",
-        f"🟢 BUY: {r['low_ex']}", f"• Price: {fmt_price(r['low'])}",
-        f"• Depth: ~${fmt_dollar(d1)}", f"• Status: {dw_status_line(r['low_ex'], st)}", "",
-        f"🔴 SELL: {r['high_ex']}", f"• Price: {fmt_price(r['high'])}",
-        f"• Depth: ~${fmt_dollar(d2)}", f"• Status: {dw_status_line(r['high_ex'], st)}",
-    ]
-
+    return ["", f"🚨 <b>ARB ALERT: {esc(r['coin'])} (+{net:.1f}%)</b>", f"⏱ Run: {idx} of {total}", "", f"🟢 BUY: {r['low_ex']}", f"• Price: {fmt_price(r['low'])}", f"• Depth: ~${fmt_dollar(d1)}", f"• Status: {dw_status_line(r['low_ex'], st)}", "", f"🔴 SELL: {r['high_ex']}", f"• Price: {fmt_price(r['high'])}", f"• Depth: ~${fmt_dollar(d2)}", f"• Status: {dw_status_line(r['high_ex'], st)}"]
 
 def run_arb(token, chat_id):
     cfg = load_cfg(); lim = arb_limits(cfg)
     try: positions_mod.check_positions(token, chat_id, cfg)
     except Exception as e: log("ARB", "positions check error:", e)
-    traps = traps_mod.load_traps(TRAP_FILE, lim["trap_days"])
-    maps, offline = {}, []
+    traps = traps_mod.load_traps(TRAP_FILE, lim["trap_days"]); maps, offline = {}, []
     for ex in EXCHANGES:
         maps[ex] = fetch_exchange(ex); log(ex, f"{len(maps[ex])} pairs")
         if not maps[ex]: offline.append(ex)
     counts = {}
     for m in maps.values():
         for c in m: counts[c] = counts.get(c, 0) + 1
-    universe = [c for c, n in counts.items() if n >= lim["min_ex"]]
-    new_alerts, all_flagged = [], []
+    universe = [c for c, n in counts.items() if n >= lim["min_ex"]]; new_alerts, all_flagged = [], []
     for c in sorted(universe):
         prices = {ex: p for ex, m in maps.items() if c in m and (p := m[c]) > 0}
         if len(prices) < lim["min_ex"]: continue
-        vals = list(prices.values()); hi, lo = max(vals), min(vals)
-        hi_ex, lo_ex = max(prices, key=prices.get), min(prices, key=prices.get)
+        vals = list(prices.values()); hi, lo = max(vals), min(vals); hi_ex, lo_ex = max(prices, key=prices.get), min(prices, key=prices.get)
         spread = (hi - lo) / lo * 100; net = calc_net(hi, lo, hi_ex, lo_ex)
         if net >= lim["spread"]:
             all_flagged.append(c)
-            if c not in traps and len(new_alerts) < lim["max_alerts"]:
-                new_alerts.append({"coin": c, "spread": spread, "net": net, "low": lo,
-                                   "low_ex": lo_ex, "high": hi, "high_ex": hi_ex, "median": median(vals)})
-    new_alerts.sort(key=lambda r: r["net"], reverse=True)
-    traps_mod.save_traps(TRAP_FILE, traps_mod.mark_flagged(traps, all_flagged))
+            if c not in traps and len(new_alerts) < lim["max_alerts"]: new_alerts.append({"coin": c, "spread": spread, "net": net, "low": lo, "low_ex": lo_ex, "high": hi, "high_ex": hi_ex, "median": median(vals)})
+    new_alerts.sort(key=lambda r: r["net"], reverse=True); traps_mod.save_traps(TRAP_FILE, traps_mod.mark_flagged(traps, all_flagged))
     for r in new_alerts:
         try: store_mod.spread_log(r["coin"], r["spread"], r["net"], r["low_ex"], r["high_ex"], r["low"], r["high"], r["median"])
         except Exception as e: log("ARB", "spread_log error:", e)
-    if not new_alerts:
-        log("[ARB] no new alerts"); return False
+    if not new_alerts: log("[ARB] no new alerts"); return False
     lines = [f"📊 <b>ARB SCAN</b> · {now_s()}", f"🌐 {len(universe)} coins · {len(EXCHANGES)} exchanges · {len(EXCHANGES)-len(offline)}/{len(EXCHANGES)} feeds", "", f"🚨 <b>NEW ALERTS ({len(new_alerts)})</b>"]
     for i, r in enumerate(new_alerts, 1): lines.extend(_alert_block(r, i, len(new_alerts), r["net"]))
     if offline: lines.extend(["", f"⚠️ offline feeds: {', '.join(offline)}"])
     telegram_msg(token, chat_id, "\n".join(lines)); return True
 
-
 def _candidate_universe(cfg, q, star):
-    rank = sorted(q.items(), key=lambda kv: -kv[1])
-    top_n = int(cfg.get("buy_scan_top_n", 100))
-    cands = [sym for sym, _ in rank[:top_n]]
-    floor = float(cfg.get("buy_min_vol", 2000000))
+    rank = sorted(q.items(), key=lambda kv: -kv[1]); top_n = int(cfg.get("buy_scan_top_n", 100)); cands = [sym for sym, _ in rank[:top_n]]; floor = float(cfg.get("buy_min_vol", 2000000))
     for sym in sorted(star - set(cands)):
         if q.get(sym, 0) >= floor * 0.5: cands.append(sym)
     return cands, rank
 
-
 def _signal_message(r):
-    setup = r.get("setup_type", "MOMENTUM")
-    kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"
-    reasons = ", ".join(r.get("reasons", [])[:5])
-    return [
-        f"🟢 <b>CONFIRMED BUY SIGNAL</b>",
-        f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}",
-        f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}",
-        f"Action: <b>BUY</b>",
-        f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}",
-        f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}",
-        f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
-        f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%",
-        f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation",
-    ]
-
+    setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
+    return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
 def run_buy(token, chat_id):
-    cfg = load_cfg()
-    intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
+    cfg = load_cfg(); intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
     if not intervals: intervals = ["5m", "15m", "1h"]
-    t24 = fetch_binance_24h(); q = crypto_quote(t24)
-    chg = {}
+    t24 = fetch_binance_24h(); q = crypto_quote(t24); chg = {}
     for x in t24:
         s = x.get("symbol", "")
         if s.endswith("USDT") and s != "USDTUSDT":
             try: chg[s[:-4]] = float(x.get("priceChangePercent", 0))
             except (ValueError, TypeError): pass
-    star = {str(w).upper() for w in cfg.get("watchlist", [])}
-    star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
-    cands, rank = _candidate_universe(cfg, q, star)
-    # 24h quote volume only defines the liquid universe; it does not trigger BUY.
-    tasks = []
+    star = {str(w).upper() for w in cfg.get("watchlist", [])}; star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
+    cands, rank = _candidate_universe(cfg, q, star); tasks = []
     for interval in intervals:
         pool = cands if interval != "5m" else [s for s, _ in rank[:int(cfg.get("buy_fast_top_n", 150))]]
         tasks.extend((sym, interval) for sym in pool)
-
     def scan(task):
         sym, interval = task
-        return intraday_signal(sym, interval=interval,
-                               min_vol_x=float(cfg.get("buy_min_vol_x", 1.15)),
-                               chg24=chg.get(sym),
-                               min_potential_pct=float(cfg.get("signal_min_potential_pct", 5.0)),
-                               max_potential_pct=float(cfg.get("signal_max_potential_pct", 80.0)),
-                               min_score=float(cfg.get("signal_min_score", 55)),
-                               min_rr=float(cfg.get("signal_min_rr", 1.5)))
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
-        hits = [r for r in ex.map(scan, tasks) if r]
-    fired = load_json("state/fired_signals.json", {}) or {}
-    updates = {}; fresh = []
-    cooldown_hours = 4.0
-    now_ts = datetime.now(timezone.utc).timestamp()
+        return intraday_signal(sym, interval=interval, min_vol_x=float(cfg.get("buy_min_vol_x", 1.15)), chg24=chg.get(sym), min_potential_pct=float(cfg.get("signal_min_potential_pct", 5.0)), max_potential_pct=float(cfg.get("signal_max_potential_pct", 80.0)), min_score=float(cfg.get("signal_min_score", 55)), min_rr=float(cfg.get("signal_min_rr", 1.5)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex: hits = [r for r in ex.map(scan, tasks) if r]
+    fired = load_json("state/fired_signals.json", {}) or {}; updates = {}; fresh = []; cooldown_hours = 4.0; now_ts = datetime.now(timezone.utc).timestamp()
     for r in hits:
-        key = f"{r['coin']}|{r['interval']}|{r['setup_type']}"
-        old = fired.get(key, {})
-        old_ts = float(old.get("ts", 0) or 0)
+        key = f"{r['coin']}|{r['interval']}|{r['setup_type']}"; old = fired.get(key, {}); old_ts = float(old.get("ts", 0) or 0)
         if old_ts and now_ts - old_ts < cooldown_hours * 3600:
             old_entry = float(old.get("entry", 0) or 0)
-            if old_entry and abs(r["entry"] - old_entry) / old_entry < 0.02:
-                continue
-        r["star"] = r["coin"] in star
-        updates[key] = {"ts": now_ts, "entry": r["entry"], "score": r["score"]}
-        fresh.append(r)
-    fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"]))
-    limit = int(cfg.get("buy_fast_top_n_shown", 15))
-    fresh = fresh[:limit]
+            if old_entry and abs(r["entry"] - old_entry) / old_entry < 0.02: continue
+        r["star"] = r["coin"] in star; updates[key] = {"ts": now_ts, "entry": r["entry"], "score": r["score"]}; fresh.append(r)
+    fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"])); fresh = fresh[:int(cfg.get("buy_fast_top_n_shown", 15))]
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
-    if not fresh and not fired_alerts:
-        log("[BUY] no new signals"); return False
+    if not fresh and not fired_alerts: log("[BUY] no new signals"); return False
     if updates: fired.update(updates); save_json("state/fired_signals.json", fired)
     try: positions_mod.open_picks(fresh, cfg, source="buy")
     except Exception as e: log("BUY", "positions open error:", e)
-    lines = [f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}",
-             f"🔎 {len(cands)} liquid coins · {len(tasks)} timeframe scans · 5m/15m/1h", ""]
+    lines = [f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}", f"🔎 {len(cands)} liquid coins · {len(tasks)} timeframe scans · 5m/15m/1h", ""]
     for i, r in enumerate(fresh, 1):
         if i > 1: lines.append("")
         lines.extend([f"<b>#{i}</b>" + (" ⭐" if r.get("star") else "")]); lines.extend(_signal_message(r))
-    if fired_alerts:
-        lines.extend(["", "🔔 <b>PRICE ALERTS</b>"]); lines.extend(fired_alerts[:6])
-    lines.extend(["", "━━━━━━━━━━━━━━━━━━━━",
-                  "Potential = model target, not guaranteed profit. Historical win rate will be added from real backtests.",
-                  "24h volume is a liquidity filter only; BUY requires multi-factor confirmation."])
-    log(f"[BUY] {len(fresh)} signals from {len(tasks)} scans")
+    if fired_alerts: lines.extend(["", "🔔 <b>PRICE ALERTS</b>"]); lines.extend(fired_alerts[:6])
+    lines.extend(["", "━━━━━━━━━━━━━━━━━━━━", "Potential = model target, not guaranteed profit. Historical win rate will be added from real backtests.", "24h volume is a liquidity filter only; BUY requires multi-factor confirmation."])
+    log(f"[BUY] {len(fresh)} signals from {len(tasks)} scans"); telegram_msg(token, chat_id, "\n".join(lines)); return True
+
+def run_daily(token, chat_id):
+    cfg = load_cfg(); fng, fngc = sentiment.fear_greed(); btc_dom, eth_dom, total_mcap = sentiment.btc_dominance(); fng_nudge = (fng - 50) / 50 * 3.0 if fng is not None else 0.0
+    t24 = fetch_binance_24h(); q = crypto_quote(t24); pool = [sym for sym, qv in sorted(q.items(), key=lambda kv: -kv[1]) if qv >= cfg.get("min_daily_qv", 1500000)]; top = pool[:int(cfg.get("daily_scan_top", 80))]
+    star = {str(w).upper() for w in cfg.get("watchlist", [])}; star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
+    for e in sorted(star - set(top)):
+        if q.get(e, 0) >= int(cfg.get("min_daily_qv", 1500000)) * 0.5: top.append(e)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex: res = [r for r in ex.map(lambda c: analyze_coin_daily(c, fng_nudge), top) if r]
+    res = [r for r in res if r["rating"] in ("BUY", "STRONG BUY")]; res.sort(key=lambda r: -r["score"]); res = res[:int(cfg.get("daily_top_n", 20))]
+    for r in res:
+        try: store_mod.daily_log(r["coin"], r["score"], r["rating"], r["price"], r["chg"], r["rsi"], r["vol_x"], r.get("qv"))
+        except Exception as e: log("DAILY", "daily_log error:", e)
+    try: positions_mod.open_picks(res, cfg)
+    except Exception as e: log("DAILY", "positions error:", e)
+    news_targets = {r["coin"] for r in res[:int(cfg.get("daily_news_top", 8))]} | {"BTC", "ETH"} | {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", [])}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex: nn = dict(zip(news_targets, ex.map(lambda s: sentiment.news_score(s), news_targets)))
+    news = {k: v for k, v in nn.items() if v and v[0] not in ("?", "No news")}; holdings_rows = portfolio_mod.portfolio_rows(cfg.get("holdings", [])); fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
+    sb = [r for r in res if r["rating"] == "STRONG BUY"]; b = [r for r in res if r["rating"] == "BUY"]; lines = [f"📈 <b>CRYPTO DAILY REPORT</b> · {now_s()}"]
+    mkt = f"🌐 Binance · {len(top)} crypto assets scanned (volume > ${cfg.get('min_daily_qv', 1500000)/1e6:.1f}M)"
+    if fng is not None: mkt = f"🌀 Fear&Greed <b>{fng}</b> ({esc(fngc)}) · {mkt}"
+    if btc_dom: mkt += f" · BTC dom {btc_dom:.1f}%"
+    if total_mcap: mkt += f" · MCap ${total_mcap/1e12:.2f}T"
+    lines += [mkt, ""]
+    def row(i, r, badge):
+        ns = ""
+        if r["coin"] in news: ns = f" · {esc(news[r['coin']][0])}"
+        star_flag = " ⭐" if r["coin"] in star else ""; lines.append(f"{i:>2}. {badge} <b>{esc(r['coin'])}</b>{star_flag} {fmt_price(r['price'])} RSI {r['rsi']:.0f} vol×{r['vol_x']:.1f} {r['chg']:+.1f}% score {r['score']:.0f}{ns}")
+    lines.append(f"🔥 <b>STRONG BUY ({len(sb)})</b>")
+    for i, r in enumerate(sb, 1): row(i, r, "🟩")
+    lines.append(""); lines.append(f"👍 <b>BUY ({len(b)})</b>")
+    for i, r in enumerate(b, len(sb)+1): row(i, r, "🟨")
+    if holdings_rows: lines.extend(["", *portfolio_mod.format_portfolio(holdings_rows)])
+    if fired_alerts: lines.extend(["", "🔔 <b>PRICE ALERTS</b>", *fired_alerts[:6]])
+    lines.extend(["", "━━━━━━━━━━━━━━━━━━━━", f"{len(sb)} strong, {len(b)} buy across {len(pool)} crypto assets. Signals only — verify before trading."])
     telegram_msg(token, chat_id, "\n".join(lines)); return True
+
+def run_price(token, chat_id):
+    cfg = load_cfg(); fired, _ = alerts_mod.check_price_alerts(cfg)
+    if not fired: log("[PRICE] no alerts"); return False
+    telegram_msg(token, chat_id, "\n".join([f"🔔 <b>PRICE ALERTS</b> · {now_s()}", "", *fired[:10]])); return True
+
+def run_backtest(token, chat_id):
+    text = backtest_mod.run_backtest(load_cfg()); telegram_msg(token, chat_id, text); return True
+
+def run_portfolio(token, chat_id):
+    cfg = load_cfg(); rows = portfolio_mod.portfolio_rows(cfg.get("holdings", [])); telegram_msg(token, chat_id, "\n".join([f"💰 <b>CRYPTO PORTFOLIO</b> · {now_s()}", *portfolio_mod.format_portfolio(rows)])); return True
+
+def run_check(token, chat_id):
+    cfg = load_cfg(); sent = 0
+    try: sent = positions_mod.check_positions(token, chat_id, cfg)
+    except Exception as e: log("CHECK", "positions error:", e)
+    try:
+        fu = store_mod.followup_spreads(hours_back=6, threshold=cfg.get("spread_alert_pct", 8.0))
+        if fu and token and chat_id:
+            lines = [f"🔄 <b>SPREAD FOLLOW-UP (6h)</b> · {now_s()}", ""]
+            for coin, ts, net, still in fu[-8:]: lines.append(f"   {coin} net {net:+.2f}% · {'open' if still else 'closed'} · alert {ts[11:16]}")
+            telegram_msg(token, chat_id, "\n".join(lines)); sent += 1
+    except Exception as e: log("CHECK", "followup error:", e)
+    return sent > 0
+
+def run_report(fmt):
+    text = store_mod.build_report_text()
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open("state/report.html", "w", encoding="utf-8") as f: f.write(store_mod.build_report_html())
+    except Exception as e: log("REPORT", "html write error:", e)
+    print(text); return text
+
+MODES = ["arb", "daily", "buy", "price", "backtest", "portfolio", "check", "report", "all"]
+
+def main():
+    ap = ArgumentParser(); ap.add_argument("--mode", choices=MODES, default="buy"); ap.add_argument("--all", action="store_true")
+    ap.add_argument("--report-format", choices=["text", "html"], default="text"); ap.add_argument("--json-logs", action="store_true")
+    args = ap.parse_args()
+    if args.json_logs: set_json_logs(True)
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", ""); chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    mode = "all" if args.all else args.mode
+    if mode == "report": run_report(args.report_format); return
+    if not token or not chat_id: print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"); sys.exit(1)
+    os.makedirs(STATE_DIR, exist_ok=True)
+    if mode == "all": run_daily(token, chat_id); run_buy(token, chat_id)
+    elif mode == "daily": run_daily(token, chat_id)
+    elif mode == "buy": run_buy(token, chat_id)
+    elif mode == "arb": run_arb(token, chat_id)
+    elif mode == "price": run_price(token, chat_id)
+    elif mode == "backtest": run_backtest(token, chat_id)
+    elif mode == "portfolio": run_portfolio(token, chat_id)
+    elif mode == "check": run_check(token, chat_id)
+
+if __name__ == "__main__": main()
