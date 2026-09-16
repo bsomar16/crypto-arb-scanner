@@ -122,14 +122,13 @@ class TwoLegExecutor:
             raise RuntimeError(f"destination exchange does not expose validated network {asset}/{network}")
         if not bool(getattr(destination_network, "deposit_enabled", False)):
             raise RuntimeError(f"destination deposit is disabled for {asset}/{network}")
-        if bool(getattr(destination_network, "memo_required", False)):
-            # Current adapter contract does not guarantee memo/tag retrieval.
-            # Refuse the transfer rather than risking an irreversible loss.
-            raise RuntimeError(f"destination requires memo/tag for {asset}/{network}; transfer blocked")
 
         balances = source_adapter.get_spot_balances()
         available = float(balances.get(asset.upper(), 0) or 0)
         fee = max(0.0, float(getattr(source_network, "withdrawal_fee", 0) or 0))
+        # Do not silently consume pre-existing inventory or assume the trading
+        # fee was paid in quote currency. The filled base quantity must still
+        # be available plus the withdrawal fee before submission.
         if available + 1e-12 < amount + fee:
             raise RuntimeError(
                 f"insufficient source balance for transfer plus withdrawal fee: "
@@ -157,12 +156,17 @@ class TwoLegExecutor:
                                       asset, network, coordinator.intent.filled_qty)
         details = destination_adapter.get_deposit_details(asset, network)
         address = str(details.get("address", ""))
+        memo = str(details.get("memo") or "")
+        memo_type = str(details.get("memo_type") or "")
+        destination_requires_memo = bool(getattr(self._network(destination_adapter.get_networks(asset), network), "memo_required", False))
         if not address:
             return self._fail_transfer(execution_intent, coordinator, "destination did not return a deposit address")
-        # Memo/tag-required routes are blocked above until adapters can provide
-        # the destination tag through the provider-neutral contract.
+        if destination_requires_memo and not memo:
+            return self._fail_transfer(execution_intent, coordinator, "destination requires memo/tag but did not return one")
+
         transfer_id = "tr-" + uuid.uuid4().hex
         raw = source_adapter.withdraw_spot(asset, coordinator.intent.filled_qty, address, network,
+                                           memo=memo or None, memo_type=memo_type or None,
                                            client_withdrawal_id=transfer_id)
         provider_id = str(raw.get("id") or raw.get("withdrawalId") or raw.get("txId") or transfer_id)
         now = int(time.time() * 1000)
@@ -172,10 +176,10 @@ class TwoLegExecutor:
             created_ms=now, updated_ms=now))
         coordinator.accept_transfer(TransferStatus(provider_id, "SUBMITTED", coordinator.intent.filled_qty))
         self.engine.sync_two_leg_state(execution_intent, coordinator.intent.state.value)
-        self._journal_transition(execution_intent, before, coordinator.intent.state.value, leg="transfer", transfer_id=provider_id)
+        self._journal_transition(execution_intent, before, coordinator.intent.state.value, leg="transfer", transfer_id=provider_id, memo_type=memo_type)
         trade_journal.record("transfer_submitted", execution_intent.id, asset=asset.upper(), amount=coordinator.intent.filled_qty,
                              source_exchange=execution_intent.buy_exchange, destination_exchange=execution_intent.sell_exchange,
-                             network=network, transfer_id=provider_id, mode="live")
+                             network=network, transfer_id=provider_id, memo_type=memo_type, mode="live")
         return coordinator.intent.state
 
     def confirm_transfer(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, transfer_id: str, *,
