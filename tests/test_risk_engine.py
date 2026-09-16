@@ -26,7 +26,9 @@ class RiskEngineTests(unittest.TestCase):
 
     def test_suggested_notional_respects_cap(self):
         cfg = {"risk_per_trade_pct": 1.0, "max_position_notional_usdt": 300}
-        self.assertAlmostEqual(risk_engine.suggested_notional(100, 95, 10000, cfg), 200.0)
+        # 1% of 10,000 USDT is 100 USDT risk. A 5% stop permits
+        # 2,000 USDT notional by risk sizing, so the 300 USDT hard cap wins.
+        self.assertAlmostEqual(risk_engine.suggested_notional(100, 95, 10000, cfg), 300.0)
         self.assertAlmostEqual(risk_engine.suggested_notional(100, 99, 10000, cfg), 300.0)
 
 
