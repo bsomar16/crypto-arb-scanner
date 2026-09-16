@@ -35,6 +35,8 @@ class LegFill:
     filled_qty: float
     avg_price: float = 0.0
     fee_quote: float = 0.0
+    fee_amount: float = 0.0
+    fee_currency: str = ""
 
 
 @dataclass
@@ -62,7 +64,11 @@ class TwoLegIntent:
     transferred_qty: float = 0.0
     sell_filled_qty: float = 0.0
     buy_fee_quote: float = 0.0
+    buy_fee_amount: float = 0.0
+    buy_fee_currency: str = ""
     sell_fee_quote: float = 0.0
+    sell_fee_amount: float = 0.0
+    sell_fee_currency: str = ""
     error: Optional[str] = None
     events: list[str] = field(default_factory=list)
 
@@ -70,14 +76,10 @@ class TwoLegIntent:
 class TwoLegCoordinator:
     """Deterministic state machine; all exchange operations are external callbacks."""
 
-    def __init__(
-        self,
-        intent: TwoLegIntent,
-        persist: Optional[Callable[[TwoLegIntent], None]] = None,
-        revalidate_buy: Optional[Callable[[TwoLegIntent], bool]] = None,
-        revalidate_transfer: Optional[Callable[[TwoLegIntent], bool]] = None,
-        revalidate_sell: Optional[Callable[[TwoLegIntent], bool]] = None,
-    ):
+    def __init__(self, intent: TwoLegIntent, persist: Optional[Callable[[TwoLegIntent], None]] = None,
+                 revalidate_buy: Optional[Callable[[TwoLegIntent], bool]] = None,
+                 revalidate_transfer: Optional[Callable[[TwoLegIntent], bool]] = None,
+                 revalidate_sell: Optional[Callable[[TwoLegIntent], bool]] = None):
         self.intent = intent
         self.persist = persist
         self.revalidate_buy = revalidate_buy
@@ -117,6 +119,8 @@ class TwoLegCoordinator:
         self.intent.buy_order_id = fill.order_id
         self.intent.filled_qty = fill.filled_qty
         self.intent.buy_fee_quote = max(0.0, fill.fee_quote)
+        self.intent.buy_fee_amount = max(0.0, fill.fee_amount)
+        self.intent.buy_fee_currency = fill.fee_currency.upper()
         status = fill.status.upper()
         if status == "FILLED" and fill.filled_qty > 0:
             self.intent.state = LegState.BUY_FILLED
@@ -129,13 +133,17 @@ class TwoLegCoordinator:
         self._save("BUY:" + status)
         return self.intent.state
 
-    def begin_transfer(self) -> LegState:
+    def begin_transfer(self, amount: Optional[float] = None) -> LegState:
         if self.intent.state != LegState.BUY_FILLED:
             raise ValueError("transfer requires a fully filled buy leg")
         if self.intent.filled_qty <= 0:
             return self._fail("buy leg has no filled quantity")
         if not self._check(self.revalidate_transfer, "transfer"):
             return self.intent.state
+        transfer_amount = self.intent.filled_qty if amount is None else float(amount)
+        if transfer_amount <= 0 or transfer_amount > self.intent.filled_qty + 1e-12:
+            return self._fail("invalid transfer amount")
+        self.intent.transferred_qty = transfer_amount
         self.intent.state = LegState.TRANSFER_PENDING
         self._save("TRANSFER_SUBMITTED")
         return self.intent.state
@@ -151,8 +159,9 @@ class TwoLegCoordinator:
         if status in {"CONFIRMED", "COMPLETED"}:
             if not transfer.destination_balance_confirmed:
                 return self._fail("destination deposit/balance is not confirmed")
-            if transfer.amount + 1e-12 < self.intent.filled_qty:
-                return self._fail("confirmed transfer does not cover filled buy quantity")
+            expected = self.intent.transferred_qty
+            if transfer.amount + 1e-12 < expected:
+                return self._fail("confirmed transfer does not cover intended transferred quantity")
             self.intent.state = LegState.TRANSFER_CONFIRMED
         elif status in {"FAILED", "REJECTED", "CANCELED", "CANCELLED"}:
             return self._fail("transfer " + status.lower())
@@ -181,6 +190,8 @@ class TwoLegCoordinator:
         self.intent.sell_order_id = fill.order_id
         self.intent.sell_filled_qty = fill.filled_qty
         self.intent.sell_fee_quote = max(0.0, fill.fee_quote)
+        self.intent.sell_fee_amount = max(0.0, fill.fee_amount)
+        self.intent.sell_fee_currency = fill.fee_currency.upper()
         status = fill.status.upper()
         if status == "FILLED" and fill.filled_qty > 0:
             if abs(fill.filled_qty - max_qty) > max(1e-12, max_qty * 1e-8):
