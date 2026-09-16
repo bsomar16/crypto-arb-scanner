@@ -22,13 +22,11 @@ class ExecutionEngineTests(unittest.TestCase):
             confirmed = e.confirm(intent, True)
             self.assertEqual(confirmed.status, "DRY_RUN_CONFIRMED")
 
-    def test_spot_gate_rejects_derivatives(self):
+    def test_spot_gate_rejects_non_spot_requests_and_allows_spot(self):
         with tempfile.TemporaryDirectory() as d:
             e = ExecutionEngine({}, d)
             with self.assertRaises(ValueError):
-                e.validate_order("binance", "BTCUSDT", 1, "BUY", confirmed=True)
-            # The adapter contract itself is SPOT-only; this test ensures normal
-            # requests remain valid without enabling live execution.
+                e.validate_order("binance", "BTCUSDT", 1, "BUY", confirmed=True, market_type="FUTURES")
             e.validate_order("binance", "BTCUSDT", 0.01, "BUY", confirmed=True)
 
 
