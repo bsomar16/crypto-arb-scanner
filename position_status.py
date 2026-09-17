@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one position-tracking cycle with human-readable Telegram trade status."""
+"""Run one position-tracking cycle with lifecycle-only Telegram trade status."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,7 @@ import positions
 import signal_history
 import store
 import trade_journal
-from botutil import fmt_price, log, esc, env_float, telegram_msg, load_json, save_json
+from botutil import fmt_price, log, esc, env_float, telegram_msg
 
 
 def load_config():
@@ -26,16 +26,6 @@ def load_config():
 
 def _cfg_num(cfg, key, env_name, default):
     return env_float(env_name, cfg.get(key, default))
-
-
-def _status_due(position_id, now_ts, interval_minutes):
-    state = load_json(positions.STATUS_FILE, {}) or {}
-    last = float(state.get(position_id, 0) or 0)
-    due = now_ts - last >= max(1.0, float(interval_minutes)) * 60.0
-    if due:
-        state[position_id] = now_ts
-        save_json(positions.STATUS_FILE, state)
-    return due
 
 
 def _target_line(label, value, hit, closed=False):
@@ -70,7 +60,7 @@ def _status_message(pos, price, terminal_event=None):
         sl_suffix = "🛡️ *(Moved to Breakeven)*" if pos.get("sl_breakeven") else "⛔"
         target_closed = False
     else:
-        progress = "Waiting for Targets"
+        progress = "Target Hit"
         sl_suffix = "⛔"
         target_closed = False
 
@@ -145,9 +135,7 @@ def run_cycle(token, chat_id, cfg):
         return 0
 
     expiry_days = _cfg_num(cfg, "position_expiry_days", "POSITION_EXPIRY_DAYS", 14.0)
-    status_interval = _cfg_num(cfg, "position_status_interval_minutes", "POSITION_STATUS_INTERVAL_MINUTES", 15.0)
     now = datetime.now(timezone.utc)
-    now_ts = now.timestamp()
     keep = []
     emitted = 0
 
@@ -200,9 +188,6 @@ def run_cycle(token, chat_id, cfg):
                 emitted += 1
 
         if pos.get("status") == "open":
-            if _status_due(pos["position_id"], now_ts, status_interval):
-                _send(token, chat_id, _status_message(pos, price))
-                emitted += 1
             keep.append(pos)
 
     positions.save(keep)
