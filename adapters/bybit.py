@@ -1,95 +1,58 @@
 #!/usr/bin/env python3
-"""Bybit V5 authenticated SPOT adapter.
-
-Every trade request pins category=spot and isLeverage=0. No derivatives or
-margin parameters are exposed through this adapter.
-"""
+"""Authenticated Bybit SPOT adapter."""
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import os
-import time
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from typing import Any, Dict, Optional
 
-from exchange_adapter import ExchangeAdapter, NetworkInfo, SpotMarket
 from execution_guard import ExecutionRequest, validate_spot_request
-from .http import request_json
+from exchange_adapter import ExchangeAdapter, NetworkInfo, SpotMarket
 
 
 class BybitSpotAdapter(ExchangeAdapter):
     name = "bybit"
 
-    def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None,
-                 base_url: str = "https://api.bybit.com") -> None:
-        self.api_key = api_key or os.getenv("BYBIT_API_KEY", "")
-        self.api_secret = api_secret or os.getenv("BYBIT_API_SECRET", "")
-        self.base_url = base_url.rstrip("/")
-        self.recv_window = os.getenv("BYBIT_RECV_WINDOW", "5000")
+    def _result(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        if int(response.get("retCode", -1)) != 0:
+            raise RuntimeError(f"Bybit API error: {response.get('retMsg', response)}")
+        return response.get("result") or {}
 
-    def _private(self, method: str, path: str, *, params: Optional[Dict[str, Any]] = None,
-                 body: Optional[Dict[str, Any]] = None) -> Any:
-        if not self.api_key or not self.api_secret:
-            raise RuntimeError("Bybit API credentials are not configured")
-        method = method.upper()
-        timestamp = str(int(time.time() * 1000))
-        if method == "GET":
-            query = urlencode({k: v for k, v in (params or {}).items() if v is not None})
-            payload = timestamp + self.api_key + self.recv_window + query
-        else:
-            body_text = json.dumps(body or {}, separators=(",", ":"))
-            payload = timestamp + self.api_key + self.recv_window + body_text
-        signature = hmac.new(self.api_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-        headers = {"X-BAPI-API-KEY": self.api_key, "X-BAPI-TIMESTAMP": timestamp,
-                   "X-BAPI-RECV-WINDOW": self.recv_window, "X-BAPI-SIGN": signature,
-                   "Content-Type": "application/json"}
-        return request_json(method, self.base_url + path, params=params, body=body, headers=headers)
-
-    @staticmethod
-    def _result(data: Any) -> Any:
-        if data.get("retCode") != 0:
-            raise RuntimeError(f"Bybit API error {data.get('retCode')}: {data.get('retMsg')}")
-        return data.get("result", {})
-
-    def get_spot_markets(self) -> List[SpotMarket]:
-        result = self._result(request_json("GET", self.base_url + "/v5/market/instruments-info", params={"category": "spot"}))
+    def get_spot_markets(self) -> list[SpotMarket]:
+        result = self._public("GET", "/v5/market/instruments-info", params={"category": "spot"})
+        rows = result.get("result", {}).get("list", []) if isinstance(result, dict) else []
         out = []
-        for r in result.get("list", []):
-            if r.get("status") != "Trading":
+        for row in rows:
+            if str(row.get("status", "")).upper() != "TRADING":
                 continue
-            pf = r.get("lotSizeFilter", {})
-            price = r.get("priceFilter", {})
+            price = row.get("priceFilter", {})
+            lot = row.get("lotSizeFilter", {})
             out.append(SpotMarket(
-                r["symbol"], r["baseCoin"], r["quoteCoin"],
-                float(pf.get("minOrderQty", 0) or 0),
-                float(pf.get("minOrderAmt", 0) or 0),
-                float(pf.get("qtyStep", 0) or 0),
+                row["symbol"], row.get("baseCoin", ""), row.get("quoteCoin", ""),
+                float(lot.get("minOrderQty", 0) or 0),
+                float(lot.get("minOrderAmt", 0) or 0),
+                float(lot.get("qtyStep", 0) or 0),
                 float(price.get("tickSize", 0) or 0),
             ))
         return out
 
-    def get_order_book(self, symbol: str, depth: int = 20) -> Dict[str, Any]:
-        return self._result(request_json("GET", self.base_url + "/v5/market/orderbook", params={"category": "spot", "symbol": symbol.upper(), "limit": min(depth, 200)}))
+    def get_order_book(self, symbol: str, depth: int = 50) -> Dict[str, Any]:
+        return self._public("GET", "/v5/market/orderbook", params={
+            "category": "spot", "symbol": symbol.upper(), "limit": depth,
+        })
 
     def get_spot_balances(self) -> Dict[str, float]:
         result = self._result(self._private("GET", "/v5/account/wallet-balance", params={"accountType": "UNIFIED"}))
-        out: Dict[str, float] = {}
-        for coin in (result.get("list") or [{}])[0].get("coin", []):
-            value = float(coin.get("walletBalance", 0) or 0) - float(coin.get("spotBorrow", 0) or 0)
-            if value > 0:
-                out[coin["coin"]] = value
-        return out
+        rows = result.get("list", [])
+        if not rows:
+            return {}
+        return {str(c.get("coin", "")).upper(): float(c.get("walletBalance", 0) or 0) for c in rows[0].get("coin", [])}
 
     def get_trading_fee(self, symbol: str) -> float:
         result = self._result(self._private("GET", "/v5/account/fee-rate", params={"category": "spot", "symbol": symbol.upper()}))
         rows = result.get("list", [])
-        if not rows:
-            raise RuntimeError("Bybit did not return a spot fee")
-        return float(rows[0].get("takerFeeRate", 0)) * 100.0
+        return abs(float(rows[0].get("takerFeeRate", 0) or 0)) * 100 if rows else 0.0
 
-    def get_networks(self, asset: str) -> List[NetworkInfo]:
+    def get_networks(self, asset: str) -> list[NetworkInfo]:
         result = self._result(self._private("GET", "/v5/asset/coin/query-info", params={"coin": asset.upper()}))
         rows = result.get("rows", [])
         if not rows:
@@ -101,7 +64,7 @@ class BybitSpotAdapter(ExchangeAdapter):
             out.append(NetworkInfo(
                 network,
                 c.get("chainDeposit") == "1",
-                c.get("chainWithdraw") == "1",
+                c.get("chainWithdraw") == "1',
                 float(c.get("withdrawFee", 0) or 0),
                 float(c.get("withdrawMin", 0) or 0),
                 tag_required,
@@ -138,7 +101,18 @@ class BybitSpotAdapter(ExchangeAdapter):
         return self._result(self._private("POST", "/v5/order/create", body=body))
 
     def get_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        result = self._result(self._private("GET", "/v5/order/history", params={"category": "spot", "symbol": symbol.upper(), "orderId": order_id}))
+        # Bybit documents the realtime endpoint for current/unfilled state and
+        # order history for older/closed records. Query realtime first, then
+        # fall back to history because API propagation can be asynchronous.
+        result = self._result(self._private("GET", "/v5/order/realtime", params={
+            "category": "spot", "symbol": symbol.upper(), "orderId": order_id,
+        }))
+        rows = result.get("list", [])
+        if rows:
+            return rows[0]
+        result = self._result(self._private("GET", "/v5/order/history", params={
+            "category": "spot", "symbol": symbol.upper(), "orderId": order_id,
+        }))
         rows = result.get("list", [])
         return rows[0] if rows else {}
 
