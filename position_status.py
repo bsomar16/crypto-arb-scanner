@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from copy import deepcopy
 from datetime import datetime, timezone
 
 import position_state
@@ -50,35 +49,37 @@ def _target_line(label, value, hit, closed=False):
 def _status_message(pos, price, terminal_event=None):
     entry = float(pos.get("entry") or 0)
     pct = (price / entry - 1) * 100 if entry else 0.0
-    positive = pct >= 0
-    pnl_icon = "🟩" if positive else "🟥"
-    pnl_emoji = "🚀" if positive else "🛑"
+    pnl_icon = "🟩" if pct >= 0 else "🟥"
+    pnl_emoji = "🚀" if pct >= 0 else "🛑"
     coin = esc(pos.get("coin", "?"))
 
-    closed = terminal_event in {"sl", "expired"}
     if terminal_event == "sl":
-        title = "Trade Status"
-        sl_label = "💥 *(Stopped Out)*"
-    elif terminal_event == "expired":
-        title = "Trade Status"
-        sl_label = "⏰ *(Expired)*"
-    elif pos.get("tp1_hit"):
-        title = "Trade Status"
-        sl_label = "🛡️ *(Moved to Breakeven)*" if pos.get("sl_breakeven") else "⛔"
-    else:
-        title = "Trade Status"
-        sl_label = "⛔"
-
-    if terminal_event == "sl":
+        progress = "Stopped Out"
+        sl_suffix = "💥 *(Stopped Out)*"
         target_closed = True
+    elif terminal_event == "expired":
+        progress = "Expired"
+        sl_suffix = "⏰ *(Expired)*"
+        target_closed = True
+    elif pos.get("tp3_hit"):
+        progress = "All Targets Hit"
+        sl_suffix = "🛡️ *(Moved to Breakeven)*" if pos.get("sl_breakeven") else "⛔"
+        target_closed = False
+    elif pos.get("tp1_hit"):
+        progress = "TP1 Hit — Waiting for TP2 / TP3"
+        sl_suffix = "🛡️ *(Moved to Breakeven)*" if pos.get("sl_breakeven") else "⛔"
+        target_closed = False
     else:
+        progress = "Waiting for Targets"
+        sl_suffix = "⛔"
         target_closed = False
 
     return (
-        f"📊 <b>${coin} {title}</b>\n"
+        f"📊 <b>${coin} Trade Status</b>\n"
+        f"<b>Current Status:</b> {progress}\n"
         f"{pnl_icon} <b>P&L:</b> {pct:+.2f}% {pnl_emoji}\n\n"
         f"<b>Entry:</b> {fmt_price(entry)} ➡️ <b>Now:</b> {fmt_price(price)}\n"
-        f"<b>SL:</b> {fmt_price(pos.get('sl'))} {sl_label}\n\n"
+        f"<b>SL:</b> {fmt_price(pos.get('sl'))} {sl_suffix}\n\n"
         f"<b>🎯 Targets:</b>\n"
         f"{_target_line('TP1', pos.get('tp1'), bool(pos.get('tp1_hit')), target_closed)}\n"
         f"{_target_line('TP2', pos.get('tp2'), bool(pos.get('tp2_hit')), target_closed)}\n"
@@ -184,21 +185,18 @@ def run_cycle(token, chat_id, cfg):
             signal_history.record_outcome(pos, "LOSS", price)
             continue
 
-        lifecycle_message = None
         for event, level in (("tp1", pos.get("tp1")), ("tp2", pos.get("tp2")), ("tp3", pos.get("tp3"))):
             if level is None:
                 continue
             if price >= float(level) and not pos.get(f"{event}_hit"):
                 _apply_tp(pos, event, price)
-                lifecycle_message = _status_message(pos, price)
                 if event == "tp3":
                     _close(pos, "closed_tp3", price, now, "WIN")
-                    _send(token, chat_id, lifecycle_message)
+                    _send(token, chat_id, _status_message(pos, price))
                     emitted += 1
                     signal_history.record_outcome(pos, "WIN", price)
-                    lifecycle_message = None
                     break
-                _send(token, chat_id, lifecycle_message)
+                _send(token, chat_id, _status_message(pos, price))
                 emitted += 1
 
         if pos.get("status") == "open":
