@@ -3,12 +3,12 @@
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-
 JSON_LOGS = False
 
 
@@ -95,9 +95,77 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=1)
 
 
+def _format_buy_message(text):
+    """Convert the legacy BUY block into the compact signal format used by Telegram."""
+    if "<b>CRYPTO BUY SIGNALS</b>" not in text:
+        return text
+    lines = text.splitlines()
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if re.fullmatch(r"<b>\#\d+</b>(?: ⭐)?", line.strip()):
+            block = []
+            j = i + 1
+            while j < len(lines) and not re.fullmatch(r"<b>\#\d+</b>(?: ⭐)?", lines[j].strip()):
+                if lines[j].startswith("🔔 <b>PRICE ALERTS</b>") or lines[j].startswith("━━━━━━━━"):
+                    break
+                block.append(lines[j])
+                j += 1
+            joined = "\n".join(block)
+            m = re.search(r"🚀 <b>([^<]+)</b> · ([^·]+) · ([^\n]+)", joined)
+            if not m:
+                i = j
+                continue
+            coin, kind, interval = m.groups()
+            setup = re.search(r"Setup: <b>([^<]+)</b>", joined)
+            entry = re.search(r"Entry: <b>([^<]+)</b>", joined)
+            stop = re.search(r"Stop: ([^\n]+)", joined)
+            t1 = re.search(r"T1: ([^ ]+)", joined)
+            t2 = re.search(r"T2: ([^ ]+)", joined)
+            t3 = re.search(r"T3: ([^\n]+)", joined)
+            metrics = re.search(r"Potential: <b>\+?([^<]+)</b> · Risk: ([^ ]+) · R:R ([^\n]+)", joined)
+            score = re.search(r"Score: <b>([^<]+)</b> · RSI ([^ ]+) · volume ×([^ ]+) · 24h ([^\n]+)", joined)
+            why = re.search(r"Why: ([^\n]+)", joined)
+            if not (entry and stop and t1 and t2 and t3 and metrics and score):
+                i = j
+                continue
+            out.extend([
+                f"🟢 <b>CONFIRMED BUY SIGNAL | ${coin}</b> 🚀",
+                f"⏱️ <b>{kind.strip().title()} ({interval.strip()})</b> | ⚡ <b>Setup:</b> {setup.group(1) if setup else 'Momentum'}",
+                "",
+                "<b>Action:</b> 🟢 BUY",
+                f"<b>Entry:</b> {entry.group(1)}",
+                f"<b>SL:</b> {stop.group(1)} ⛔",
+                "",
+                "🎯 <b>Targets:</b>",
+                f"⏳ <b>TP1:</b> {t1.group(1)}",
+                f"⏳ <b>TP2:</b> {t2.group(1)}",
+                f"⏳ <b>TP3:</b> {t3.group(1)}",
+                "",
+                "📊 <b>Trade Metrics:</b>",
+                f"📈 <b>Potential:</b> +{metrics.group(1)} | 📉 <b>Risk:</b> {metrics.group(2)} | ⚖️ <b>R:R:</b> {metrics.group(3)}",
+                f"⭐ <b>Score:</b> {score.group(1)}",
+                "",
+                "🔍 <b>Technical Context:</b>",
+                f"• <b>Data:</b> RSI {score.group(2)} | Vol ×{score.group(3)} | 24h {score.group(4)} | 4h: {re.search(r'4h: ([^\\n]+)', joined).group(1) if re.search(r'4h: ([^\\n]+)', joined) else '?'}",
+                f"• <b>Why:</b> {why.group(1) if why else 'EMA structure &amp; MACD confirmation'}",
+            ])
+            if j < len(lines) and lines[j].startswith("🔔 <b>PRICE ALERTS</b>"):
+                i = j
+            else:
+                i = j
+            continue
+        i += 1
+    if not out:
+        return text
+    return "\n".join(out)
+
+
 def telegram_msg(token, chat_id, text):
     if not token or not chat_id:
         raise ValueError("missing telegram credentials")
+    text = _format_buy_message(text)
     if len(text) <= 4000:
         _send(token, chat_id, text)
         return
