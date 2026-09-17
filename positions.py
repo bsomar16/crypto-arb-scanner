@@ -12,8 +12,10 @@ import trade_journal
 import risk_engine
 
 POS_FILE = "state/positions.json"
+STATUS_FILE = "state/position_status.json"
 POSITION_EXPIRY_DEFAULT = 14
 MAX_OPEN_DEFAULT = 40
+STATUS_INTERVAL_DEFAULT = 15.0
 
 
 def _cfg_num(cfg, key, env_name, default):
@@ -228,13 +230,40 @@ def _close(pos, status, price, now, outcome):
                          exchange=pos.get("exchange"), order_id=pos.get("order_id"), mode=pos.get("mode", "paper"))
 
 
+def _status_due(position_id, now_ts, interval_minutes):
+    state = load_json(STATUS_FILE, {}) or {}
+    last = float(state.get(position_id, 0) or 0)
+    due = now_ts - last >= max(1.0, float(interval_minutes)) * 60.0
+    if due:
+        state[position_id] = now_ts
+        save_json(STATUS_FILE, state)
+    return due
+
+
+def _status_msg(pos, price):
+    entry = float(pos.get("entry") or 0)
+    pct = (price / entry - 1) * 100 if entry else 0.0
+    e = esc(pos.get("coin", "?"))
+    flags = []
+    if pos.get("tp1_hit"): flags.append("TP1✓")
+    if pos.get("tp2_hit"): flags.append("TP2✓")
+    if pos.get("tp3_hit"): flags.append("TP3✓")
+    progress = " · ".join(flags) if flags else "No TP hit"
+    return (f"📊 <b>TRADE STATUS · {e}</b>\n"
+            f"Entry: {fmt_price(entry)} · Now: {fmt_price(price)} · P&L: <b>{pct:+.2f}%</b>\n"
+            f"SL: {fmt_price(pos.get('sl'))} · TP1: {fmt_price(pos.get('tp1'))} · TP2: {fmt_price(pos.get('tp2'))} · TP3: {fmt_price(pos.get('tp3'))}\n"
+            f"Progress: {progress} · Mode: {esc(pos.get('mode','paper'))}")
+
+
 def check_positions(token, chat_id, cfg):
-    """Check tracked positions independently of signal scans."""
+    """Check tracked positions independently of signal scans and emit periodic status."""
     expiry_days = thresholds(cfg)["expiry_days"]
+    status_interval = _cfg_num(cfg, "position_status_interval_minutes", "POSITION_STATUS_INTERVAL_MINUTES", STATUS_INTERVAL_DEFAULT)
     positions = load()
     if not positions:
         return 0
     now = datetime.now(timezone.utc)
+    now_ts = now.timestamp()
     keep = []
     alerts = []
     for pos in positions:
@@ -274,6 +303,8 @@ def check_positions(token, chat_id, cfg):
                     signal_history.record_outcome(pos, "WIN", price)
                     break
         if pos.get("status") == "open":
+            if _status_due(pos["position_id"], now_ts, status_interval):
+                alerts.append(_status_msg(pos, price))
             keep.append(pos)
     save(keep)
     for msg in alerts:
