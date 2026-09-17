@@ -6,6 +6,7 @@ import json
 import os
 
 from botutil import log
+from position_state import migrate_positions
 from positions import check_positions
 
 
@@ -24,6 +25,9 @@ def main() -> int:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
     try:
+        migrated = migrate_positions()
+        if migrated:
+            log("POSITION_STATUS", f"migrated {migrated} legacy position field(s)")
         alerts = check_positions(token, chat_id, cfg)
         log("POSITION_STATUS", f"cycle complete; emitted {alerts} alert/status message(s)")
         return 0
