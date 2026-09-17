@@ -49,6 +49,21 @@ class SpotAdapterSafetyTests(unittest.TestCase):
             self.assertEqual(y.call_args.kwargs["params"]["category"], "spot")
             self.assertEqual(o.call_args.kwargs["params"]["instId"], "BTC-USDT")
 
+    def test_bybit_order_uses_realtime_then_history(self):
+        realtime = {"retCode": 0, "result": {"list": []}}
+        history = {"retCode": 0, "result": {"list": [{
+            "orderId": "123", "orderStatus": "Filled", "cumExecQty": "0.01",
+            "avgPrice": "100.5", "cumExecValue": "1.005",
+            "cumFeeDetail": {"USDT": "0.001"},
+        }]}}
+        adapter = BybitSpotAdapter("key", "secret")
+        with patch("adapters.bybit.request_json", side_effect=[realtime, history]) as request:
+            row = adapter.get_order("BTCUSDT", "123")
+        self.assertEqual(row["orderStatus"], "Filled")
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args_list[0].kwargs["params"], {"category": "spot", "orderId": "123"})
+        self.assertEqual(request.call_args_list[1].kwargs["params"], {"category": "spot", "orderId": "123"})
+
 
 if __name__ == "__main__":
     unittest.main()
