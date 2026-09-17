@@ -1,8 +1,10 @@
 name: Crypto Signal Bot
 
 on:
-  # Scheduling is handled externally by cron-job.org.
-  # Keep workflow_dispatch for manual/API-triggered runs.
+  # BUY signals and trade tracking run every 15 minutes.
+  # cron-job.org may still trigger the workflow manually; disable the old hourly BUY job there to avoid duplicate runs.
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -57,8 +59,8 @@ jobs:
 
   buy-signals:
     if: |
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'buy') ||
-      (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'all'))
     runs-on: ubuntu-latest
     concurrency:
       group: buy-scan
@@ -68,6 +70,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Run trade tracking/status cycle
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python position_status.py
       - name: Run multi-timeframe crypto BUY scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
