@@ -13,8 +13,11 @@ import trade_journal
 
 class FakeAdapter:
     def __init__(self, *, memo_required=False, memo="", balance=10.0, withdraw_fee=0.01, deposit_enabled=True, withdraw_enabled=True):
+        self.name = "binance"
         self.orders = {}
         self.withdrawals = []
+        self.withdraw_record = {}
+        self.deposit_record = {}
         self.memo_required = memo_required
         self.memo = memo
         self.balance = balance
@@ -48,8 +51,26 @@ class FakeAdapter:
                 "memo_type": "tag" if self.memo else ""}
 
     def withdraw_spot(self, asset, amount, address, network, *, memo=None, memo_type=None, client_withdrawal_id=None):
+        transfer_id = client_withdrawal_id or "withdraw-1"
         self.withdrawals.append((asset, amount, address, network, memo, memo_type))
-        return {"id": client_withdrawal_id or "withdraw-1"}
+        self.withdraw_record = {"id": transfer_id, "coin": asset, "network": network, "amount": str(amount),
+                                "status": 6, "txId": "tx1", "toAddress": address}
+        return {"id": transfer_id, "txId": "tx1"}
+
+    def _signed(self, method, path, params):
+        if "withdraw/history" in path:
+            return [self.withdraw_record] if self.withdraw_record else []
+        if "deposit/hisrec" in path:
+            return [self.deposit_record] if self.deposit_record else []
+        return []
+
+    def _private(self, method, path, params=None, body=None):
+        if "withdraw/query-record" in path or "deposit/query-record" in path:
+            return {"retCode": 0, "result": {"rows": []}}
+        return {"code": "0", "data": []}
+
+    def _request(self, method, path, params=None, body=None, auth=False):
+        return []
 
 
 class TwoLegExecutorTests(unittest.TestCase):
@@ -92,7 +113,13 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.assertIsNotNone(tid)
         with self.assertRaises(ValueError):
             self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=False)
-        self.assertEqual(self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=True), LegState.TRANSFER_CONFIRMED)
+        with self.assertRaises(ValueError):
+            self.executor.confirm_transfer(self.intent, self.coordinator, tid, destination_balance_confirmed=True)
+        destination.deposit_record = {"id": "d1", "coin": "SOL", "network": "SOL", "amount": "1", "status": 1,
+                                     "txId": "tx1", "address": "destination-address"}
+        state, result = self.executor.reconcile_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL", tid)
+        self.assertEqual(result.status, "COMPLETED")
+        self.assertEqual(state, LegState.TRANSFER_CONFIRMED)
         self.assertEqual(self.executor.submit_sell(self.intent, self.coordinator, destination, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
 
     def test_base_asset_buy_fee_is_not_withdrawn(self):
@@ -161,5 +188,4 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.assertEqual(orders[-1]["executed_qty"], 1.0)
 
 
-if __name__ == "__main__":
-    unittest.main()
+if __name__ == "__main__": unittest.main()
