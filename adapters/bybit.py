@@ -128,7 +128,17 @@ class BybitSpotAdapter(ExchangeAdapter):
         return self._result(self._private("POST", "/v5/order/create", body=body))
 
     def get_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        result = self._result(self._private("GET", "/v5/order/history", params={"category": "spot", "symbol": symbol.upper(), "orderId": order_id}))
+        # Realtime lookup is the fast path. For Spot, orderId is supported while
+        # symbol is not a realtime filter; history is the durable fallback.
+        result = self._result(self._private("GET", "/v5/order/realtime", params={
+            "category": "spot", "orderId": str(order_id),
+        }))
+        rows = result.get("list", [])
+        if rows:
+            return rows[0]
+        result = self._result(self._private("GET", "/v5/order/history", params={
+            "category": "spot", "orderId": str(order_id),
+        }))
         rows = result.get("list", [])
         return rows[0] if rows else {}
 
