@@ -6,14 +6,20 @@ class FakeAdapter:
         self.name=name; self.withdraw=withdraw or {}; self.deposit=deposit or {}
     def _signed(self, method, path, params):
         if 'withdraw/history' in path: return [self.withdraw]
-        return [self.deposit]
+        if 'deposit/hisrec' in path: return [self.deposit]
+        return [self.withdraw]
     def _private(self, method, path, params=None, body=None):
         if 'withdraw/query-record' in path: return {'retCode':0,'result':{'rows':[self.withdraw]}}
         if 'deposit/query-record' in path: return {'retCode':0,'result':{'rows':[self.deposit]}}
         if 'withdrawal-history' in path: return {'code':'0','data':[self.withdraw]}
-        return {'code':'0','data':[self.deposit]}
+        if 'deposit-history' in path: return {'code':'0','data':[self.deposit]}
+        return {'code':'0','data':[]}
     def _request(self, method, path, params=None, body=None, auth=False):
-        return [self.withdraw if 'withdrawal-records' in path else self.deposit]
+        if 'withdrawal-records' in path: return [self.withdraw]
+        if 'deposit-records' in path: return [self.deposit]
+        if 'withdraw/history' in path: return [self.withdraw]
+        if 'deposit/hisrec' in path: return [self.deposit]
+        return []
 
 class TestTransferReconciliation(unittest.TestCase):
     def test_binance_completed_transfer(self):
