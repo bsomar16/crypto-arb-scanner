@@ -23,7 +23,7 @@ def normalize_order_status(raw: dict) -> str:
     mapping = {
         "NEW": "OPEN", "OPEN": "OPEN", "LIVE": "OPEN", "ACTIVE": "OPEN",
         "PARTIALLY_FILLED": "PARTIAL", "PARTIALLYFILLED": "PARTIAL", "PARTIAL": "PARTIAL",
-        "FILLED": "FILLED", "FULLY_FILLED": "FILLED",
+        "FILLED": "FILLED", "FULLY_FILLED": "FILLED", "FULL-FILL": "FILLED", "FULL_FILL": "FILLED",
         "CANCELED": "CANCELLED", "CANCELLED": "CANCELLED", "CANCEL": "CANCELLED",
         "REJECTED": "REJECTED", "EXPIRED": "EXPIRED", "EXPIRE": "EXPIRED",
     }
