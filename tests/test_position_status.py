@@ -7,14 +7,15 @@ import position_status
 
 class PositionStatusTests(unittest.TestCase):
     @patch.object(position_status, "check_positions", return_value=2)
-    def test_main_runs_one_tracking_cycle(self, check):
+    @patch.object(position_status, "load_config", return_value={"position_status_interval_minutes": 15})
+    def test_main_runs_one_tracking_cycle(self, _cfg, check):
         old_token = os.environ.get("TELEGRAM_BOT_TOKEN")
         old_chat = os.environ.get("TELEGRAM_CHAT_ID")
         os.environ["TELEGRAM_BOT_TOKEN"] = "test"
         os.environ["TELEGRAM_CHAT_ID"] = "123"
         try:
             self.assertEqual(position_status.main(), 0)
-            check.assert_called_once_with("test", "123", {})
+            check.assert_called_once_with("test", "123", {"position_status_interval_minutes": 15})
         finally:
             if old_token is None:
                 os.environ.pop("TELEGRAM_BOT_TOKEN", None)
