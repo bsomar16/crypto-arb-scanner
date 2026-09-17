@@ -8,6 +8,7 @@ import os
 import time
 
 from botutil import log
+from position_state import migrate_positions
 from positions import check_positions
 
 
@@ -37,6 +38,9 @@ def main() -> int:
 
     while True:
         try:
+            migrated = migrate_positions()
+            if migrated:
+                log("POSITIONS", f"migrated {migrated} legacy position field(s)")
             alerts = check_positions(token, chat_id, cfg)
             if alerts:
                 log("POSITIONS", f"monitor emitted {alerts} lifecycle alert(s)")
