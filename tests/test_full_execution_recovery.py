@@ -56,6 +56,13 @@ class PaperAdapter:
         return []
 
     def _private(self, method, path, params=None, body=None):
+        if "deposit/query-record" in path:
+            rows = [self.deposit_record] if self.deposit_record else []
+            return {"retCode": 0, "result": {"rows": rows}}
+        if "withdraw/query-record" in path:
+            rows = [{"withdrawId": self.withdrawals[0][0], "coin": "SOL", "chain": "SOL", "amount": str(self.withdrawals[0][1]),
+                     "status": "success", "txID": "paper-tx", "toAddress": "paper-destination"}] if self.withdrawals else []
+            return {"retCode": 0, "result": {"rows": rows}}
         return {"retCode": 0, "result": {"rows": []}}
 
     def _request(self, method, path, params=None, body=None, auth=False):
@@ -97,14 +104,12 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         executor = TwoLegExecutor(engine, self.tmp.name)
         coordinator = executor.coordinator(intent, 3.0)
 
-        # BUY submission is persisted before restart and reconciled afterwards.
         self.assertEqual(executor.submit_buy(intent, coordinator, source, price=100, revalidate=lambda _: True), LegState.BUY_SUBMITTED)
         buy_id = coordinator.intent.buy_order_id
         self.assertEqual(len(source.orders), 1)
 
         engine2 = ExecutionEngine(self.cfg, self.tmp.name)
-        intent2 = engine2._intents[intent.id]
-        intent2 = type(intent)(**intent2)
+        intent2 = type(intent)(**engine2._intents[intent.id])
         executor2 = TwoLegExecutor(engine2, self.tmp.name)
         coordinator2 = executor2.coordinator(intent2, 3.0)
         self.assertEqual(coordinator2.intent.buy_order_id, buy_id)
@@ -113,7 +118,6 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.assertEqual(executor2.reconcile_buy(intent2, coordinator2, source), LegState.BUY_FILLED)
         self.assertEqual(coordinator2.intent.filled_qty, 3.0)
 
-        # Transfer submission is persisted and can be recovered without submitting twice.
         self.assertEqual(executor2.submit_transfer(intent2, coordinator2, source, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
         transfer_id = coordinator2.intent.transfer_id
         self.assertEqual(len(source.withdrawals), 1)
@@ -132,7 +136,6 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.assertEqual(result.status, "COMPLETED")
         self.assertEqual(state, LegState.TRANSFER_CONFIRMED)
 
-        # SELL submission is also idempotent through the stable client order id.
         self.assertEqual(executor3.submit_sell(intent3, coordinator3, destination, price=104, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
         sell_id = coordinator3.intent.sell_order_id
         self.assertEqual(len(destination.orders), 1)
