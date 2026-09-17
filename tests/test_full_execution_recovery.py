@@ -135,13 +135,27 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         state, result = executor3.reconcile_transfer(intent3, coordinator3, source, destination, "SOL", transfer_id)
         self.assertEqual(result.status, "COMPLETED")
         self.assertEqual(state, LegState.TRANSFER_CONFIRMED)
+        self.assertTrue(coordinator3.intent.destination_deposit_confirmed)
 
-        self.assertEqual(executor3.submit_sell(intent3, coordinator3, destination, price=104, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
-        sell_id = coordinator3.intent.sell_order_id
+        # Simulate a process restart after destination credit was independently confirmed.
+        engine4 = ExecutionEngine(self.cfg, self.tmp.name)
+        intent4 = type(intent)(**engine4._intents[intent.id])
+        executor4 = TwoLegExecutor(engine4, self.tmp.name)
+        coordinator4 = executor4.coordinator(intent4, 3.0)
+        self.assertEqual(coordinator4.intent.state, LegState.TRANSFER_CONFIRMED)
+        self.assertTrue(coordinator4.intent.destination_deposit_confirmed)
+        self.assertEqual(coordinator4.intent.transfer_id, transfer_id)
+
+        self.assertEqual(executor4.submit_sell(intent4, coordinator4, destination, price=104, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
+        sell_id = coordinator4.intent.sell_order_id
         self.assertEqual(len(destination.orders), 1)
-        self.assertEqual(executor3.submit_sell(intent3, coordinator3, destination, price=104, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
+        self.assertEqual(executor4.submit_sell(intent4, coordinator4, destination, price=104, revalidate=lambda _: True), LegState.SELL_SUBMITTED)
         self.assertEqual(len(destination.orders), 1)
-        self.assertEqual(sell_id, coordinator3.intent.sell_order_id)
+        self.assertEqual(sell_id, coordinator4.intent.sell_order_id)
+
+        destination.orders[sell_id].update({"status": "FILLED", "executedQty": 2.997, "avgPrice": 104.0,
+                                             "feeAmount": 0.001, "feeCurrency": "USDT"})
+        self.assertEqual(executor4.reconcile_sell(intent4, coordinator4, destination), LegState.COMPLETED)
 
     def test_no_sell_before_destination_credit(self):
         engine, intent = self._intent()
