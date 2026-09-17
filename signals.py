@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Crypto signal engine: multi-timeframe scalp + small-trade setups."""
+"""Crypto-only signal engine: multi-timeframe scalp + small-trade setups."""
 
 import indicators as ind
 from botutil import http_json
@@ -7,6 +7,17 @@ import signal_history
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
+
+# Strategy-specific BUY profiles. 24h volume remains a liquidity filter only.
+STRATEGY_PROFILES = {
+    "scalp_5m": {"kind": "Scalp", "interval": "5m", "min_vol_x": 1.35, "min_score": 62, "min_rr": 1.80, "stop_atr": 1.15, "target_atr": 3.0},
+    "scalp_15m": {"kind": "Scalp", "interval": "15m", "min_vol_x": 1.25, "min_score": 60, "min_rr": 1.70, "stop_atr": 1.40, "target_atr": 4.0},
+    "small_trade_1h": {"kind": "Small Trade", "interval": "1h", "min_vol_x": 1.15, "min_score": 58, "min_rr": 1.60, "stop_atr": 1.80, "target_atr": 5.5},
+}
+
+
+def strategy_profile(interval):
+    return next((p for p in STRATEGY_PROFILES.values() if p["interval"] == interval), None)
 
 
 def rating(s):
@@ -96,10 +107,14 @@ def _setup_type(price,resistance,support,e20,vol_ratio,macd_rising,rsi):
     return "MOMENTUM"
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=1.15, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=55, min_rr=1.5):
-    """Generate a 5m/15m/1h setup; 24h volume is a liquidity-universe filter, not a BUY trigger."""
-    if interval not in {"5m","15m","1h"}: return None
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None):
+    """Generate a strategy-specific 5m/15m scalp or 1h small-trade setup."""
+    profile = strategy_profile(interval)
+    if not profile: return None
     try:
+        effective_min_vol_x = profile["min_vol_x"] if min_vol_x is None else max(float(min_vol_x), profile["min_vol_x"])
+        effective_min_score = profile["min_score"] if min_score is None else max(float(min_score), profile["min_score"])
+        effective_min_rr = profile["min_rr"] if min_rr is None else max(float(min_rr), profile["min_rr"])
         data=_fetch_klines(coin,interval,limit)
         if not data: return None
         data=data[:-1]
@@ -107,7 +122,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=1.15, min_hour_vo
         if len(closes)<70 or (min_hour_vol and sum(qvols[-4:])<min_hour_vol): return None
         e9=ind.ema(closes,9); e20=ind.ema(closes,20); e21=ind.ema(closes,21); m,sig,hist=ind.macd(closes); r=ind.rsi(closes,14) or 50; a=ind.atr(highs,lows,closes) or closes[-1]*0.01; price=closes[-1]
         recent_vol=sum(vols[-2:])/2; base_vol=sum(vols[-22:-2])/20; vol_ratio=recent_vol/base_vol if base_vol>0 else 0
-        if vol_ratio<min_vol_x: return None
+        if vol_ratio<effective_min_vol_x: return None
         resistance=max(highs[-21:-1]); support=min(lows[-21:-1]); range_high=max(highs[-12:-1]); macd_rising=hist[-1]>hist[-2]; ema_bull=e9[-1]>e21[-1] and price>e20[-1]
         trend=_trend_filter(coin)
         if not trend: return None
@@ -132,13 +147,13 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=1.15, min_hour_vo
         score+=structure_score+trend["score"]
         reasons.append(f"4h {trend['state'].lower()}")
         score=max(0,min(100,score))
-        stop_dist=max({"5m":1.25,"15m":1.5,"1h":1.8}[interval]*a,price*0.006); stop=price-stop_dist; risk_pct=_pct(price,stop)
-        structure_target=resistance if resistance>price else range_high; volatility_target=price+{"5m":3,"15m":4,"1h":5}[interval]*a; target=max(structure_target,volatility_target); potential=_pct(target,price)
+        stop_dist=max(profile["stop_atr"]*a,price*0.006); stop=price-stop_dist; risk_pct=_pct(price,stop)
+        structure_target=resistance if resistance>price else range_high; volatility_target=price+profile["target_atr"]*a; target=max(structure_target,volatility_target); potential=_pct(target,price)
         if potential<min_potential_pct: return None
         potential=min(float(max_potential_pct),potential); target=price*(1+potential/100); rr=potential/risk_pct if risk_pct>0 else 0
-        if score<min_score or rr<min_rr: return None
+        if score<effective_min_score or rr<effective_min_rr: return None
         if trend["state"]=="BEARISH" and setup!="REVERSAL": return None
-        result={"coin":coin,"interval":interval,"price":price,"entry":price,"stop":stop,"t1":price+stop_dist,"t2":price+2*stop_dist,"t3":target,"target":target,"rsi":round(r,1),"vol_x":round(vol_ratio,2),"chg24":round(float(chg24 or 0),2),"st":round(score,1),"score":round(score,1),"potential_pct":round(potential,1),"risk_pct":round(risk_pct,2),"rr":round(rr,2),"atr":round(a,6),"resistance":resistance,"support":support,"setup_type":setup,"trend_4h":trend["state"],"e9_e21":e9[-1]>e21[-1],"macd_rising":macd_rising,"reasons":reasons}
+        result={"coin":coin,"interval":interval,"strategy":profile["kind"],"strategy_id":next(k for k,v in STRATEGY_PROFILES.items() if v is profile),"price":price,"entry":price,"stop":stop,"t1":price+stop_dist,"t2":price+2*stop_dist,"t3":target,"target":target,"rsi":round(r,1),"vol_x":round(vol_ratio,2),"chg24":round(float(chg24 or 0),2),"st":round(score,1),"score":round(score,1),"potential_pct":round(potential,1),"risk_pct":round(risk_pct,2),"rr":round(rr,2),"atr":round(a,6),"resistance":resistance,"support":support,"setup_type":setup,"trend_4h":trend["state"],"e9_e21":e9[-1]>e21[-1],"macd_rising":macd_rising,"reasons":reasons}
         stats=signal_history.comparable_stats(result, min_samples=20)
         result["historical_win_pct"]=stats["win_pct"]
         result["historical_sample"]=stats["sample"]
