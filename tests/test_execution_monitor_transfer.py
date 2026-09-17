@@ -21,13 +21,7 @@ class ExecutionMonitorTransferTests(unittest.TestCase):
         self.assertEqual(normalize_order_status({"state": "partially_filled"}), "PARTIAL")
 
     def test_reconcile_binance_order(self):
-        snap = reconcile_order(FakeAdapter({
-            "orderId": 101,
-            "status": "FILLED",
-            "executedQty": "1.25",
-            "cummulativeQuoteQty": "125.50",
-            "fills": [{"commission": "0.00125", "commissionAsset": "SOL"}],
-        }), "SOLUSDT", "101")
+        snap = reconcile_order(FakeAdapter({"orderId": 101, "status": "FILLED", "executedQty": "1.25", "cummulativeQuoteQty": "125.50", "fills": [{"commission": "0.00125", "commissionAsset": "SOL"}]}), "SOLUSDT", "101")
         self.assertEqual(snap.status, "FILLED")
         self.assertAlmostEqual(snap.executed_qty, 1.25)
         self.assertAlmostEqual(snap.executed_quote_qty, 125.50)
@@ -35,15 +29,7 @@ class ExecutionMonitorTransferTests(unittest.TestCase):
         self.assertEqual(snap.fee_currency, "SOL")
 
     def test_reconcile_bybit_order(self):
-        snap = reconcile_order(FakeAdapter({
-            "orderId": "b1",
-            "orderStatus": "PartiallyFilled",
-            "cumExecQty": "0.4",
-            "avgPrice": "100.25",
-            "cumExecValue": "40.10",
-            "cumExecFee": "0.0401",
-            "feeCurrency": "USDT",
-        }), "SOLUSDT", "b1")
+        snap = reconcile_order(FakeAdapter({"orderId": "b1", "orderStatus": "PartiallyFilled", "cumExecQty": "0.4", "avgPrice": "100.25", "cumExecValue": "40.10", "cumExecFee": "0.0401", "feeCurrency": "USDT"}), "SOLUSDT", "b1")
         self.assertEqual(snap.status, "PARTIAL")
         self.assertAlmostEqual(snap.executed_qty, 0.4)
         self.assertAlmostEqual(snap.avg_price, 100.25)
@@ -52,15 +38,7 @@ class ExecutionMonitorTransferTests(unittest.TestCase):
         self.assertEqual(snap.fee_currency, "USDT")
 
     def test_reconcile_okx_order(self):
-        snap = reconcile_order(FakeAdapter({
-            "ordId": "o1",
-            "state": "filled",
-            "accFillSz": "2",
-            "avgPx": "50.5",
-            "accFillValue": "101",
-            "fillFee": "0.02",
-            "fillFeeCcy": "USDT",
-        }), "SOL-USDT", "o1")
+        snap = reconcile_order(FakeAdapter({"ordId": "o1", "state": "filled", "accFillSz": "2", "avgPx": "50.5", "accFillValue": "101", "fillFee": "0.02", "fillFeeCcy": "USDT"}), "SOL-USDT", "o1")
         self.assertEqual(snap.status, "FILLED")
         self.assertAlmostEqual(snap.executed_qty, 2)
         self.assertAlmostEqual(snap.avg_price, 50.5)
@@ -69,16 +47,8 @@ class ExecutionMonitorTransferTests(unittest.TestCase):
         self.assertEqual(snap.fee_currency, "USDT")
 
     def test_reconcile_bitget_order(self):
-        snap = reconcile_order(FakeAdapter({
-            "orderId": "g1",
-            "status": "full-fill",
-            "baseVolume": "3",
-            "priceAvg": "20",
-            "quoteVolume": "60",
-            "fee": "0.03",
-            "feeCcy": "USDT",
-        }), "SOLUSDT", "g1")
-        self.assertEqual(snap.status, "UNKNOWN")
+        snap = reconcile_order(FakeAdapter({"orderId": "g1", "status": "full-fill", "baseVolume": "3", "priceAvg": "20", "quoteVolume": "60", "fee": "0.03", "feeCcy": "USDT"}), "SOLUSDT", "g1")
+        self.assertEqual(snap.status, "FILLED")
         self.assertAlmostEqual(snap.executed_qty, 3)
         self.assertAlmostEqual(snap.avg_price, 20)
         self.assertAlmostEqual(snap.executed_quote_qty, 60)
@@ -86,15 +56,7 @@ class ExecutionMonitorTransferTests(unittest.TestCase):
         self.assertEqual(snap.fee_currency, "USDT")
 
     def test_reconcile_mexc_order(self):
-        snap = reconcile_order(FakeAdapter({
-            "orderId": "m1",
-            "status": "FILLED",
-            "dealQuantity": "4",
-            "avgPrice": "10",
-            "dealAmount": "40",
-            "fee": "0.04",
-            "feeCurrency": "USDT",
-        }), "SOLUSDT", "m1")
+        snap = reconcile_order(FakeAdapter({"orderId": "m1", "status": "FILLED", "dealQuantity": "4", "avgPrice": "10", "dealAmount": "40", "fee": "0.04", "feeCurrency": "USDT"}), "SOLUSDT", "m1")
         self.assertEqual(snap.status, "FILLED")
         self.assertAlmostEqual(snap.executed_qty, 4)
         self.assertAlmostEqual(snap.avg_price, 10)
