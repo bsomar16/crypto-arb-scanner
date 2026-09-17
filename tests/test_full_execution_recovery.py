@@ -50,7 +50,7 @@ class PaperAdapter:
     def _signed(self, method, path, params):
         if "withdraw/history" in path:
             return [{"id": self.withdrawals[0][0], "coin": "SOL", "network": "SOL", "amount": str(self.withdrawals[0][1]),
-                     "status": 7, "txId": "paper-tx", "toAddress": "paper-destination"}] if self.withdrawals else []
+                     "status": 6, "txId": "paper-tx", "toAddress": "paper-destination"}] if self.withdrawals else []
         if "deposit/hisrec" in path:
             return [self.deposit_record] if self.deposit_record else []
         return []
@@ -130,7 +130,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.assertEqual(len(source.withdrawals), 1)
 
         destination.deposit_record = {"id": "deposit-1", "coin": "SOL", "network": "SOL",
-                                      "amount": "2.997", "status": 1, "txId": "paper-tx",
+                                      "amount": "2.997", "status": 3, "txId": "paper-tx",
                                       "address": "paper-destination"}
         state, result = executor3.reconcile_transfer(intent3, coordinator3, source, destination, "SOL", transfer_id)
         self.assertEqual(result.status, "COMPLETED")
