@@ -12,6 +12,7 @@ from execution_engine import ExecutionEngine, ExecutionIntent
 from execution_monitor import reconcile_order
 from order_constraints import OrderConstraintError, normalize_spot_order
 from transfer_tracker import Transfer, TransferTracker
+from transfer_reconciliation import ReconciliationResult, reconcile_transfer
 from two_leg_execution import LegFill, LegState, TransferStatus, TwoLegCoordinator, TwoLegIntent
 import trade_journal
 
@@ -223,20 +224,82 @@ class TwoLegExecutor:
                              network=network, transfer_id=provider_id, memo_type=memo_type, mode="live")
         return coordinator.intent.state
 
-    def confirm_transfer(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, transfer_id: str, *,
-                         destination_balance_confirmed: bool, status: str = "CONFIRMED",
-                         tx_hash: Optional[str] = None) -> LegState:
+    def reconcile_transfer(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator,
+                           source_adapter: Any, destination_adapter: Any, asset: str, transfer_id: str,
+                           *, expected_address: str = "", created_ms: int = 0) -> tuple[LegState, ReconciliationResult]:
+        """Poll both exchanges and release SELL only after independent credit confirmation."""
         transfer = self.transfers.transfers.get(transfer_id)
         if transfer is None:
             raise ValueError("unknown transfer id")
-        if status.upper() in {"CONFIRMED", "COMPLETED"} and not destination_balance_confirmed:
-            raise ValueError("destination balance confirmation is required")
-        if status.upper() in {"CONFIRMED", "COMPLETED"} and transfer.status in {"SUBMITTED", "CONFIRMING"}:
+        result = reconcile_transfer(
+            source_adapter, destination_adapter,
+            transfer_id=transfer_id,
+            asset=asset,
+            network=transfer.network,
+            expected_amount=transfer.amount,
+            expected_address=expected_address,
+            created_ms=created_ms or transfer.created_ms,
+        )
+        if result.status == "COMPLETED":
+            tx_hash = result.source.tx_hash or result.destination.tx_hash or transfer.txid
+            self.transfers.transition(transfer_id, "COMPLETED", txid=tx_hash or None)
+            state = self.confirm_transfer(
+                execution_intent, coordinator, transfer_id,
+                destination_balance_confirmed=True,
+                status="CONFIRMED", tx_hash=tx_hash,
+                reconciliation=result,
+            )
+        elif result.status == "FAILED":
+            state = self.confirm_transfer(
+                execution_intent, coordinator, transfer_id,
+                destination_balance_confirmed=False,
+                status="FAILED", tx_hash=result.source.tx_hash or result.destination.tx_hash or transfer.txid,
+                reconciliation=result,
+            )
+        else:
+            state = coordinator.accept_transfer(TransferStatus(
+                transfer_id, "CONFIRMING", transfer.amount,
+                result.source.tx_hash or result.destination.tx_hash or transfer.txid,
+                False,
+            ))
+            self.engine.sync_two_leg_state(execution_intent, state.value)
+        trade_journal.record("transfer_reconciled", execution_intent.id,
+                             transfer_id=transfer_id, status=result.status, reason=result.reason,
+                             source_status=result.source.status if result.source else "",
+                             destination_status=result.destination.status if result.destination else "",
+                             tx_hash=(result.source.tx_hash or result.destination.tx_hash) if result.source or result.destination else "",
+                             mode="live" if self.engine.enabled else "dry_run")
+        return state, result
+
+    def confirm_transfer(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, transfer_id: str, *,
+                         destination_balance_confirmed: bool, status: str = "CONFIRMED",
+                         tx_hash: Optional[str] = None,
+                         reconciliation: Optional[ReconciliationResult] = None) -> LegState:
+        transfer = self.transfers.transfers.get(transfer_id)
+        if transfer is None:
+            raise ValueError("unknown transfer id")
+        normalized_status = status.upper()
+        if normalized_status in {"CONFIRMED", "COMPLETED"}:
+            if reconciliation is None or reconciliation.status != "COMPLETED":
+                raise ValueError("independent transfer reconciliation is required before SELL")
+            if not destination_balance_confirmed:
+                raise ValueError("destination balance confirmation is required")
+            if reconciliation.destination is None or reconciliation.source is None:
+                raise ValueError("source and destination reconciliation snapshots are required")
+            if reconciliation.destination.amount + 1e-12 < transfer.amount:
+                raise ValueError("reconciled destination amount does not cover intended transfer")
+            if reconciliation.source.status != "COMPLETED" or reconciliation.destination.status != "COMPLETED":
+                raise ValueError("source withdrawal and destination deposit are not independently completed")
+            tx_hash = tx_hash or reconciliation.source.tx_hash or reconciliation.destination.tx_hash
+            if not tx_hash:
+                raise ValueError("completed on-chain transfer requires a transaction hash")
+        if normalized_status in {"CONFIRMED", "COMPLETED"} and transfer.status in {"SUBMITTED", "CONFIRMING"}:
             self.transfers.transition(transfer_id, "COMPLETED", txid=tx_hash)
         before = coordinator.intent.state.value
-        state = coordinator.accept_transfer(TransferStatus(transfer_id, status, transfer.amount, tx_hash, destination_balance_confirmed))
+        state = coordinator.accept_transfer(TransferStatus(transfer_id, normalized_status, transfer.amount, tx_hash, destination_balance_confirmed))
         self.engine.sync_two_leg_state(execution_intent, state.value)
-        self._journal_transition(execution_intent, before, state.value, leg="transfer", transfer_id=transfer_id, tx_hash=tx_hash)
+        self._journal_transition(execution_intent, before, state.value, leg="transfer", transfer_id=transfer_id, tx_hash=tx_hash,
+                                 reconciliation_status=reconciliation.status if reconciliation else "")
         return state
 
     def submit_sell(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, adapter: Any, *,
