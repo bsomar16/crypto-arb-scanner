@@ -26,13 +26,9 @@ class BybitSpotAdapter(ExchangeAdapter):
                 continue
             price = row.get("priceFilter", {})
             lot = row.get("lotSizeFilter", {})
-            out.append(SpotMarket(
-                row["symbol"], row.get("baseCoin", ""), row.get("quoteCoin", ""),
-                float(lot.get("minOrderQty", 0) or 0),
-                float(lot.get("minOrderAmt", 0) or 0),
-                float(lot.get("qtyStep", 0) or 0),
-                float(price.get("tickSize", 0) or 0),
-            ))
+            out.append(SpotMarket(row["symbol"], row.get("baseCoin", ""), row.get("quoteCoin", ""),
+                                  float(lot.get("minOrderQty", 0) or 0), float(lot.get("minOrderAmt", 0) or 0),
+                                  float(lot.get("qtyStep", 0) or 0), float(price.get("tickSize", 0) or 0)))
         return out
 
     def get_order_book(self, symbol: str, depth: int = 50) -> Dict[str, Any]:
@@ -59,15 +55,9 @@ class BybitSpotAdapter(ExchangeAdapter):
         for c in rows[0].get("chains", []):
             network = str(c.get("chain", ""))
             tag_required = str(c.get("tagRequired", "0")) == "1"
-            out.append(NetworkInfo(
-                network,
-                c.get("chainDeposit") == "1",
-                c.get("chainWithdraw") == "1",
-                float(c.get("withdrawFee", 0) or 0),
-                float(c.get("withdrawMin", 0) or 0),
-                tag_required,
-                raw_chain=network,
-            ))
+            out.append(NetworkInfo(network, c.get("chainDeposit") == "1", c.get("chainWithdraw") == "1",
+                                   float(c.get("withdrawFee", 0) or 0), float(c.get("withdrawMin", 0) or 0),
+                                   tag_required, raw_chain=network))
         return out
 
     def get_deposit_details(self, asset: str, network: str) -> Dict[str, str]:
@@ -99,12 +89,9 @@ class BybitSpotAdapter(ExchangeAdapter):
         return self._result(self._private("POST", "/v5/order/create", body=body))
 
     def get_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        result = self._result(self._private("GET", "/v5/order/realtime", params={
-            "category": "spot", "symbol": symbol.upper(), "orderId": order_id,
-        }))
-        rows = result.get("list", [])
-        if rows:
-            return rows[0]
+        # Closed Spot orders are reliably available through order history;
+        # this is the provider-neutral reconciliation source used after
+        # submission and across process restarts.
         result = self._result(self._private("GET", "/v5/order/history", params={
             "category": "spot", "symbol": symbol.upper(), "orderId": order_id,
         }))
