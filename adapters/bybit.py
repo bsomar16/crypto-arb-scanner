@@ -36,9 +36,7 @@ class BybitSpotAdapter(ExchangeAdapter):
         return out
 
     def get_order_book(self, symbol: str, depth: int = 50) -> Dict[str, Any]:
-        return self._public("GET", "/v5/market/orderbook", params={
-            "category": "spot", "symbol": symbol.upper(), "limit": depth,
-        })
+        return self._public("GET", "/v5/market/orderbook", params={"category": "spot", "symbol": symbol.upper(), "limit": depth})
 
     def get_spot_balances(self) -> Dict[str, float]:
         result = self._result(self._private("GET", "/v5/account/wallet-balance", params={"accountType": "UNIFIED"}))
@@ -64,7 +62,7 @@ class BybitSpotAdapter(ExchangeAdapter):
             out.append(NetworkInfo(
                 network,
                 c.get("chainDeposit") == "1",
-                c.get("chainWithdraw") == "1',
+                c.get("chainWithdraw") == "1",
                 float(c.get("withdrawFee", 0) or 0),
                 float(c.get("withdrawMin", 0) or 0),
                 tag_required,
@@ -101,9 +99,6 @@ class BybitSpotAdapter(ExchangeAdapter):
         return self._result(self._private("POST", "/v5/order/create", body=body))
 
     def get_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        # Bybit documents the realtime endpoint for current/unfilled state and
-        # order history for older/closed records. Query realtime first, then
-        # fall back to history because API propagation can be asynchronous.
         result = self._result(self._private("GET", "/v5/order/realtime", params={
             "category": "spot", "symbol": symbol.upper(), "orderId": order_id,
         }))
@@ -116,9 +111,7 @@ class BybitSpotAdapter(ExchangeAdapter):
         rows = result.get("list", [])
         return rows[0] if rows else {}
 
-    def withdraw_spot(self, asset: str, amount: float, address: str, network: str, *,
-                      memo: Optional[str] = None, memo_type: Optional[str] = None,
-                      client_withdrawal_id: Optional[str] = None) -> Dict[str, Any]:
+    def withdraw_spot(self, asset: str, amount: float, address: str, network: str, *, memo: Optional[str] = None, memo_type: Optional[str] = None, client_withdrawal_id: Optional[str] = None) -> Dict[str, Any]:
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true":
             raise RuntimeError("live withdrawals are disabled; set EXECUTION_ENABLED=true deliberately")
         validate_spot_request(ExecutionRequest("SPOT", "SELL", f"{asset.upper()}USDT", self.name, amount, True, True))
