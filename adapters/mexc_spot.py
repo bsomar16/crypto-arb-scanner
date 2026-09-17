@@ -95,7 +95,7 @@ class MexcSpotAdapter(ExchangeAdapter):
         validate_spot_request(ExecutionRequest("SPOT", "SELL", f"{asset.upper()}USDT", self.name, amount, True, True))
         if memo and memo_type not in (None, "memo"):
             raise ValueError(f"MEXC withdrawal does not accept memo_type={memo_type!r}")
-        params = {"coin": asset.upper(), "amount": str(amount), "address": address, "network": network}
+        params = {"coin": asset.upper(), "amount": str(amount), "address": address, "netWork": network}
         if memo: params["memo"] = memo
         if client_withdrawal_id: params["withdrawOrderId"] = client_withdrawal_id
-        return self._trade("POST", "/api/v3/capital/withdraw/apply", params)
+        return self._trade("POST", "/api/v3/capital/withdraw", params)
