@@ -64,6 +64,7 @@ class TwoLegIntent:
     transfer_requested_qty: float = 0.0
     transferred_qty: float = 0.0
     sell_filled_qty: float = 0.0
+    destination_deposit_confirmed: bool = False
     buy_fee_quote: float = 0.0
     buy_fee_amount: float = 0.0
     buy_fee_currency: str = ""
@@ -146,12 +147,13 @@ class TwoLegCoordinator:
             return self._fail("invalid transfer amount")
         self.intent.transfer_requested_qty = transfer_amount
         self.intent.transferred_qty = transfer_amount
+        self.intent.destination_deposit_confirmed = False
         self.intent.state = LegState.TRANSFER_PENDING
         self._save("TRANSFER_SUBMITTED")
         return self.intent.state
 
     def accept_transfer(self, transfer: TransferStatus) -> LegState:
-        if self.intent.state != LegState.TRANSFER_PENDING:
+        if self.intent.state not in {LegState.TRANSFER_PENDING, LegState.TRANSFER_CONFIRMED}:
             raise ValueError("transfer update is invalid for current state")
         expected = self.intent.transfer_requested_qty or self.intent.filled_qty
         if transfer.amount <= 0 or transfer.amount > expected + 1e-12:
@@ -164,6 +166,7 @@ class TwoLegCoordinator:
                 return self._fail("destination deposit/balance is not confirmed")
             if transfer.amount + 1e-12 < expected:
                 return self._fail("confirmed transfer does not cover intended transferred quantity")
+            self.intent.destination_deposit_confirmed = True
             self.intent.state = LegState.TRANSFER_CONFIRMED
         elif status in {"FAILED", "REJECTED", "CANCELED", "CANCELLED"}:
             return self._fail("transfer " + status.lower())
@@ -175,7 +178,11 @@ class TwoLegCoordinator:
 
     def prepare_sell(self) -> LegState:
         if self.intent.state != LegState.TRANSFER_CONFIRMED:
-            raise ValueError("sell preparation requires confirmed destination deposit")
+            if self.intent.destination_deposit_confirmed and self.intent.transferred_qty > 0:
+                self.intent.state = LegState.TRANSFER_CONFIRMED
+                self._save("TRANSFER:CONFIRMED_RECOVERED")
+            else:
+                raise ValueError("sell preparation requires confirmed destination deposit")
         if self.intent.transferred_qty <= 0:
             return self._fail("no confirmed transferred quantity")
         if not self._check(self.revalidate_sell, "sell leg"):
