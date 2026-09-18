@@ -251,11 +251,16 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         entry_quality = max(0.0, min(100.0, entry_quality))
         expansion_score = max(0.0, min(100.0, score + min(15.0, max(0.0, potential - 15.0))))
 
+        # Stage the three targets across the modelled move so TP1/TP2 are
+        # meaningful partial exits instead of merely 1R/2R placeholders.
+        t1 = price + (target - price) * 0.35
+        t2 = price + (target - price) * 0.65
+
         result = {
             "coin": coin, "interval": interval, "strategy": profile["kind"],
             "strategy_id": next(k for k, v in STRATEGY_PROFILES.items() if v is profile),
             "price": price, "entry": price, "stop": stop,
-            "t1": price + stop_dist, "t2": price + 2 * stop_dist, "t3": target, "target": target,
+            "t1": t1, "t2": t2, "t3": target, "target": target,
             "rsi": round(r, 1), "vol_x": round(vol_ratio, 2), "chg24": round(float(chg24 or 0), 2),
             "st": round(score, 1), "score": round(score, 1), "potential_pct": round(potential, 1),
             "risk_pct": round(risk_pct, 2), "rr": round(rr, 2), "atr": round(a, 6),
