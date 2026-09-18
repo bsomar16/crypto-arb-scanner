@@ -76,17 +76,21 @@ def _backtest_stats(signal):
     try:
         with open(BACKTEST_STATS_PATH, "r", encoding="utf-8") as f:
             payload = json.load(f)
-        row = (payload.get("stats") or {}).get(
+        exact = (payload.get("stats") or {}).get(
             f"{signal.get('coin')}|{signal.get('interval')}")
-        if not row:
-            return None
-        sample = int(row.get("wins", 0) or 0) + int(row.get("losses", 0) or 0)
-        if sample <= 0 or row.get("win_pct") is None:
+        row = exact
+        scope = "backtest coin/timeframe"
+        sample = int((row or {}).get("wins", 0) or 0) + int((row or {}).get("losses", 0) or 0)
+        if sample < 20:
+            row = (payload.get("setup_stats") or {}).get(
+                f"{signal.get('interval')}|{signal.get('setup_type', 'UNKNOWN')}")
+            scope = "backtest setup/timeframe"
+            sample = int((row or {}).get("sample", 0) or 0)
+        if not row or sample <= 0 or row.get("win_pct") is None:
             return None
         return {"win_pct": float(row["win_pct"]), "wins": int(row.get("wins", 0)),
                 "losses": int(row.get("losses", 0)), "sample": sample,
-                "scope": "backtest coin/timeframe",
-                "generated_at": payload.get("generated_at")}
+                "scope": scope, "generated_at": payload.get("generated_at")}
     except (FileNotFoundError, OSError, ValueError, TypeError, json.JSONDecodeError):
         return None
 
