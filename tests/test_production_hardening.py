@@ -67,6 +67,17 @@ class ProductionHardeningTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_spot_request(ExecutionRequest("FUTURES", "BUY", "BTCUSDT", "BINANCE", 1, True))
 
+
+    def test_realtime_cache_accepts_only_closed_klines(self):
+        cache = __import__("realtime").BinanceKlineCache(["BTC"], intervals=["5m"], max_bars=60)
+        raw = '{"data":{"k":{"x":false,"s":"BTCUSDT","i":"5m","t":1,"o":"1","h":"2","l":"0.5","c":"1.5","v":"10","q":"15"}}}'
+        cache._on_message(None, raw)
+        self.assertEqual(cache.get("BTC", "5m"), [])
+        raw = '{"data":{"k":{"x":true,"s":"BTCUSDT","i":"5m","t":1,"o":"1","h":"2","l":"0.5","c":"1.5","v":"10","q":"15"}}}'
+        cache._on_message(None, raw)
+        self.assertEqual(len(cache.get("BTC", "5m")), 1)
+        self.assertEqual(cache.get("BTC", "5m")[0]["close"], 1.5)
+
     def test_confirmed_entry_requires_sweep_bos_retest_confirmation(self):
         n = 50
         closes = [100.0] * n
