@@ -153,13 +153,40 @@ def run_buy(token, chat_id):
         sym, interval = task
         return intraday_signal(sym, interval=interval, min_vol_x=float(cfg.get("buy_min_vol_x", 1.15)), chg24=chg.get(sym), min_potential_pct=float(cfg.get("signal_min_potential_pct", 5.0)), max_potential_pct=float(cfg.get("signal_max_potential_pct", 80.0)), min_score=float(cfg.get("signal_min_score", 55)), min_rr=float(cfg.get("signal_min_rr", 1.5)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex: hits = [r for r in ex.map(scan, tasks) if r]
-    fired = load_json("state/fired_signals.json", {}) or {}; updates = {}; fresh = []; cooldown_hours = 4.0; now_ts = datetime.now(timezone.utc).timestamp()
+    fired = load_json("state/fired_signals.json", {}) or {}; updates = {}; fresh = []; cooldown_hours = 4.0; entry_change_pct = 0.02; now_ts = datetime.now(timezone.utc).timestamp()
+    # One Telegram BUY signal per coin. A second signal is allowed only when
+    # the previous signal has materially changed (setup/timeframe or >2% entry).
+    best_by_coin = {}
     for r in hits:
-        key = f"{r['coin']}|{r['interval']}|{r['setup_type']}"; old = fired.get(key, {}); old_ts = float(old.get("ts", 0) or 0)
-        if old_ts and now_ts - old_ts < cooldown_hours * 3600:
-            old_entry = float(old.get("entry", 0) or 0)
-            if old_entry and abs(r["entry"] - old_entry) / old_entry < 0.02: continue
-        r["star"] = r["coin"] in star; updates[key] = {"ts": now_ts, "entry": r["entry"], "score": r["score"]}; fresh.append(r)
+        coin = str(r.get("coin", "")).upper()
+        if not coin:
+            continue
+        current = best_by_coin.get(coin)
+        if current is None or (r["score"], r["rr"], r["potential_pct"]) > (current["score"], current["rr"], current["potential_pct"]):
+            best_by_coin[coin] = r
+    for coin, r in best_by_coin.items():
+        old = fired.get(coin, {})
+        old_ts = float(old.get("ts", 0) or 0)
+        old_entry = float(old.get("entry", 0) or 0)
+        old_setup = str(old.get("setup_type", "") or "")
+        old_interval = str(old.get("interval", "") or "")
+        entry_changed = bool(old_entry and abs(r["entry"] - old_entry) / old_entry >= entry_change_pct)
+        setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
+        interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
+        same_signal = bool(old_ts and not entry_changed and not setup_changed and not interval_changed)
+        if same_signal:
+            continue
+        if old_ts and now_ts - old_ts < cooldown_hours * 3600 and not (entry_changed or setup_changed or interval_changed):
+            continue
+        r["star"] = r["coin"] in star
+        updates[coin] = {
+            "ts": now_ts,
+            "entry": r["entry"],
+            "score": r["score"],
+            "setup_type": r.get("setup_type", ""),
+            "interval": r.get("interval", ""),
+        }
+        fresh.append(r)
     fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"])); fresh = fresh[:int(cfg.get("buy_fast_top_n_shown", 15))]
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
     if not fresh and not fired_alerts: log("[BUY] no new signals"); return False
