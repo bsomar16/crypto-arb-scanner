@@ -8,7 +8,7 @@ def _pct(a, b):
 def _body_strength(o, h, l, c):
     return abs(c - o) / max(h - l, 1e-12)
 
-def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retest=True):
+def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retest=True, require_sweep=True):
     """Return a causal long-entry confirmation or None using only closed candles."""
     n = len(closes)
     if n < 45 or len(opens) != n or len(highs) != n or len(lows) != n:
@@ -36,7 +36,7 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
             if closes[i] > lookback_high + tol * 0.10:
                 bos = {"index": i, "level": lookback_high, "close": closes[i]}
                 break
-    if bos is None:
+    if bos is None or (require_sweep and sweep is None):
         return None
 
     broken_level = bos["level"]
