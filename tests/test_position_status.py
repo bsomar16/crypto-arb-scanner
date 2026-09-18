@@ -62,6 +62,19 @@ class PositionStatusTests(unittest.TestCase):
         self.assertIn("⏳ <b>TP2:</b>", msg)
         self.assertIn("⏳ <b>TP3:</b>", msg)
 
+    def test_lifecycle_event_is_emitted_only_once(self):
+        pos = self._position()
+        pos["position_id"] = "notify-once"
+        pos["notification_enabled"] = True
+        notifications = {}
+        with patch.object(position_status, "_send", return_value=True) as sender, \
+             patch.object(position_status, "_save_notifications") as saver:
+            self.assertTrue(position_status._emit_event("token", "chat", pos, "tp1", "TP1", notifications))
+            self.assertFalse(position_status._emit_event("token", "chat", pos, "tp1", "TP1", notifications))
+        sender.assert_called_once()
+        saver.assert_called_once()
+        self.assertTrue(notifications["notify-once"]["tp1"])
+
     def test_stopped_out_format_marks_targets_closed(self):
         pos = self._position()
         pos["status"] = "closed_sl"
