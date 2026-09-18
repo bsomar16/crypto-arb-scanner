@@ -21,7 +21,7 @@ class BuySignalDedupeTests(unittest.TestCase):
             self._signal(interval="15m", score=82),
             self._signal(interval="1h", score=75),
         ]
-        fresh, updates = scanner._dedupe_buy_signals(hits, {}, 1000)
+        fresh, updates = scanner._dedupe_buy_signals(hits, {}, 1000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertEqual(fresh[0]["interval"], "15m")
         self.assertIn("GALA", updates)
@@ -36,7 +36,7 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000)
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
         self.assertEqual(fresh, [])
         self.assertEqual(updates, {})
 
@@ -70,3 +70,35 @@ class BuySignalDedupeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_active_coin_never_repeats_even_if_setup_changes(self):
+        hits = [self._signal(setup="BREAKOUT", entry=0.00195, interval="5m")]
+        fired = {
+            "GALA": {
+                "ts": 900,
+                "entry": 0.00183,
+                "setup_type": "MOMENTUM",
+                "interval": "15m",
+            }
+        }
+        fresh, updates = scanner._dedupe_buy_signals(
+            hits, fired, 1000, active_coins={"GALA"}
+        )
+        self.assertEqual(fresh, [])
+        self.assertEqual(updates, {})
+
+    def test_closed_coin_can_alert_on_new_setup(self):
+        hits = [self._signal(setup="BREAKOUT")]
+        fired = {
+            "GALA": {
+                "ts": 900,
+                "entry": 0.00183,
+                "setup_type": "MOMENTUM",
+                "interval": "15m",
+            }
+        }
+        fresh, updates = scanner._dedupe_buy_signals(
+            hits, fired, 1000, active_coins=set()
+        )
+        self.assertEqual(len(fresh), 1)
+        self.assertIn("GALA", updates)
