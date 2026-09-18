@@ -8,6 +8,8 @@ OHLC candle, the conservative assumption is that the stop was hit first.
 
 from datetime import datetime, timezone
 from statistics import mean
+import json
+import os
 
 import indicators as ind
 from botutil import http_json
@@ -165,24 +167,44 @@ def _signal_at(rows, i, interval, min_vol_x=1.15, min_potential_pct=5.0,
             "vol_x": vol_x}
 
 
+EXPANSION_MILESTONES = (5, 10, 20, 30, 50, 80)
+
 def _evaluate(rows, signal_i, signal, horizon):
+    """Evaluate stop/target plus milestone attainment without look-ahead.
+
+    A candle that touches both SL and a milestone is treated conservatively:
+    SL happens first, so that milestone is not credited.
+    """
     end = min(len(rows), signal_i + 1 + horizon)
     stop = signal["stop"]
     target = signal["target"]
     entry = signal["entry"]
+    reached = {str(p): False for p in EXPANSION_MILESTONES}
     for j in range(signal_i + 1, end):
         high = float(rows[j][2]); low = float(rows[j][3])
         hit_stop = low <= stop
         hit_target = high >= target
-        if hit_stop and hit_target:
-            return {"outcome": "LOSS", "exit_i": j, "ret_pct": (stop / entry - 1) * 100 - COST_PCT}
         if hit_stop:
-            return {"outcome": "LOSS", "exit_i": j, "ret_pct": (stop / entry - 1) * 100 - COST_PCT}
+            return {
+                "outcome": "LOSS", "exit_i": j,
+                "ret_pct": (stop / entry - 1) * 100 - COST_PCT,
+                "milestones": reached,
+            }
+        for pct in EXPANSION_MILESTONES:
+            if high >= entry * (1 + pct / 100):
+                reached[str(pct)] = True
         if hit_target:
-            return {"outcome": "WIN", "exit_i": j, "ret_pct": (target / entry - 1) * 100 - COST_PCT}
+            return {
+                "outcome": "WIN", "exit_i": j,
+                "ret_pct": (target / entry - 1) * 100 - COST_PCT,
+                "milestones": reached,
+            }
     last = float(rows[end - 1][4])
-    return {"outcome": "EXPIRED", "exit_i": end - 1,
-            "ret_pct": (last / entry - 1) * 100 - COST_PCT}
+    return {
+        "outcome": "EXPIRED", "exit_i": end - 1,
+        "ret_pct": (last / entry - 1) * 100 - COST_PCT,
+        "milestones": reached,
+    }
 
 
 def run_symbol(symbol, interval="15m", bars=3000, warmup=100,
@@ -217,6 +239,12 @@ def run_symbol(symbol, interval="15m", bars=3000, warmup=100,
     closed = wins + losses
     gross_wins = sum(max(0, t["ret_pct"]) for t in trades)
     gross_losses = -sum(min(0, t["ret_pct"]) for t in trades)
+    milestone_stats = {}
+    for pct in EXPANSION_MILESTONES:
+        key = str(pct)
+        hits = sum(1 for t in trades if t.get("milestones", {}).get(key))
+        milestone_stats[key] = {"hits": hits, "rate_pct": hits / len(trades) * 100}
+
     return {
         "symbol": symbol, "interval": interval, "n": len(trades),
         "wins": len(wins), "losses": len(losses),
@@ -228,6 +256,8 @@ def run_symbol(symbol, interval="15m", bars=3000, warmup=100,
         "avg_potential": mean([t["potential_pct"] for t in trades]),
         "avg_rr": mean([t["rr"] for t in trades]),
         "avg_hold_bars": mean([t["exit_i"] - next(i for i, r in enumerate(rows) if r[0] == t["timestamp"]) for t in trades]),
+        "milestones": milestone_stats,
+        "trades": trades,
     }
 
 
@@ -253,6 +283,22 @@ def run_backtest(cfg):
     if not results:
         return "Backtest: no data."
 
+    stats_payload = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "stats": {}}
+    for r in results:
+        if not r.get("n"):
+            continue
+        stats_payload["stats"][f"{r['symbol']}|{r['interval']}"] = {
+            "wins": r["wins"], "losses": r["losses"], "expired": r["expired"],
+            "win_pct": r["win_pct"], "sample": r["wins"] + r["losses"],
+            "milestones": r.get("milestones", {}),
+        }
+    try:
+        os.makedirs("state", exist_ok=True)
+        with open("state/backtest_stats.json", "w", encoding="utf-8") as f:
+            json.dump(stats_payload, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        print(f"[BACKTEST] unable to persist stats: {e}")
+
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [f"📈 <b>MTF CRYPTO BACKTEST</b> · {now}",
              "Closed-candle walk-forward · no look-ahead · conservative same-candle SL/TP handling",
@@ -266,7 +312,10 @@ def run_backtest(cfg):
         pf = "∞" if r["pf"] == float("inf") else (f"{r['pf']:.2f}" if r["pf"] is not None else "-")
         avgp = f"{r['avg_potential']:.1f}%" if r["avg_potential"] is not None else "-"
         avgr = f"{r['avg_rr']:.2f}" if r["avg_rr"] is not None else "-"
+        milestones = r.get("milestones", {})
+        expansion = " · ".join(f"+{p}% {milestones.get(str(p), {}).get('rate_pct', 0):.0f}%" for p in EXPANSION_MILESTONES)
         lines.append(f"<b>{r['symbol']} {r['interval']}</b> · setups {r['n']} · win {win} · W/L {r['wins']}/{r['losses']} · expired {r['expired']} · PF {pf} · avg potential {avgp} · avg R:R {avgr}")
+        lines.append(f"  Expansion reached: {expansion}")
 
     closed = [r for r in results if r["n"]]
     total_wins = sum(r["wins"] for r in closed)
