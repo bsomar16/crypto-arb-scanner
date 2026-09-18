@@ -109,7 +109,7 @@ def _setup_type(price,resistance,support,e20,vol_ratio,macd_rising,rsi):
     return "MOMENTUM"
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None):
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None, realtime_bars=None):
     """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
     profile = strategy_profile(interval)
     if not profile:
@@ -119,11 +119,17 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         effective_min_score = profile["min_score"] if min_score is None else max(float(min_score), profile["min_score"])
         effective_min_rr = profile["min_rr"] if min_rr is None else max(float(min_rr), profile["min_rr"])
         data = _fetch_klines(coin, interval, limit)
-    if realtime_bars and len(realtime_bars) >= 45:
-        data = [[b["open_time"], b["open"], b["high"], b["low"], b["close"], b["volume"], 0, b["quote_volume"]] for b in realtime_bars]
         if not data:
             return None
-        data = data[:-1]
+        if realtime_bars:
+            # Replace only overlapping closed candles; keep REST history for warm-up.
+            merged = {int(k[0]): k for k in data}
+            for b in realtime_bars:
+                merged[int(b["open_time"])] = [
+                    b["open_time"], b["open"], b["high"], b["low"], b["close"],
+                    b["volume"], 0, b["quote_volume"]
+                ]
+            data = [merged[k] for k in sorted(merged)][-limit:]
         closes = [float(k[4]) for k in data]
         highs = [float(k[2]) for k in data]
         lows = [float(k[3]) for k in data]
