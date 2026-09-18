@@ -95,7 +95,7 @@ def open_picks(picks, cfg, source="daily"):
             continue
         pos = {
             "position_id": _position_id(coin, source),
-            "notification_enabled": True,
+            "notification_enabled": True,\n            "notification_version": 2,
             "coin": coin, "entry": entry,
             "entry_ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
