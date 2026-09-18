@@ -135,6 +135,43 @@ def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
+def _dedupe_buy_signals(hits, fired, now_ts, cooldown_hours=4.0, entry_change_pct=0.02, limit=15):
+    """Return one Telegram BUY signal per coin, only when materially new."""
+    updates = {}
+    fresh = []
+    best_by_coin = {}
+    for r in hits:
+        coin = str(r.get("coin", "")).upper()
+        if not coin:
+            continue
+        current = best_by_coin.get(coin)
+        if current is None or (r["score"], r["rr"], r["potential_pct"]) > (current["score"], current["rr"], current["potential_pct"]):
+            best_by_coin[coin] = r
+    for coin, r in best_by_coin.items():
+        old = fired.get(coin, {})
+        old_ts = float(old.get("ts", 0) or 0)
+        old_entry = float(old.get("entry", 0) or 0)
+        old_setup = str(old.get("setup_type", "") or "")
+        old_interval = str(old.get("interval", "") or "")
+        entry_changed = bool(old_entry and abs(r["entry"] - old_entry) / old_entry >= entry_change_pct)
+        setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
+        interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
+        same_signal = bool(old_ts and not entry_changed and not setup_changed and not interval_changed)
+        if same_signal:
+            continue
+        if old_ts and now_ts - old_ts < cooldown_hours * 3600 and not (entry_changed or setup_changed or interval_changed):
+            continue
+        updates[coin] = {
+            "ts": now_ts,
+            "entry": r["entry"],
+            "score": r["score"],
+            "setup_type": r.get("setup_type", ""),
+            "interval": r.get("interval", ""),
+        }
+        fresh.append(r)
+    fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"]))
+    return fresh[:limit], updates
+
 def run_buy(token, chat_id):
     cfg = load_cfg(); intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
     if not intervals: intervals = ["5m", "15m", "1h"]
@@ -168,40 +205,16 @@ def run_buy(token, chat_id):
         fired = migrated
         migrated_fired = True
     updates = {}; fresh = []; cooldown_hours = 4.0; entry_change_pct = 0.02; now_ts = datetime.now(timezone.utc).timestamp()
-    # One Telegram BUY signal per coin. A second signal is allowed only when
-    # the previous signal has materially changed (setup/timeframe or >2% entry).
-    best_by_coin = {}
-    for r in hits:
-        coin = str(r.get("coin", "")).upper()
-        if not coin:
-            continue
-        current = best_by_coin.get(coin)
-        if current is None or (r["score"], r["rr"], r["potential_pct"]) > (current["score"], current["rr"], current["potential_pct"]):
-            best_by_coin[coin] = r
-    for coin, r in best_by_coin.items():
-        old = fired.get(coin, {})
-        old_ts = float(old.get("ts", 0) or 0)
-        old_entry = float(old.get("entry", 0) or 0)
-        old_setup = str(old.get("setup_type", "") or "")
-        old_interval = str(old.get("interval", "") or "")
-        entry_changed = bool(old_entry and abs(r["entry"] - old_entry) / old_entry >= entry_change_pct)
-        setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
-        interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
-        same_signal = bool(old_ts and not entry_changed and not setup_changed and not interval_changed)
-        if same_signal:
-            continue
-        if old_ts and now_ts - old_ts < cooldown_hours * 3600 and not (entry_changed or setup_changed or interval_changed):
-            continue
+    fresh, updates = _dedupe_buy_signals(
+        hits,
+        fired,
+        now_ts,
+        cooldown_hours=cooldown_hours,
+        entry_change_pct=entry_change_pct,
+        limit=int(cfg.get("buy_fast_top_n_shown", 15)),
+    )
+    for r in fresh:
         r["star"] = r["coin"] in star
-        updates[coin] = {
-            "ts": now_ts,
-            "entry": r["entry"],
-            "score": r["score"],
-            "setup_type": r.get("setup_type", ""),
-            "interval": r.get("interval", ""),
-        }
-        fresh.append(r)
-    fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"])); fresh = fresh[:int(cfg.get("buy_fast_top_n_shown", 15))]
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
     if not fresh and not fired_alerts: log("[BUY] no new signals"); return False
     if updates:
