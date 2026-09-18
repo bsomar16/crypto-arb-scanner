@@ -119,6 +119,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         effective_min_score = profile["min_score"] if min_score is None else max(float(min_score), profile["min_score"])
         effective_min_rr = profile["min_rr"] if min_rr is None else max(float(min_rr), profile["min_rr"])
         data = _fetch_klines(coin, interval, limit)
+    if realtime_bars and len(realtime_bars) >= 45:
+        data = [[b["open_time"], b["open"], b["high"], b["low"], b["close"], b["volume"], 0, b["quote_volume"]] for b in realtime_bars]
         if not data:
             return None
         data = data[:-1]

@@ -159,6 +159,13 @@ def structure_snapshot(closes, highs, lows):
 
     higher_highs = len(last_ph) >= 2 and last_ph[-1][1] > last_ph[-2][1]
     higher_lows = len(last_pl) >= 2 and last_pl[-1][1] > last_pl[-2][1]
+    # A monotonic trend may not create local pivots; use rolling swing lows as a
+    # deterministic fallback so structure does not become UNKNOWN/MIXED solely
+    # because every candle makes a new high/low.
+    if not higher_lows and len(lows) >= 8:
+        earlier_low = min(lows[-8:-4])
+        recent_low = min(lows[-4:])
+        higher_lows = recent_low > earlier_low
     lower_highs = len(last_ph) >= 2 and last_ph[-1][1] < last_ph[-2][1]
     lower_lows = len(last_pl) >= 2 and last_pl[-1][1] < last_pl[-2][1]
 

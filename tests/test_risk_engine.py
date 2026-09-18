@@ -8,9 +8,9 @@ class RiskEngineTests(unittest.TestCase):
     def test_position_and_total_exposure_caps(self):
         cfg = {"max_position_notional_usdt": 300, "max_total_exposure_usdt": 600, "max_daily_loss_usdt": 30}
         positions = [{"status": "open", "notional_usdt": 300}]
-        self.assertEqual(risk_engine.check_new_position(positions, 300, cfg)[0], True)
-        self.assertEqual(risk_engine.check_new_position(positions, 301, cfg)[0], False)
-        self.assertEqual(risk_engine.check_new_position(positions + [{"status": "open", "notional_usdt": 300}], 1, cfg)[0], False)
+        self.assertEqual(risk_engine.check_new_position(positions, 300, cfg, rows=[])[0], True)
+        self.assertEqual(risk_engine.check_new_position(positions, 301, cfg, rows=[])[0], False)
+        self.assertEqual(risk_engine.check_new_position(positions + [{"status": "open", "notional_usdt": 300}], 1, cfg, rows=[])[0], False)
 
     def test_kill_switch_blocks(self):
         self.assertFalse(risk_engine.check_new_position([], 100, {"risk_kill_switch": True})[0])
