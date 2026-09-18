@@ -135,32 +135,48 @@ def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
-def _dedupe_buy_signals(hits, fired, now_ts, cooldown_hours=4.0, entry_change_pct=0.02, limit=15):
-    """Return one Telegram BUY signal per coin, only when materially new."""
+def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=15):
+    """Return one BUY notification per coin.
+
+    A coin is silent while it has an open tracked position. After that signal
+    closes, the same coin can alert again only when the new setup is materially
+    different (entry moved, setup changed, or timeframe changed).
+    """
     updates = {}
     fresh = []
+    active_coins = {str(c).upper() for c in (active_coins or set())}
     best_by_coin = {}
+
     for r in hits:
         coin = str(r.get("coin", "")).upper()
         if not coin:
             continue
         current = best_by_coin.get(coin)
-        if current is None or (r["score"], r["rr"], r["potential_pct"]) > (current["score"], current["rr"], current["potential_pct"]):
+        if current is None or (r["score"], r["rr"], r["potential_pct"]) > (
+            current["score"], current["rr"], current["potential_pct"]
+        ):
             best_by_coin[coin] = r
+
     for coin, r in best_by_coin.items():
+        # Never emit another BUY while this coin's previous signal is active.
+        if coin in active_coins:
+            continue
+
         old = fired.get(coin, {})
-        old_ts = float(old.get("ts", 0) or 0)
         old_entry = float(old.get("entry", 0) or 0)
         old_setup = str(old.get("setup_type", "") or "")
         old_interval = str(old.get("interval", "") or "")
-        entry_changed = bool(old_entry and abs(r["entry"] - old_entry) / old_entry >= entry_change_pct)
-        setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
-        interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
-        same_signal = bool(old_ts and not entry_changed and not setup_changed and not interval_changed)
-        if same_signal:
+        if old_entry <= 0:
+            is_new_signal = True
+        else:
+            entry_changed = abs(float(r["entry"]) - old_entry) / old_entry >= entry_change_pct
+            setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
+            interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
+            is_new_signal = entry_changed or setup_changed or interval_changed
+
+        if old and not is_new_signal:
             continue
-        if old_ts and now_ts - old_ts < cooldown_hours * 3600 and not (entry_changed or setup_changed or interval_changed):
-            continue
+
         updates[coin] = {
             "ts": now_ts,
             "entry": r["entry"],
@@ -169,6 +185,7 @@ def _dedupe_buy_signals(hits, fired, now_ts, cooldown_hours=4.0, entry_change_pc
             "interval": r.get("interval", ""),
         }
         fresh.append(r)
+
     fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"]))
     return fresh[:limit], updates
 
@@ -204,13 +221,18 @@ def run_buy(token, chat_id):
                 migrated[coin] = value
         fired = migrated
         migrated_fired = True
-    updates = {}; fresh = []; cooldown_hours = 4.0; entry_change_pct = 0.02; now_ts = datetime.now(timezone.utc).timestamp()
+    now_ts = datetime.now(timezone.utc).timestamp()
+    active_coins = {
+        str(p.get("coin", "")).upper()
+        for p in positions_mod.load()
+        if p.get("status") == "open" and p.get("coin")
+    }
     fresh, updates = _dedupe_buy_signals(
         hits,
         fired,
         now_ts,
-        cooldown_hours=cooldown_hours,
-        entry_change_pct=entry_change_pct,
+        active_coins=active_coins,
+        entry_change_pct=float(cfg.get("buy_signal_entry_change_pct", 0.02)),
         limit=int(cfg.get("buy_fast_top_n_shown", 15)),
     )
     for r in fresh:
