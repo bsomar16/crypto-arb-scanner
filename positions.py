@@ -84,18 +84,25 @@ def open_picks(picks, cfg, source="daily"):
         tp1 = float(r.get("t1", fallback["tp1"]))
         tp2 = float(r.get("t2", fallback["tp2"]))
         tp3 = float(r.get("t3", fallback["tp3"]))
-        requested_notional = r.get("notional_usdt", default_notional)
-        try:
-            notional = float(requested_notional)
-        except (TypeError, ValueError):
-            notional = default_notional
+        requested_notional = r.get("notional_usdt")
+        if requested_notional is None and cfg.get("account_equity_usdt") is not None:
+            try:
+                notional = risk_engine.suggested_notional(entry, sl, float(cfg["account_equity_usdt"]), cfg)
+            except (TypeError, ValueError):
+                notional = default_notional
+        else:
+            try:
+                notional = float(requested_notional)
+            except (TypeError, ValueError):
+                notional = default_notional
         allowed, reason = risk_engine.check_new_position(positions, notional, cfg)
         if not allowed:
             log("RISK", f"blocked {coin}: {reason}")
             continue
         pos = {
             "position_id": _position_id(coin, source),
-            "notification_enabled": True,\n            "notification_version": 2,
+            "notification_enabled": True,
+            "notification_version": 2,
             "coin": coin, "entry": entry,
             "entry_ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
