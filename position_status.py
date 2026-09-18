@@ -11,7 +11,7 @@ import positions
 import signal_history
 import store
 import trade_journal
-from botutil import fmt_price, log, esc, env_float, telegram_msg
+from botutil import fmt_price, log, esc, env_float, telegram_msg, load_json, save_json
 
 
 def load_config():
@@ -116,13 +116,39 @@ def _close(pos, status, price, now, outcome):
     )
 
 
+NOTIFICATION_FILE = "state/position_notifications.json"
+
+def _load_notifications():
+    data = load_json(NOTIFICATION_FILE, {})
+    return data if isinstance(data, dict) else {}
+
+def _save_notifications(data):
+    save_json(NOTIFICATION_FILE, data)
+
 def _send(token, chat_id, message):
     if not message:
-        return
+        return False
     try:
         telegram_msg(token, chat_id, message)
+        return True
     except Exception as exc:
         log("POSITION_STATUS", "telegram error:", exc)
+        return False
+
+def _emit_event(token, chat_id, pos, event, message, notifications):
+    if not pos.get("notification_enabled", False):
+        return False
+    pid = str(pos.get("position_id", "") or "")
+    if not pid:
+        return False
+    sent = notifications.setdefault(pid, {})
+    if sent.get(event):
+        return False
+    if _send(token, chat_id, message):
+        sent[event] = True
+        _save_notifications(notifications)
+        return True
+    return False
 
 
 def run_cycle(token, chat_id, cfg):
@@ -138,6 +164,19 @@ def run_cycle(token, chat_id, cfg):
     now = datetime.now(timezone.utc)
     keep = []
     emitted = 0
+    notifications = _load_notifications()
+
+    # Positions created before notification gating was added stay silent.
+    # New positions.py records explicitly set notification_enabled=True.
+    for existing in positions_list:
+        if "notification_enabled" not in existing:
+            existing["notification_enabled"] = False
+        pid = str(existing.get("position_id", "") or "")
+        if pid:
+            sent = notifications.setdefault(pid, {})
+            for event in ("tp1", "tp2", "tp3"):
+                if existing.get(f"{event}_hit"):
+                    sent.setdefault(event, True)
 
     for pos in positions_list:
         if pos.get("status") != "open":
@@ -160,15 +199,15 @@ def run_cycle(token, chat_id, cfg):
         if age_days >= expiry_days:
             pos["expiry_days"] = round(age_days, 1)
             _close(pos, "expired", price, now, "EXPIRED")
-            _send(token, chat_id, _status_message(pos, price, "expired"))
-            emitted += 1
+            if _emit_event(token, chat_id, pos, "expired", _status_message(pos, price, "expired"), notifications):
+                emitted += 1
             signal_history.record_outcome(pos, "EXPIRED", price)
             continue
 
         if price <= float(pos.get("sl") or 0):
             _close(pos, "closed_sl", price, now, "LOSS")
-            _send(token, chat_id, _status_message(pos, price, "sl"))
-            emitted += 1
+            if _emit_event(token, chat_id, pos, "sl", _status_message(pos, price, "sl"), notifications):
+                emitted += 1
             trade_journal.record("stop", pos["position_id"], coin=coin, price=price, outcome="LOSS")
             signal_history.record_outcome(pos, "LOSS", price)
             continue
@@ -180,12 +219,12 @@ def run_cycle(token, chat_id, cfg):
                 _apply_tp(pos, event, price)
                 if event == "tp3":
                     _close(pos, "closed_tp3", price, now, "WIN")
-                    _send(token, chat_id, _status_message(pos, price))
-                    emitted += 1
+                    if _emit_event(token, chat_id, pos, "tp3", _status_message(pos, price), notifications):
+                        emitted += 1
                     signal_history.record_outcome(pos, "WIN", price)
                     break
-                _send(token, chat_id, _status_message(pos, price))
-                emitted += 1
+                if _emit_event(token, chat_id, pos, event, _status_message(pos, price), notifications):
+                    emitted += 1
 
         if pos.get("status") == "open":
             keep.append(pos)
