@@ -153,7 +153,21 @@ def run_buy(token, chat_id):
         sym, interval = task
         return intraday_signal(sym, interval=interval, min_vol_x=float(cfg.get("buy_min_vol_x", 1.15)), chg24=chg.get(sym), min_potential_pct=float(cfg.get("signal_min_potential_pct", 5.0)), max_potential_pct=float(cfg.get("signal_max_potential_pct", 80.0)), min_score=float(cfg.get("signal_min_score", 55)), min_rr=float(cfg.get("signal_min_rr", 1.5)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex: hits = [r for r in ex.map(scan, tasks) if r]
-    fired = load_json("state/fired_signals.json", {}) or {}; updates = {}; fresh = []; cooldown_hours = 4.0; entry_change_pct = 0.02; now_ts = datetime.now(timezone.utc).timestamp()
+    fired = load_json("state/fired_signals.json", {}) or {}
+    # Migrate the previous coin|interval|setup keys to one state record per coin.
+    migrated_fired = False
+    if any("|" in str(k) for k in fired):
+        migrated = {}
+        for key, value in fired.items():
+            coin = str(key).split("|", 1)[0].upper()
+            if not coin or not isinstance(value, dict):
+                continue
+            previous = migrated.get(coin)
+            if previous is None or float(value.get("ts", 0) or 0) > float(previous.get("ts", 0) or 0):
+                migrated[coin] = value
+        fired = migrated
+        migrated_fired = True
+    updates = {}; fresh = []; cooldown_hours = 4.0; entry_change_pct = 0.02; now_ts = datetime.now(timezone.utc).timestamp()
     # One Telegram BUY signal per coin. A second signal is allowed only when
     # the previous signal has materially changed (setup/timeframe or >2% entry).
     best_by_coin = {}
@@ -190,7 +204,10 @@ def run_buy(token, chat_id):
     fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"])); fresh = fresh[:int(cfg.get("buy_fast_top_n_shown", 15))]
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
     if not fresh and not fired_alerts: log("[BUY] no new signals"); return False
-    if updates: fired.update(updates); save_json("state/fired_signals.json", fired)
+    if updates:
+        fired.update(updates)
+    if updates or migrated_fired:
+        save_json("state/fired_signals.json", fired)
     try: positions_mod.open_picks(fresh, cfg, source="buy")
     except Exception as e: log("BUY", "positions open error:", e)
     lines = [f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}", f"🔎 {len(cands)} liquid coins · {len(tasks)} timeframe scans · 5m/15m/1h", ""]
