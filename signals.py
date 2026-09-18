@@ -4,6 +4,7 @@
 import indicators as ind
 from botutil import http_json
 import signal_history
+from discovery import structure_snapshot
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
@@ -108,61 +109,173 @@ def _setup_type(price,resistance,support,e20,vol_ratio,macd_rising,rsi):
 
 
 def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None):
-    """Generate a strategy-specific 5m/15m scalp or 1h small-trade setup."""
+    """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
     profile = strategy_profile(interval)
-    if not profile: return None
+    if not profile:
+        return None
     try:
         effective_min_vol_x = profile["min_vol_x"] if min_vol_x is None else max(float(min_vol_x), profile["min_vol_x"])
         effective_min_score = profile["min_score"] if min_score is None else max(float(min_score), profile["min_score"])
         effective_min_rr = profile["min_rr"] if min_rr is None else max(float(min_rr), profile["min_rr"])
-        data=_fetch_klines(coin,interval,limit)
-        if not data: return None
-        data=data[:-1]
-        closes=[float(k[4]) for k in data]; highs=[float(k[2]) for k in data]; lows=[float(k[3]) for k in data]; vols=[float(k[5]) for k in data]; qvols=[float(k[7]) for k in data]
-        if len(closes)<70 or (min_hour_vol and sum(qvols[-4:])<min_hour_vol): return None
-        e9=ind.ema(closes,9); e20=ind.ema(closes,20); e21=ind.ema(closes,21); m,sig,hist=ind.macd(closes); r=ind.rsi(closes,14) or 50; a=ind.atr(highs,lows,closes) or closes[-1]*0.01; price=closes[-1]
-        recent_vol=sum(vols[-2:])/2; base_vol=sum(vols[-22:-2])/20; vol_ratio=recent_vol/base_vol if base_vol>0 else 0
-        if vol_ratio<effective_min_vol_x: return None
-        resistance=max(highs[-21:-1]); support=min(lows[-21:-1]); range_high=max(highs[-12:-1]); macd_rising=hist[-1]>hist[-2]; ema_bull=e9[-1]>e21[-1] and price>e20[-1]
-        trend=_trend_filter(coin)
-        if not trend: return None
-        setup=_setup_type(price,resistance,support,e20[-1],vol_ratio,macd_rising,r)
-        near_support=abs(price/support-1)<=0.012 if support else False
-        if setup=="REVERSAL": structure_score=14 if near_support else 5
-        elif setup=="BREAKOUT": structure_score=22 if price>=range_high else 12
-        elif setup=="PULLBACK": structure_score=18
-        else: structure_score=15
-        score=0.0; reasons=[]
-        if ema_bull: score+=18; reasons.append("EMA structure bullish")
-        elif price>e20[-1]: score+=10; reasons.append("price above EMA20")
-        else: score-=5
-        if m[-1]>sig[-1]: score+=12; reasons.append("MACD bullish")
-        if macd_rising: score+=7; reasons.append("MACD histogram rising")
-        if 48<=r<=70: score+=10; reasons.append("RSI healthy")
-        elif 40<=r<48: score+=5; reasons.append("RSI recovering")
-        elif r>78: score-=8; reasons.append("RSI extended")
-        if vol_ratio>=2: score+=15; reasons.append(f"volume x{vol_ratio:.1f}")
-        elif vol_ratio>=1.5: score+=11; reasons.append(f"volume x{vol_ratio:.1f}")
-        else: score+=7; reasons.append(f"volume x{vol_ratio:.1f}")
-        score+=structure_score+trend["score"]
+        data = _fetch_klines(coin, interval, limit)
+        if not data:
+            return None
+        data = data[:-1]
+        closes = [float(k[4]) for k in data]
+        highs = [float(k[2]) for k in data]
+        lows = [float(k[3]) for k in data]
+        vols = [float(k[5]) for k in data]
+        qvols = [float(k[7]) for k in data]
+        if len(closes) < 70 or (min_hour_vol and sum(qvols[-4:]) < min_hour_vol):
+            return None
+
+        e9 = ind.ema(closes, 9)
+        e20 = ind.ema(closes, 20)
+        e21 = ind.ema(closes, 21)
+        m, sig, hist = ind.macd(closes)
+        r = ind.rsi(closes, 14) or 50
+        a = ind.atr(highs, lows, closes) or closes[-1] * 0.01
+        price = closes[-1]
+        recent_vol = sum(vols[-2:]) / 2
+        base_vol = sum(vols[-22:-2]) / 20
+        vol_ratio = recent_vol / base_vol if base_vol > 0 else 0
+        if vol_ratio < effective_min_vol_x:
+            return None
+
+        resistance = max(highs[-21:-1])
+        support = min(lows[-21:-1])
+        range_high = max(highs[-12:-1])
+        macd_rising = hist[-1] > hist[-2]
+        ema_bull = e9[-1] > e21[-1] and price > e20[-1]
+        trend = _trend_filter(coin)
+        if not trend:
+            return None
+
+        structure = structure_snapshot(closes, highs, lows)
+        near_support = abs(price / support - 1) <= 0.012 if support else False
+        setup = _setup_type(price, resistance, support, e20[-1], vol_ratio, macd_rising, r)
+        if structure["choch"] and setup != "BREAKOUT":
+            setup = "REVERSAL"
+        elif structure["bos"] and price >= range_high and vol_ratio >= 1.15:
+            setup = "BREAKOUT"
+
+        if setup == "REVERSAL":
+            structure_score = 14 if near_support else 5
+        elif setup == "BREAKOUT":
+            structure_score = 22 if price >= range_high else 12
+        elif setup == "PULLBACK":
+            structure_score = 18
+        else:
+            structure_score = 15
+
+        score = 0.0
+        reasons = []
+        if ema_bull:
+            score += 18
+            reasons.append("EMA structure bullish")
+        elif price > e20[-1]:
+            score += 10
+            reasons.append("price above EMA20")
+        else:
+            score -= 5
+        if m[-1] > sig[-1]:
+            score += 12
+            reasons.append("MACD bullish")
+        if macd_rising:
+            score += 7
+            reasons.append("MACD histogram rising")
+        if 48 <= r <= 70:
+            score += 10
+            reasons.append("RSI healthy")
+        elif 40 <= r < 48:
+            score += 5
+            reasons.append("RSI recovering")
+        elif r > 78:
+            score -= 8
+            reasons.append("RSI extended")
+        if vol_ratio >= 2:
+            score += 15
+            reasons.append(f"volume x{vol_ratio:.1f}")
+        elif vol_ratio >= 1.5:
+            score += 11
+            reasons.append(f"volume x{vol_ratio:.1f}")
+        else:
+            score += 7
+            reasons.append(f"volume x{vol_ratio:.1f}")
+
+        score += structure_score + trend["score"]
+        score += min(18.0, structure["score"] * 0.25)
+        if structure["higher_lows"]:
+            reasons.append("higher lows")
+        if structure["bos"]:
+            reasons.append("BOS")
+        if structure["choch"]:
+            reasons.append("CHOCH")
+        if structure["liquidity_sweep"]:
+            reasons.append("liquidity sweep + reclaim")
+        if structure["compression"] > 0.15:
+            reasons.append("compression before expansion")
         reasons.append(f"4h {trend['state'].lower()}")
-        score=max(0,min(100,score))
-        stop_dist=max(profile["stop_atr"]*a,price*0.006); stop=price-stop_dist; risk_pct=_pct(price,stop)
-        structure_target=resistance if resistance>price else range_high; volatility_target=price+profile["target_atr"]*a; target=max(structure_target,volatility_target); potential=_pct(target,price)
-        if potential<min_potential_pct: return None
-        potential=min(float(max_potential_pct),potential); target=price*(1+potential/100); rr=potential/risk_pct if risk_pct>0 else 0
-        if score<effective_min_score or rr<effective_min_rr: return None
-        if trend["state"]=="BEARISH" and setup!="REVERSAL": return None
-        result={"coin":coin,"interval":interval,"strategy":profile["kind"],"strategy_id":next(k for k,v in STRATEGY_PROFILES.items() if v is profile),"price":price,"entry":price,"stop":stop,"t1":price+stop_dist,"t2":price+2*stop_dist,"t3":target,"target":target,"rsi":round(r,1),"vol_x":round(vol_ratio,2),"chg24":round(float(chg24 or 0),2),"st":round(score,1),"score":round(score,1),"potential_pct":round(potential,1),"risk_pct":round(risk_pct,2),"rr":round(rr,2),"atr":round(a,6),"resistance":resistance,"support":support,"setup_type":setup,"trend_4h":trend["state"],"e9_e21":e9[-1]>e21[-1],"macd_rising":macd_rising,"reasons":reasons}
-        stats=signal_history.comparable_stats(result, min_samples=20)
-        result["historical_win_pct"]=stats["win_pct"]
-        result["historical_sample"]=stats["sample"]
-        result["historical_wins"]=stats["wins"]
-        result["historical_losses"]=stats["losses"]
-        result["historical_scope"]=stats["scope"]
+        score = max(0, min(100, score))
+
+        stop_dist = max(profile["stop_atr"] * a, price * 0.006)
+        stop = price - stop_dist
+        risk_pct = _pct(price, stop)
+        structure_target = resistance if resistance > price else range_high
+        volatility_target = price + profile["target_atr"] * a
+        target = max(structure_target, volatility_target)
+        potential = _pct(target, price)
+        if potential < min_potential_pct:
+            return None
+        potential = min(float(max_potential_pct), potential)
+        target = price * (1 + potential / 100)
+        rr = potential / risk_pct if risk_pct > 0 else 0
+        if score < effective_min_score or rr < effective_min_rr:
+            return None
+        if trend["state"] == "BEARISH" and setup != "REVERSAL":
+            return None
+
+        entry_quality = 50.0
+        if structure["bos"]:
+            entry_quality += 15
+        if structure["liquidity_sweep"]:
+            entry_quality += 12
+        if structure["higher_lows"]:
+            entry_quality += 8
+        if structure["compression"] > 0.15:
+            entry_quality += 7
+        if r > 75:
+            entry_quality -= 12
+        if potential > 60 and price > range_high:
+            entry_quality -= 8
+        entry_quality = max(0.0, min(100.0, entry_quality))
+        expansion_score = max(0.0, min(100.0, score + min(15.0, max(0.0, potential - 15.0))))
+
+        result = {
+            "coin": coin, "interval": interval, "strategy": profile["kind"],
+            "strategy_id": next(k for k, v in STRATEGY_PROFILES.items() if v is profile),
+            "price": price, "entry": price, "stop": stop,
+            "t1": price + stop_dist, "t2": price + 2 * stop_dist, "t3": target, "target": target,
+            "rsi": round(r, 1), "vol_x": round(vol_ratio, 2), "chg24": round(float(chg24 or 0), 2),
+            "st": round(score, 1), "score": round(score, 1), "potential_pct": round(potential, 1),
+            "risk_pct": round(risk_pct, 2), "rr": round(rr, 2), "atr": round(a, 6),
+            "resistance": resistance, "support": support, "setup_type": setup, "trend_4h": trend["state"],
+            "e9_e21": e9[-1] > e21[-1], "macd_rising": macd_rising, "reasons": reasons,
+            "entry_quality": round(entry_quality, 1), "expansion_score": round(expansion_score, 1),
+            "structure_score": round(structure["score"], 1), "bos": structure["bos"],
+            "choch": structure["choch"], "liquidity_sweep": structure["liquidity_sweep"],
+            "higher_lows": structure["higher_lows"], "compression": structure["compression"],
+        }
+        stats = signal_history.comparable_stats(result, min_samples=20)
+        result["historical_win_pct"] = stats["win_pct"]
+        result["historical_sample"] = stats["sample"]
+        result["historical_wins"] = stats["wins"]
+        result["historical_losses"] = stats["losses"]
+        result["historical_scope"] = stats["scope"]
         if stats["win_pct"] is not None:
             scope = "exact setup" if stats["scope"] == "exact" else "setup/timeframe"
             reasons.append(f"historical {stats['win_pct']:.0f}% ({stats['sample']} {scope} results)")
         signal_history.record_signal(result)
         return result
-    except Exception: return None
+    except Exception:
+        return None
