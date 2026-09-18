@@ -3,6 +3,7 @@ import unittest
 import discovery
 import signals
 import scanner
+from execution_guard import ExecutionRequest, validate_spot_request
 
 
 class ProductionHardeningTests(unittest.TestCase):
@@ -22,6 +23,12 @@ class ProductionHardeningTests(unittest.TestCase):
         ranked = scanner._rank_trade_candidates(hits, {})
         self.assertEqual(ranked[0]["coin"], "A")
         self.assertGreater(ranked[0]["trade_quality"], ranked[1]["trade_quality"])
+
+    def test_spot_guard_requires_confirmation_and_rejects_derivatives(self):
+        with self.assertRaises(PermissionError):
+            validate_spot_request(ExecutionRequest("SPOT", "BUY", "BTCUSDT", "BINANCE", 1))
+        with self.assertRaises(ValueError):
+            validate_spot_request(ExecutionRequest("FUTURES", "BUY", "BTCUSDT", "BINANCE", 1, True))
 
     def test_target_staging_is_monotonic(self):
         target = 120.0
