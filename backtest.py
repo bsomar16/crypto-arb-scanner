@@ -283,7 +283,8 @@ def run_backtest(cfg):
     if not results:
         return "Backtest: no data."
 
-    stats_payload = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "stats": {}}
+    stats_payload = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "stats": {}, "setup_stats": {}}
+    setup_buckets = {}
     for r in results:
         if not r.get("n"):
             continue
@@ -291,6 +292,19 @@ def run_backtest(cfg):
             "wins": r["wins"], "losses": r["losses"], "expired": r["expired"],
             "win_pct": r["win_pct"], "sample": r["wins"] + r["losses"],
             "milestones": r.get("milestones", {}),
+        }
+        for trade in r.get("trades", []):
+            if trade.get("outcome") not in ("WIN", "LOSS"):
+                continue
+            key = f"{r['interval']}|{trade.get('setup_type', 'UNKNOWN')}"
+            bucket = setup_buckets.setdefault(key, {"wins": 0, "losses": 0})
+            bucket["wins" if trade["outcome"] == "WIN" else "losses"] += 1
+    for key, bucket in setup_buckets.items():
+        sample = bucket["wins"] + bucket["losses"]
+        stats_payload["setup_stats"][key] = {
+            **bucket,
+            "sample": sample,
+            "win_pct": bucket["wins"] / sample * 100 if sample else None,
         }
     try:
         os.makedirs("state", exist_ok=True)
