@@ -5,6 +5,7 @@ import signals
 import scanner
 import backtest
 import exposure
+import entry_engine
 from execution_guard import ExecutionRequest, validate_spot_request
 
 
@@ -65,6 +66,37 @@ class ProductionHardeningTests(unittest.TestCase):
             validate_spot_request(ExecutionRequest("SPOT", "BUY", "BTCUSDT", "BINANCE", 1))
         with self.assertRaises(ValueError):
             validate_spot_request(ExecutionRequest("FUTURES", "BUY", "BTCUSDT", "BINANCE", 1, True))
+
+    def test_confirmed_entry_requires_sweep_bos_retest_confirmation(self):
+        n = 50
+        closes = [100.0] * n
+        opens = [99.8] * n
+        highs = [105.0] * n
+        lows = [95.0] * n
+        for i in range(0, 41):
+            closes[i] = 100.0
+            opens[i] = 99.5
+            highs[i] = 105.0
+            lows[i] = 95.0
+        # Sell-side liquidity sweep/reclaim.
+        lows[41], closes[41], opens[41], highs[41] = 94.0, 98.0, 96.0, 101.0
+        # Bullish BOS above the pre-sweep high.
+        opens[42], closes[42], highs[42], lows[42] = 100.0, 107.0, 108.0, 99.0
+        # Retest of the broken 105 level.
+        opens[43], closes[43], highs[43], lows[43] = 104.0, 106.0, 107.0, 104.0
+        # Confirmation candle.
+        opens[44], closes[44], highs[44], lows[44] = 106.0, 109.0, 110.0, 105.5
+        for i in range(45, n):
+            opens[i], closes[i], highs[i], lows[i] = 108.0, 109.0, 110.0, 107.0
+
+        result = entry_engine.evaluate_entry(closes, highs, lows, opens, "15m", atr=2.0)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["entry_trigger"], "SWEEP_RECLAIM_BOS_RETEST_CONFIRM")
+        self.assertTrue(result["liquidity_sweep_confirmed"])
+        self.assertTrue(result["bos_confirmed"])
+        self.assertTrue(result["retest_confirmed"])
+        self.assertTrue(result["confirmation_candle"])
+        self.assertGreaterEqual(result["entry_quality"], 80)
 
     def test_target_staging_is_monotonic(self):
         target = 120.0
