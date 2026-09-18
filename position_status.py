@@ -136,7 +136,9 @@ def _send(token, chat_id, message):
         return False
 
 def _emit_event(token, chat_id, pos, event, message, notifications):
-    if not pos.get("notification_enabled", False):
+    # Only positions created by the current notification protocol may emit.
+    # This silences legacy positions so their old TP/SL events are not replayed.
+    if not pos.get("notification_enabled", False) or int(pos.get("notification_version", 0) or 0) < 2:
         return False
     pid = str(pos.get("position_id", "") or "")
     if not pid:
@@ -171,6 +173,8 @@ def run_cycle(token, chat_id, cfg):
     for existing in positions_list:
         if "notification_enabled" not in existing:
             existing["notification_enabled"] = False
+        # Legacy records intentionally remain silent; only newly created
+        # notification_version=2 positions can generate Telegram lifecycle alerts.
         pid = str(existing.get("position_id", "") or "")
         if pid:
             sent = notifications.setdefault(pid, {})
