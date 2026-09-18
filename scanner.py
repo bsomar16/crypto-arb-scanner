@@ -125,12 +125,36 @@ def run_arb(token, chat_id):
     if offline: lines.extend(["", f"⚠️ offline feeds: {', '.join(offline)}"])
     telegram_msg(token, chat_id, "\n".join(lines)); return True
 
-def _candidate_universe(cfg, q, star):
-    rank = sorted(q.items(), key=lambda kv: -kv[1]); top_n = int(cfg.get("buy_scan_top_n", 100)); cands = [sym for sym, _ in rank[:top_n]]; floor = float(cfg.get("buy_min_vol", 2000000))
-    for sym in sorted(star - set(cands)):
-        if q.get(sym, 0) >= floor * 0.5: cands.append(sym)
-    return cands, rank
+def _candidate_universe(cfg, q, star, t24=None):
+    """Build a wide discovery universe instead of volume-rank-only candidates."""
+    from discovery import discover
+    results, deep = discover(t24 or [], cfg)
+    discovered = [r["coin"] for r in deep]
+    floor = float(cfg.get("discovery_min_quote_volume", 500000))
+    for sym in sorted(star - set(discovered)):
+        if q.get(sym, 0) >= floor:
+            discovered.append(sym)
+    return discovered, results
 
+def _rank_trade_candidates(hits, cfg):
+    """Rank qualified signals into the small daily entry budget."""
+    scored = []
+    for r in hits:
+        historical = r.get("historical_win_pct")
+        historical_component = float(historical) if historical is not None else 50.0
+        rr_component = min(100.0, float(r.get("rr", 0)) / 3.0 * 100.0)
+        quality = (
+            float(r.get("entry_quality", 50.0)) * 0.30
+            + float(r.get("score", 0)) * 0.25
+            + float(r.get("expansion_score", 0)) * 0.20
+            + historical_component * 0.15
+            + rr_component * 0.10
+        )
+        row = dict(r)
+        row["trade_quality"] = round(max(0.0, min(100.0, quality)), 1)
+        scored.append(row)
+    scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
+    return scored
 def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
@@ -190,25 +214,50 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
     return fresh[:limit], updates
 
 def run_buy(token, chat_id):
-    cfg = load_cfg(); intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
-    if not intervals: intervals = ["5m", "15m", "1h"]
-    t24 = fetch_binance_24h(); q = crypto_quote(t24); chg = {}
+    cfg = load_cfg()
+    intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
+    if not intervals:
+        intervals = ["5m", "15m", "1h"]
+
+    t24 = fetch_binance_24h()
+    q = crypto_quote(t24)
+    chg = {}
     for x in t24:
         s = x.get("symbol", "")
         if s.endswith("USDT") and s != "USDTUSDT":
-            try: chg[s[:-4]] = float(x.get("priceChangePercent", 0))
-            except (ValueError, TypeError): pass
-    star = {str(w).upper() for w in cfg.get("watchlist", [])}; star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
-    cands, rank = _candidate_universe(cfg, q, star); tasks = []
-    for interval in intervals:
-        pool = cands if interval != "5m" else [s for s, _ in rank[:int(cfg.get("buy_fast_top_n", 150))]]
-        tasks.extend((sym, interval) for sym in pool)
+            try:
+                chg[s[:-4]] = float(x.get("priceChangePercent", 0))
+            except (ValueError, TypeError):
+                pass
+
+    star = {str(w).upper() for w in cfg.get("watchlist", [])}
+    star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
+
+    # Stage 1: scan a broad liquid Binance universe with a cheap 1h discovery pass.
+    cands, discovery_rows = _candidate_universe(cfg, q, star, t24=t24)
+    deep_n = int(cfg.get("discovery_deep_candidates", 100))
+    cands = cands[:max(deep_n, len(star))]
+    tasks = [(sym, interval) for interval in intervals for sym in cands]
+
     def scan(task):
         sym, interval = task
-        return intraday_signal(sym, interval=interval, min_vol_x=float(cfg.get("buy_min_vol_x", 1.15)), chg24=chg.get(sym), min_potential_pct=float(cfg.get("signal_min_potential_pct", 5.0)), max_potential_pct=float(cfg.get("signal_max_potential_pct", 80.0)), min_score=float(cfg.get("signal_min_score", 55)), min_rr=float(cfg.get("signal_min_rr", 1.5)))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex: hits = [r for r in ex.map(scan, tasks) if r]
+        return intraday_signal(
+            sym,
+            interval=interval,
+            min_vol_x=float(cfg.get("buy_min_vol_x", 1.15)),
+            min_hour_vol=float(cfg.get("buy_fast_min_hour_vol", 100000)),
+            chg24=chg.get(sym),
+            min_potential_pct=float(cfg.get("signal_min_potential_pct", 5.0)),
+            max_potential_pct=float(cfg.get("signal_max_potential_pct", 80.0)),
+            min_score=float(cfg.get("signal_min_score", 55)),
+            min_rr=float(cfg.get("signal_min_rr", 1.5)),
+        )
+
+    workers = int(cfg.get("deep_scan_workers", 16))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
+        hits = [r for r in ex.map(scan, tasks) if r]
+
     fired = load_json("state/fired_signals.json", {}) or {}
-    # Migrate the previous coin|interval|setup keys to one state record per coin.
     migrated_fired = False
     if any("|" in str(k) for k in fired):
         migrated = {}
@@ -221,6 +270,7 @@ def run_buy(token, chat_id):
                 migrated[coin] = value
         fired = migrated
         migrated_fired = True
+
     now_ts = datetime.now(timezone.utc).timestamp()
     active_coins = {
         str(p.get("coin", "")).upper()
@@ -233,25 +283,57 @@ def run_buy(token, chat_id):
         now_ts,
         active_coins=active_coins,
         entry_change_pct=float(cfg.get("buy_signal_entry_change_pct", 0.02)),
-        limit=int(cfg.get("buy_fast_top_n_shown", 15)),
+        limit=int(cfg.get("buy_signal_pool_size", 20)),
     )
-    for r in fresh:
+
+    # Stage 4: choose only the configured daily entry budget from the signal pool.
+    ranked = _rank_trade_candidates(fresh, cfg)
+    entry_budget = int(cfg.get("max_trade_entries_per_day", 5))
+    selected = ranked[:max(1, min(entry_budget, 5))]
+    for r in selected:
         r["star"] = r["coin"] in star
+
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
-    if not fresh and not fired_alerts: log("[BUY] no new signals"); return False
+    if not selected and not fired_alerts:
+        log("[BUY] no new signals")
+        return False
+
     if updates:
         fired.update(updates)
     if updates or migrated_fired:
         save_json("state/fired_signals.json", fired)
-    try: positions_mod.open_picks(fresh, cfg, source="buy")
-    except Exception as e: log("BUY", "positions open error:", e)
-    lines = [f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}", f"🔎 {len(cands)} liquid coins · {len(tasks)} timeframe scans · 5m/15m/1h", ""]
-    for i, r in enumerate(fresh, 1):
-        if i > 1: lines.append("")
-        lines.extend([f"<b>#{i}</b>" + (" ⭐" if r.get("star") else "")]); lines.extend(_signal_message(r))
-    if fired_alerts: lines.extend(["", "🔔 <b>PRICE ALERTS</b>"]); lines.extend(fired_alerts[:6])
-    lines.extend(["", "━━━━━━━━━━━━━━━━━━━━", "Potential = model target, not guaranteed profit. Historical win rate will be added from real backtests.", "24h volume is a liquidity filter only; BUY requires multi-factor confirmation."])
-    log(f"[BUY] {len(fresh)} signals from {len(tasks)} scans"); telegram_msg(token, chat_id, "\n".join(lines)); return True
+
+    try:
+        positions_mod.open_picks(selected, cfg, source="buy")
+    except Exception as e:
+        log("BUY", "positions open error:", e)
+
+    lines = [
+        f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}",
+        f"🔎 Wide discovery: {len(discovery_rows)} candidates · deep: {len(cands)} · {len(tasks)} MTF scans",
+        f"🎯 Selected {len(selected)} of {len(fresh)} qualified signals · daily entry budget {entry_budget}",
+        "",
+    ]
+    for i, r in enumerate(selected, 1):
+        if i > 1:
+            lines.append("")
+        lines.extend([f"<b>#{i}</b>" + (" ⭐" if r.get("star") else "")])
+        lines.extend(_signal_message(r))
+        lines.append(f"🏆 <b>Trade Quality:</b> {r['trade_quality']:.0f}/100")
+
+    if fired_alerts:
+        lines.extend(["", "🔔 <b>PRICE ALERTS</b>"])
+        lines.extend(fired_alerts[:6])
+    lines.extend([
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "Potential = model target, not guaranteed profit.",
+        "24h volume is a liquidity filter only; BUY requires multi-factor confirmation.",
+        "Daily budget limits selections; the bot does not manufacture trades when fewer qualified setups exist.",
+    ])
+    log(f"[BUY] {len(selected)} selected from {len(fresh)} qualified signals / {len(tasks)} deep scans")
+    telegram_msg(token, chat_id, "\n".join(lines))
+    return True
 
 def run_daily(token, chat_id):
     cfg = load_cfg(); fng, fngc = sentiment.fear_greed(); btc_dom, eth_dom, total_mcap = sentiment.btc_dominance(); fng_nudge = (fng - 50) / 50 * 3.0 if fng is not None else 0.0
