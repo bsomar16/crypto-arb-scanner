@@ -6,6 +6,7 @@ from botutil import http_json
 import signal_history
 from discovery import structure_snapshot
 from entry_engine import evaluate_entry
+from expansion import classify_expansion
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
@@ -250,11 +251,23 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         if trend["state"] == "BEARISH" and setup != "REVERSAL":
             return None
 
+        expansion = classify_expansion(closes, highs, lows, vols, a)
         entry_quality = float(entry["entry_quality"])
         if entry["extension_pct"] > 4.0:
             score -= min(10.0, entry["extension_pct"] * 1.5)
         score = max(0.0, min(100.0, score))
         expansion_score = max(0.0, min(100.0, score + min(15.0, max(0.0, potential - 15.0))))
+        # Prefer early expansion without accepting a late pump merely because
+        # its absolute potential is large.
+        expansion_score = round(
+            max(0.0, min(100.0, expansion_score * 0.70 + expansion["score"] * 0.30)), 1
+        )
+        if expansion["state"] == "LATE_EXTENSION" and setup != "REVERSAL":
+            return None
+        if expansion["state"] == "EARLY_EXPANSION":
+            reasons.append("early expansion")
+        elif expansion["state"] == "EXPANSION":
+            reasons.append("expansion confirmed")
 
         # Stage the three targets across the modelled move so TP1/TP2 are
         # meaningful partial exits instead of merely 1R/2R placeholders.
@@ -272,6 +285,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             "resistance": resistance, "support": support, "setup_type": setup, "trend_4h": trend["state"],
             "e9_e21": e9[-1] > e21[-1], "macd_rising": macd_rising, "reasons": reasons,
             "entry_quality": round(entry_quality, 1), "expansion_score": round(expansion_score, 1),
+            "expansion_state": expansion["state"], "expansion_volume_ratio": expansion["volume_ratio"],
+            "expansion_range_ratio": expansion["expansion"], "expansion_extension_pct": expansion["extension_pct"],
             "entry_trigger": entry["entry_trigger"], "liquidity_sweep_confirmed": entry["liquidity_sweep_confirmed"],
             "reclaim_confirmed": entry["reclaim_confirmed"], "bos_confirmed": entry["bos_confirmed"],
             "retest_confirmed": entry["retest_confirmed"], "confirmation_candle": entry["confirmation_candle"],
