@@ -124,7 +124,11 @@ def discover(t24, cfg):
     workers = int(cfg.get("discovery_workers", 24))
     with ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
         futures = [ex.submit(_fast_one, c, qv, chg, btc_chg) for c, qv, chg in rows]
-        results = [f.result() for f in futures if f.result()]
+        results = []
+        for f in futures:
+            result = f.result()
+            if result:
+                results.append(result)
 
     results.sort(key=lambda r: (-r["score"], -r["qv"]))
     deep_n = int(cfg.get("discovery_deep_candidates", 100))
