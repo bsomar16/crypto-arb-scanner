@@ -1,10 +1,8 @@
 name: Crypto Signal Bot
 
 on:
-  # BUY signals and trade tracking run every 15 minutes.
-  # cron-job.org may still trigger the workflow manually; disable the old hourly BUY job there to avoid duplicate runs.
-  schedule:
-    - cron: '*/15 * * * *'
+  # Scheduling is external (cron-job.org). Do not add a native schedule here:
+  # two schedulers would create duplicate BUY/TP notifications.
   workflow_dispatch:
     inputs:
       mode:
@@ -24,6 +22,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: crypto-signal-bot
+  cancel-in-progress: false
 
 jobs:
   arb-scan:
@@ -59,8 +61,7 @@ jobs:
 
   buy-signals:
     if: |
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'all'))
+      github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'all')
     runs-on: ubuntu-latest
     concurrency:
       group: buy-scan
