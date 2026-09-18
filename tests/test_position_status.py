@@ -66,6 +66,7 @@ class PositionStatusTests(unittest.TestCase):
         pos = self._position()
         pos["position_id"] = "notify-once"
         pos["notification_enabled"] = True
+        pos["notification_version"] = 2
         notifications = {}
         with patch.object(position_status, "_send", return_value=True) as sender, \
              patch.object(position_status, "_save_notifications") as saver:
