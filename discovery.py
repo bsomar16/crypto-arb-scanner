@@ -118,7 +118,8 @@ def discover(t24, cfg):
 
     rows.sort(key=lambda x: x[1], reverse=True)
     max_universe = int(cfg.get("discovery_universe_size", 600))
-    rows = rows[:max_universe]
+    fast_scan_size = max(1, min(max_universe, int(cfg.get("discovery_fast_scan_size", 300))))
+    rows = rows[:fast_scan_size]
     btc_chg = next((r[2] for r in rows if r[0] == "BTC"), 0.0)
 
     workers = int(cfg.get("discovery_workers", 24))
