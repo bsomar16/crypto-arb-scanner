@@ -257,61 +257,68 @@ def _status_msg(pos, price):
 
 
 def check_positions(token, chat_id, cfg):
-    """Check tracked positions independently of signal scans and emit periodic status."""
+    """Update tracked positions without sending Telegram notifications.
+
+    Telegram lifecycle notifications are owned exclusively by position_status.py.
+    Keeping a single notification owner prevents duplicate TP/SL messages when
+    multiple scanner modes invoke position checks.
+    """
     expiry_days = thresholds(cfg)["expiry_days"]
-    status_interval = _cfg_num(cfg, "position_status_interval_minutes", "POSITION_STATUS_INTERVAL_MINUTES", STATUS_INTERVAL_DEFAULT)
     positions = load()
     if not positions:
         return 0
+
     now = datetime.now(timezone.utc)
-    now_ts = now.timestamp()
     keep = []
-    alerts = []
+    changed = False
+
     for pos in positions:
         if pos.get("status") != "open":
             continue
+
         coin = pos.get("coin", "")
         price = _public_price(pos.get("exchange") or "BINANCE", coin)
         if price is None:
             keep.append(pos)
             continue
+
+        changed = True
         pos["last_price"] = price
-        entry = float(pos["entry"])
+        entry = float(pos.get("entry") or 0)
         pos["last_pct"] = round((price / entry - 1) * 100 if entry else 0, 2)
+
         try:
             entry_t = datetime.fromisoformat(pos["entry_ts"])
         except (TypeError, ValueError):
             entry_t = now
+
         age_days = round((now - entry_t).total_seconds() / 86400, 1)
+
+        # State updates only. position_status.py is the sole Telegram emitter.
         if age_days >= expiry_days:
             pos["expiry_days"] = age_days
             _close(pos, "expired", price, now, "EXPIRED")
-            alerts.append(_fmt_msg("expired", coin, pos, price))
             signal_history.record_outcome(pos, "EXPIRED", price)
             continue
-        if price <= pos["sl"]:
+
+        if price <= float(pos.get("sl") or 0):
             _close(pos, "closed_sl", price, now, "LOSS")
-            alerts.append(_fmt_msg("sl", coin, pos, price))
-            trade_journal.record("stop", pos["position_id"], coin=coin, price=price, outcome="LOSS")
             signal_history.record_outcome(pos, "LOSS", price)
             continue
-        for event, level in (("tp1", pos["tp1"]), ("tp2", pos["tp2"]), ("tp3", pos["tp3"])):
-            if price >= level and not pos.get(f"{event}_hit"):
+
+        for event, level in (("tp1", pos.get("tp1")), ("tp2", pos.get("tp2")), ("tp3", pos.get("tp3"))):
+            if level is None:
+                continue
+            if price >= float(level) and not pos.get(f"{event}_hit"):
                 _record_target(pos, event, price)
-                alerts.append(_fmt_msg(event, coin, pos, price))
                 if event == "tp3":
                     _close(pos, "closed_tp3", price, now, "WIN")
                     signal_history.record_outcome(pos, "WIN", price)
                     break
+
         if pos.get("status") == "open":
-            if _status_due(pos["position_id"], now_ts, status_interval):
-                alerts.append(_status_msg(pos, price))
             keep.append(pos)
-    save(keep)
-    for msg in alerts:
-        if msg:
-            try:
-                telegram_msg(token, chat_id, msg)
-            except Exception as exc:
-                log("POSITIONS", "telegram error:", exc)
-    return len(alerts)
+
+    if changed:
+        save(keep)
+    return 0
