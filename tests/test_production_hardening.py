@@ -78,6 +78,18 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertEqual(len(cache.get("BTC", "5m")), 1)
         self.assertEqual(cache.get("BTC", "5m")[0]["close"], 1.5)
 
+
+    def test_early_expansion_classifier_is_causal_and_penalizes_extension(self):
+        from expansion import classify_expansion
+        closes = [100 + i * 0.05 for i in range(30)]
+        highs = [c * 1.002 for c in closes]
+        lows = [c * 0.998 for c in closes]
+        volumes = [100.0] * 30
+        result = classify_expansion(closes, highs, lows, volumes, atr=1.0)
+        self.assertIn(result["state"], {"BASE", "EXPANSION", "EARLY_EXPANSION"})
+        self.assertEqual(result["extension_pct"], round((closes[-1] / min(lows[-20:]) - 1) * 100, 2))
+        self.assertNotIn("future", result)
+
     def test_confirmed_entry_requires_sweep_bos_retest_confirmation(self):
         n = 50
         closes = [100.0] * n
