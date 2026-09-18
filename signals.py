@@ -5,6 +5,7 @@ import indicators as ind
 from botutil import http_json
 import signal_history
 from discovery import structure_snapshot
+from entry_engine import evaluate_entry
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
@@ -152,6 +153,12 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             return None
 
         structure = structure_snapshot(closes, highs, lows)
+        entry = evaluate_entry(
+            closes, highs, lows, [float(k[1]) for k in data], interval, atr=a,
+            require_retest=True,
+        )
+        if not entry:
+            return None
         near_support = abs(price / support - 1) <= 0.012 if support else False
         setup = _setup_type(price, resistance, support, e20[-1], vol_ratio, macd_rising, r)
         if structure["choch"] and setup != "BREAKOUT":
@@ -235,20 +242,10 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         if trend["state"] == "BEARISH" and setup != "REVERSAL":
             return None
 
-        entry_quality = 50.0
-        if structure["bos"]:
-            entry_quality += 15
-        if structure["liquidity_sweep"]:
-            entry_quality += 12
-        if structure["higher_lows"]:
-            entry_quality += 8
-        if structure["compression"] > 0.15:
-            entry_quality += 7
-        if r > 75:
-            entry_quality -= 12
-        if potential > 60 and price > range_high:
-            entry_quality -= 8
-        entry_quality = max(0.0, min(100.0, entry_quality))
+        entry_quality = float(entry["entry_quality"])
+        if entry["extension_pct"] > 4.0:
+            score -= min(10.0, entry["extension_pct"] * 1.5)
+        score = max(0.0, min(100.0, score))
         expansion_score = max(0.0, min(100.0, score + min(15.0, max(0.0, potential - 15.0))))
 
         # Stage the three targets across the modelled move so TP1/TP2 are
@@ -267,6 +264,12 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             "resistance": resistance, "support": support, "setup_type": setup, "trend_4h": trend["state"],
             "e9_e21": e9[-1] > e21[-1], "macd_rising": macd_rising, "reasons": reasons,
             "entry_quality": round(entry_quality, 1), "expansion_score": round(expansion_score, 1),
+            "entry_trigger": entry["entry_trigger"], "liquidity_sweep_confirmed": entry["liquidity_sweep_confirmed"],
+            "reclaim_confirmed": entry["reclaim_confirmed"], "bos_confirmed": entry["bos_confirmed"],
+            "retest_confirmed": entry["retest_confirmed"], "confirmation_candle": entry["confirmation_candle"],
+            "bos_level": entry["bos_level"], "sweep_level": entry["sweep_level"],
+            "retest_level": entry["retest_level"], "retest_distance_pct": entry["retest_distance_pct"],
+            "entry_extension_pct": entry["extension_pct"], "confirmation_body": entry["confirmation_body"],
             "structure_score": round(structure["score"], 1), "bos": structure["bos"],
             "choch": structure["choch"], "liquidity_sweep": structure["liquidity_sweep"],
             "higher_lows": structure["higher_lows"], "compression": structure["compression"],
