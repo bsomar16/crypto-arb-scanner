@@ -50,7 +50,7 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000)
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertIn("GALA", updates)
 
@@ -64,12 +64,8 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, _ = scanner._dedupe_buy_signals(hits, fired, 1000)
+        fresh, _ = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
         self.assertEqual(len(fresh), 1)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
     def test_active_coin_never_repeats_even_if_setup_changes(self):
         hits = [self._signal(setup="BREAKOUT", entry=0.00195, interval="5m")]
@@ -81,9 +77,7 @@ if __name__ == "__main__":
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(
-            hits, fired, 1000, active_coins={"GALA"}
-        )
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins={"GALA"})
         self.assertEqual(fresh, [])
         self.assertEqual(updates, {})
 
@@ -97,8 +91,10 @@ if __name__ == "__main__":
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(
-            hits, fired, 1000, active_coins=set()
-        )
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertIn("GALA", updates)
+
+
+if __name__ == "__main__":
+    unittest.main()
