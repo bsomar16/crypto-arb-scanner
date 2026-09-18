@@ -7,6 +7,7 @@ Modes: arb | daily | buy | price | backtest | portfolio | check | report | all
 import concurrent.futures
 import os
 import sys
+import time
 from argparse import ArgumentParser
 from datetime import datetime, timezone
 from statistics import median
@@ -23,6 +24,7 @@ import traps as traps_mod
 import store as store_mod
 import positions as positions_mod
 import exposure as exposure_mod
+from realtime import BinanceKlineCache
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -63,6 +65,13 @@ DEFAULTS = {
     "max_open_positions": 5,
     "max_trade_entries_per_day": 5,
     "preferred_trade_entries_per_day": 3,
+    "realtime_scan_interval_seconds": 60,
+    "realtime_discovery_refresh_seconds": 900,
+    "realtime_monitor_candidates": 25,
+    "realtime_kline_enabled": True,
+    "realtime_kline_intervals": ["5m", "15m", "1h"],
+    "realtime_kline_max_symbols": 100,
+    "realtime_kline_max_bars": 120,
 }
 
 def load_cfg():
@@ -223,7 +232,7 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
     fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"]))
     return fresh[:limit], updates
 
-def run_buy(token, chat_id):
+def run_buy(token, chat_id, realtime_cache=None):
     cfg = load_cfg()
     intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
     if not intervals:
@@ -246,7 +255,10 @@ def run_buy(token, chat_id):
     # Stage 1: scan a broad liquid Binance universe with a cheap 1h discovery pass.
     cands, discovery_rows = _candidate_universe(cfg, q, star, t24=t24)
     deep_n = int(cfg.get("discovery_deep_candidates", 100))
-    cands = cands[:max(deep_n, len(star))]
+    if realtime_cache is not None:
+        cands = cands[:max(1, int(cfg.get("realtime_monitor_candidates", 25)))]
+    else:
+        cands = cands[:max(deep_n, len(star))]
     tasks = [(sym, interval) for interval in intervals for sym in cands]
 
     def scan(task):
@@ -261,6 +273,7 @@ def run_buy(token, chat_id):
             max_potential_pct=float(cfg.get("signal_max_potential_pct", 80.0)),
             min_score=float(cfg.get("signal_min_score", 55)),
             min_rr=float(cfg.get("signal_min_rr", 1.5)),
+            realtime_bars=(realtime_cache.get(sym, interval) if realtime_cache is not None else None),
         )
 
     workers = int(cfg.get("deep_scan_workers", 16))
@@ -354,6 +367,45 @@ def run_buy(token, chat_id):
     telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
+
+def run_realtime(token, chat_id):
+    """Run a long-lived closed-candle confirmation monitor."""
+    cfg = load_cfg()
+    if not bool(cfg.get("realtime_kline_enabled", True)):
+        log("[REALTIME] disabled by config")
+        return False
+    intervals = [i for i in cfg.get("realtime_kline_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
+    if not intervals:
+        intervals = ["5m", "15m", "1h"]
+    cache = None
+    last_discovery = 0.0
+    scan_interval = max(15, int(cfg.get("realtime_scan_interval_seconds", 60)))
+    refresh_interval = max(300, int(cfg.get("realtime_discovery_refresh_seconds", 900)))
+    try:
+        while True:
+            now = time.time()
+            if cache is None or now - last_discovery >= refresh_interval:
+                t24 = fetch_binance_24h()
+                q = crypto_quote(t24)
+                star = {str(w).upper() for w in cfg.get("watchlist", [])}
+                star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
+                monitored, _ = _candidate_universe(cfg, q, star, t24=t24)
+                monitored = set(monitored[:int(cfg.get("realtime_kline_max_symbols", 100))])
+                if cache is not None:
+                    cache.stop()
+                cache = BinanceKlineCache(monitored, intervals=intervals, max_bars=int(cfg.get("realtime_kline_max_bars", 120)))
+                cache.start()
+                last_discovery = now
+                log(f"[REALTIME] monitoring {len(monitored)} symbols across {len(intervals)} intervals")
+            run_buy(token, chat_id, realtime_cache=cache)
+            time.sleep(scan_interval)
+    except KeyboardInterrupt:
+        log("[REALTIME] stopped")
+        return True
+    finally:
+        if cache is not None:
+            cache.stop()
+
 def run_daily(token, chat_id):
     cfg = load_cfg(); fng, fngc = sentiment.fear_greed(); btc_dom, eth_dom, total_mcap = sentiment.btc_dominance(); fng_nudge = (fng - 50) / 50 * 3.0 if fng is not None else 0.0
     t24 = fetch_binance_24h(); q = crypto_quote(t24); pool = [sym for sym, qv in sorted(q.items(), key=lambda kv: -kv[1]) if qv >= cfg.get("min_daily_qv", 1500000)]; top = pool[:int(cfg.get("daily_scan_top", 80))]
@@ -420,7 +472,7 @@ def run_report(fmt):
     except Exception as e: log("REPORT", "html write error:", e)
     print(text); return text
 
-MODES = ["arb", "daily", "buy", "price", "backtest", "portfolio", "check", "report", "all"]
+MODES = ["arb", "daily", "buy", "realtime", "price", "backtest", "portfolio", "check", "report", "all"]
 
 def main():
     ap = ArgumentParser(); ap.add_argument("--mode", choices=MODES, default="buy"); ap.add_argument("--all", action="store_true")
@@ -435,6 +487,7 @@ def main():
     if mode == "all": run_daily(token, chat_id); run_buy(token, chat_id)
     elif mode == "daily": run_daily(token, chat_id)
     elif mode == "buy": run_buy(token, chat_id)
+    elif mode == "realtime": run_realtime(token, chat_id)
     elif mode == "arb": run_arb(token, chat_id)
     elif mode == "price": run_price(token, chat_id)
     elif mode == "backtest": run_backtest(token, chat_id)
