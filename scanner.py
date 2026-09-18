@@ -22,6 +22,7 @@ import backtest as backtest_mod
 import traps as traps_mod
 import store as store_mod
 import positions as positions_mod
+import exposure as exposure_mod
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -304,7 +305,7 @@ def run_buy(token, chat_id):
     max_daily = max(0, min(int(cfg.get("max_trade_entries_per_day", 5)), 5))
     used_today = max(0, int(daily_state.get("count", 0) or 0))
     remaining = max(0, max_daily - used_today)
-    selected = ranked[:remaining]
+    selected, exposure_blocked = exposure_mod.select_diversified(ranked[:remaining], cfg)
     for r in selected:
         r["star"] = r["coin"] in star
 
