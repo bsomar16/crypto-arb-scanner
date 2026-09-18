@@ -25,6 +25,20 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertEqual(ranked[0]["coin"], "A")
         self.assertGreater(ranked[0]["trade_quality"], ranked[1]["trade_quality"])
 
+    def test_backtest_setup_stats_are_aggregateable(self):
+        results = [{"symbol": "AAA", "interval": "15m", "n": 2,
+                    "wins": 1, "losses": 1, "trades": [
+                        {"outcome": "WIN", "setup_type": "BREAKOUT"},
+                        {"outcome": "LOSS", "setup_type": "BREAKOUT"}]}]
+        buckets = {}
+        for result in results:
+            for trade in result["trades"]:
+                key = f"{result['interval']}|{trade['setup_type']}"
+                b = buckets.setdefault(key, {"wins": 0, "losses": 0})
+                b["wins" if trade["outcome"] == "WIN" else "losses"] += 1
+        self.assertEqual(buckets["15m|BREAKOUT"]["wins"], 1)
+        self.assertEqual(buckets["15m|BREAKOUT"]["losses"], 1)
+
     def test_backtest_records_expansion_milestones(self):
         rows = []
         for i in range(10):
