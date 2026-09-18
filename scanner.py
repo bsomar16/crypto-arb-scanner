@@ -59,7 +59,9 @@ DEFAULTS = {
     "max_alerts_per_run": MAX_ALERTS_PER_RUN,
     "trap_expiry_days": TRAP_EXPIRY_DAYS,
     "position_expiry_days": 14,
-    "max_open_positions": 40,
+    "max_open_positions": 5,
+    "max_trade_entries_per_day": 5,
+    "preferred_trade_entries_per_day": 3,
 }
 
 def load_cfg():
@@ -141,15 +143,22 @@ def _rank_trade_candidates(hits, cfg):
     scored = []
     for r in hits:
         historical = r.get("historical_win_pct")
-        historical_component = float(historical) if historical is not None else 50.0
         rr_component = min(100.0, float(r.get("rr", 0)) / 3.0 * 100.0)
-        quality = (
-            float(r.get("entry_quality", 50.0)) * 0.30
-            + float(r.get("score", 0)) * 0.25
-            + float(r.get("expansion_score", 0)) * 0.20
-            + historical_component * 0.15
-            + rr_component * 0.10
-        )
+        if historical is not None:
+            quality = (
+                float(r.get("entry_quality", 50.0)) * 0.30
+                + float(r.get("score", 0)) * 0.25
+                + float(r.get("expansion_score", 0)) * 0.20
+                + float(historical) * 0.15
+                + rr_component * 0.10
+            )
+        else:
+            quality = (
+                float(r.get("entry_quality", 50.0)) * 0.35
+                + float(r.get("score", 0)) * 0.30
+                + float(r.get("expansion_score", 0)) * 0.23
+                + rr_component * 0.12
+            )
         row = dict(r)
         row["trade_quality"] = round(max(0.0, min(100.0, quality)), 1)
         scored.append(row)
@@ -286,10 +295,16 @@ def run_buy(token, chat_id):
         limit=int(cfg.get("buy_signal_pool_size", 20)),
     )
 
-    # Stage 4: choose only the configured daily entry budget from the signal pool.
+    # Stage 4: enforce a real UTC-day entry budget across repeated scan runs.
     ranked = _rank_trade_candidates(fresh, cfg)
-    entry_budget = int(cfg.get("max_trade_entries_per_day", 5))
-    selected = ranked[:max(1, min(entry_budget, 5))]
+    daily_state = load_json("state/daily_entries.json", {}) or {}
+    today = datetime.now(timezone.utc).date().isoformat()
+    if daily_state.get("date") != today:
+        daily_state = {"date": today, "count": 0}
+    max_daily = max(0, min(int(cfg.get("max_trade_entries_per_day", 5)), 5))
+    used_today = max(0, int(daily_state.get("count", 0) or 0))
+    remaining = max(0, max_daily - used_today)
+    selected = ranked[:remaining]
     for r in selected:
         r["star"] = r["coin"] in star
 
@@ -303,15 +318,19 @@ def run_buy(token, chat_id):
     if updates or migrated_fired:
         save_json("state/fired_signals.json", fired)
 
+    opened = 0
     try:
-        positions_mod.open_picks(selected, cfg, source="buy")
+        opened = positions_mod.open_picks(selected, cfg, source="buy")
     except Exception as e:
         log("BUY", "positions open error:", e)
+    if opened:
+        daily_state["count"] = used_today + opened
+        save_json("state/daily_entries.json", daily_state)
 
     lines = [
         f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}",
         f"🔎 Wide discovery: {len(discovery_rows)} candidates · deep: {len(cands)} · {len(tasks)} MTF scans",
-        f"🎯 Selected {len(selected)} of {len(fresh)} qualified signals · daily entry budget {entry_budget}",
+        f"🎯 Selected {len(selected)} of {len(fresh)} qualified signals · daily entries {used_today + opened}/{max_daily}",
         "",
     ]
     for i, r in enumerate(selected, 1):
@@ -319,7 +338,6 @@ def run_buy(token, chat_id):
             lines.append("")
         lines.extend([f"<b>#{i}</b>" + (" ⭐" if r.get("star") else "")])
         lines.extend(_signal_message(r))
-        lines.append(f"🏆 <b>Trade Quality:</b> {r['trade_quality']:.0f}/100")
 
     if fired_alerts:
         lines.extend(["", "🔔 <b>PRICE ALERTS</b>"])
@@ -331,7 +349,7 @@ def run_buy(token, chat_id):
         "24h volume is a liquidity filter only; BUY requires multi-factor confirmation.",
         "Daily budget limits selections; the bot does not manufacture trades when fewer qualified setups exist.",
     ])
-    log(f"[BUY] {len(selected)} selected from {len(fresh)} qualified signals / {len(tasks)} deep scans")
+    log(f"[BUY] {len(selected)} selected / {opened} opened today={used_today + opened}/{max_daily} from {len(fresh)} qualified signals / {len(tasks)} deep scans")
     telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
@@ -346,8 +364,7 @@ def run_daily(token, chat_id):
     for r in res:
         try: store_mod.daily_log(r["coin"], r["score"], r["rating"], r["price"], r["chg"], r["rsi"], r["vol_x"], r.get("qv"))
         except Exception as e: log("DAILY", "daily_log error:", e)
-    try: positions_mod.open_picks(res, cfg)
-    except Exception as e: log("DAILY", "positions error:", e)
+    # Daily report is informational; it must not create trade entries or consume the BUY daily budget.
     news_targets = {r["coin"] for r in res[:int(cfg.get("daily_news_top", 8))]} | {"BTC", "ETH"} | {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", [])}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex: nn = dict(zip(news_targets, ex.map(lambda s: sentiment.news_score(s), news_targets)))
     news = {k: v for k, v in nn.items() if v and v[0] not in ("?", "No news")}; holdings_rows = portfolio_mod.portfolio_rows(cfg.get("holdings", [])); fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
