@@ -3,6 +3,7 @@ import unittest
 import discovery
 import signals
 import scanner
+import backtest
 from execution_guard import ExecutionRequest, validate_spot_request
 
 
@@ -23,6 +24,19 @@ class ProductionHardeningTests(unittest.TestCase):
         ranked = scanner._rank_trade_candidates(hits, {})
         self.assertEqual(ranked[0]["coin"], "A")
         self.assertGreater(ranked[0]["trade_quality"], ranked[1]["trade_quality"])
+
+    def test_backtest_records_expansion_milestones(self):
+        rows = []
+        for i in range(10):
+            price = 100 + i * 6
+            rows.append([i, price, price, price, price, 1000, i, 100000, 0, 0, 0, 0])
+        signal = {"entry": 100.0, "stop": 90.0, "target": 130.0}
+        result = backtest._evaluate(rows, 0, signal, 9)
+        self.assertTrue(result["milestones"]["5"])
+        self.assertTrue(result["milestones"]["10"])
+        self.assertTrue(result["milestones"]["20"])
+        self.assertTrue(result["milestones"]["30"])
+        self.assertFalse(result["milestones"]["50"])
 
     def test_spot_guard_requires_confirmation_and_rejects_derivatives(self):
         with self.assertRaises(PermissionError):
