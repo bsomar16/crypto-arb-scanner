@@ -4,6 +4,7 @@ import discovery
 import signals
 import scanner
 import backtest
+import exposure
 from execution_guard import ExecutionRequest, validate_spot_request
 
 
@@ -38,6 +39,13 @@ class ProductionHardeningTests(unittest.TestCase):
                 b["wins" if trade["outcome"] == "WIN" else "losses"] += 1
         self.assertEqual(buckets["15m|BREAKOUT"]["wins"], 1)
         self.assertEqual(buckets["15m|BREAKOUT"]["losses"], 1)
+
+    def test_correlation_measure_is_bounded(self):
+        a = [0.01, -0.01, 0.02, -0.02] * 6
+        b = list(a)
+        c2 = [-x for x in a]
+        self.assertAlmostEqual(exposure._corr(a, b), 1.0, places=6)
+        self.assertAlmostEqual(exposure._corr(a, c2), -1.0, places=6)
 
     def test_backtest_records_expansion_milestones(self):
         rows = []
