@@ -111,7 +111,7 @@ def _setup_type(price,resistance,support,e20,vol_ratio,macd_rising,rsi):
     return "MOMENTUM"
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None, realtime_bars=None):
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None):
     """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
     profile = strategy_profile(interval)
     if not profile:
@@ -274,11 +274,12 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
 
         provisional = {"coin": coin, "interval": interval, "setup_type": setup}
         outcome_stats = signal_history.comparable_stats(provisional, min_samples=20)
+        adaptive_cfg = cfg or {}
         adaptive = adaptive_thresholds(
             interval, setup, effective_min_score, effective_min_vol_x,
-            effective_min_rr, outcome_stats, cfg=None,
+            effective_min_rr, outcome_stats, adaptive_cfg,
         )
-        if score < adaptive["min_score"] or vol_ratio < adaptive["min_vol_x"] or rr < adaptive["min_rr"]:
+        if adaptive_cfg.get("adaptive_thresholds_enabled", True) and (score < adaptive["min_score"] or vol_ratio < adaptive["min_vol_x"] or rr < adaptive["min_rr"]):
             return None
         reasons.append(
             f"thresholds {adaptive['mode'].lower()}"
