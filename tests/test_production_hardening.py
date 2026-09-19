@@ -169,6 +169,21 @@ class ProductionHardeningTests(unittest.TestCase):
         )
         self.assertEqual(result["mode"], "BASE")
 
+    def test_component_attribution_requires_minimum_sample(self):
+        from outcome_attribution import aggregate
+        rows = []
+        for i in range(20):
+            rows.append({
+                "outcome": "WIN" if i < 15 else "LOSS",
+                "component_flags": {"compression": True, "bos": i < 10},
+                "milestones": {"5": i < 16, "10": i < 12, "20": i < 4},
+            })
+        stats = aggregate(rows, min_samples=20)
+        self.assertIn("compression", stats)
+        self.assertNotIn("bos", stats)
+        self.assertEqual(stats["compression"]["sample"], 20)
+        self.assertEqual(stats["compression"]["milestone_rates"]["5"], 80.0)
+
     def test_adaptive_thresholds_need_sample_and_stay_bounded(self):
         import adaptive
         base = adaptive.adaptive_thresholds("15m", "MOMENTUM", 60, 1.25, 1.70,
