@@ -99,7 +99,7 @@ class ProductionHardeningTests(unittest.TestCase):
         volumes = [100.0] * 30
         result = classify_expansion(closes, highs, lows, volumes, atr=1.0)
         self.assertIn(result["state"], {"BASE", "EXPANSION", "EARLY_EXPANSION"})
-        self.assertEqual(result["extension_pct"], round((closes[-1] / min(lows[-20:]) - 1) * 100, 2))
+        self.assertEqual(result["extension_pct"], round((closes[-1] / min(lows[-21:-1]) - 1) * 100, 2))
         self.assertNotIn("future", result)
 
     def test_confirmed_entry_requires_sweep_bos_retest_confirmation(self):
@@ -235,7 +235,7 @@ class ProductionHardeningTests(unittest.TestCase):
             {"sample": 30, "win_pct": 80,
              "avg_mfe_pct": 12, "avg_mae_pct": -1,
              "milestone_rates": {"5": 90, "10": 80, "20": 60},
-             "scope": "setup/timeframe"},
+             "scope": "setup/timeframe", "source": "live"},
             {"adaptive_min_score_floor": 58,
              "adaptive_min_vol_x_floor": 1.20,
              "adaptive_min_rr_floor": 1.60},
