@@ -72,14 +72,15 @@ class ExecutionEngineTests(unittest.TestCase):
             e = ExecutionEngine({"execution_live_enabled": True}, d)
             with self.assertRaises(ValueError):
                 e.validate_order("binance", "BTCUSDT", 1, "BUY", confirmed=True, market_type="FUTURES")
-            import os
             old = os.environ.get("EXECUTION_ENABLED")
             os.environ["EXECUTION_ENABLED"] = "true"
             try:
                 e.validate_order("binance", "BTCUSDT", 0.01, "BUY", confirmed=True)
             finally:
-                if old is None: os.environ.pop("EXECUTION_ENABLED", None)
-                else: os.environ["EXECUTION_ENABLED"] = old
+                if old is None:
+                    os.environ.pop("EXECUTION_ENABLED", None)
+                else:
+                    os.environ["EXECUTION_ENABLED"] = old
 
 
 if __name__ == "__main__":
