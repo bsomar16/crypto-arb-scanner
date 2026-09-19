@@ -112,8 +112,14 @@ def _setup_type(price,resistance,support,e20,vol_ratio,macd_rising,rsi):
     return "MOMENTUM"
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None):
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None):
     """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
+
+
+def _audit_reject(audit, stage):
+    if audit is not None:
+        audit.reject(stage)
+    return None
     profile = strategy_profile(interval)
     if not profile:
         return None
@@ -123,7 +129,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         effective_min_rr = profile["min_rr"] if min_rr is None else max(float(min_rr), profile["min_rr"])
         data = _fetch_klines(coin, interval, limit)
         if not data:
-            return None
+            return _audit_reject(audit, "data_fetch")
         # Binance REST includes the currently forming candle. Never score an
         # unclosed candle; realtime_bars are already filtered to closed candles.
         data = data[:-1]
@@ -142,7 +148,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         vols = [float(k[5]) for k in data]
         qvols = [float(k[7]) for k in data]
         if len(closes) < 70 or (min_hour_vol and sum(qvols[-4:]) < min_hour_vol):
-            return None
+            return _audit_reject(audit, "liquidity")
 
         e9 = ind.ema(closes, 9)
         e20 = ind.ema(closes, 20)
@@ -156,7 +162,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         vol_ratio = recent_vol / base_vol if base_vol > 0 else 0
         strategy_min_vol_x = profile["min_vol_x"]
         if vol_ratio < strategy_min_vol_x:
-            return None
+            return _audit_reject(audit, "volume")
 
         resistance = max(highs[-21:-1])
         support = min(lows[-21:-1])
@@ -165,7 +171,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         ema_bull = e9[-1] > e21[-1] and price > e20[-1]
         trend = _trend_filter(coin)
         if not trend:
-            return None
+            return _audit_reject(audit, "trend_data")
 
         structure = structure_snapshot(closes, highs, lows)
         entry = evaluate_entry(
@@ -173,7 +179,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             require_retest=True,
         )
         if not entry:
-            return None
+            return _audit_reject(audit, "entry_confirmation")
         near_support = abs(price / support - 1) <= 0.012 if support else False
         setup = _setup_type(price, resistance, support, e20[-1], vol_ratio, macd_rising, r)
         if structure["choch"] and setup != "BREAKOUT":
@@ -248,12 +254,12 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         target = max(structure_target, volatility_target)
         potential = _pct(target, price)
         if potential < min_potential_pct:
-            return None
+            return _audit_reject(audit, "target_potential")
         potential = min(float(max_potential_pct), potential)
         target = price * (1 + potential / 100)
         rr = potential / risk_pct if risk_pct > 0 else 0
         if trend["state"] == "BEARISH" and setup != "REVERSAL":
-            return None
+            return _audit_reject(audit, "bearish_trend")
 
         expansion = classify_expansion(closes, highs, lows, vols, a)
         entry_quality = float(entry["entry_quality"])
@@ -267,7 +273,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             max(0.0, min(100.0, expansion_score * 0.70 + expansion["score"] * 0.30)), 1
         )
         if expansion["state"] == "LATE_EXTENSION" and setup != "REVERSAL":
-            return None
+            return _audit_reject(audit, "late_extension")
         if expansion["state"] == "EARLY_EXPANSION":
             reasons.append("early expansion")
         elif expansion["state"] == "EXPANSION":
@@ -281,7 +287,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             effective_min_rr, outcome_stats, adaptive_cfg,
         )
         if adaptive_cfg.get("adaptive_thresholds_enabled", True) and (score < adaptive["min_score"] or vol_ratio < adaptive["min_vol_x"] or rr < adaptive["min_rr"]):
-            return None
+            return _audit_reject(audit, "adaptive_thresholds")
         reasons.append(
             f"thresholds {adaptive['mode'].lower()}"
             + (f" ({adaptive['sample']} outcomes)" if adaptive["sample"] else "")
@@ -315,7 +321,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         potential = _pct(target, price)
         rr = potential / risk_pct if risk_pct > 0 else 0
         if rr < effective_min_rr or potential < min_potential_pct or potential > max_potential_pct:
-            return None
+            return _audit_reject(audit, "target_quality")
         if target_plan["mode"] != "BASE":
             reasons.append(
                 f"targets {target_plan['mode'].lower()} "
@@ -373,6 +379,10 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             scope = "exact setup" if stats["scope"] == "exact" else "setup/timeframe"
             reasons.append(f"historical {stats['win_pct']:.0f}% ({stats['sample']} {scope} results)")
         signal_history.record_signal(result)
+        if audit is not None:
+            audit.accept("qualified")
         return result
     except Exception:
+        if audit is not None:
+            audit.reject("exception")
         return None
