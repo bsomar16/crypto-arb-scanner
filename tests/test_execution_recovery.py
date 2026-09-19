@@ -13,6 +13,7 @@ class ExecutionRecoveryTests(unittest.TestCase):
         return {
             "realtime_min_net_pct": 0.5,
             "execution_confirmation_ttl_ms": 30000,
+            "execution_live_enabled": False,
             "execution_max_notional_usdt": 300,
             "execution_max_active_intents": 1,
             "execution_max_daily_notional_usdt": 1000,

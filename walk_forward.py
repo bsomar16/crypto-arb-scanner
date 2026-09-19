@@ -48,7 +48,8 @@ def build_windows(
     """Build non-overlapping chronological test windows.
 
     Each window is [train_start, split) for training and [split, test_end)
-    for testing. A test window never contributes observations to its own
+    for testing. Metadata uses inclusive ``train_end`` and exclusive
+    ``test_end`` indices so the boundary itself is never part of training. A test window never contributes observations to its own
     training set or to an earlier window.
     """
     data = validate_rows(rows)
@@ -70,7 +71,7 @@ def build_windows(
         windows.append({
             "index": len(windows),
             "train_start": train_start,
-            "train_end": train_end,
+            "train_end": train_end - 1,
             "test_start": train_end,
             "test_end": test_end,
             "train_start_ts": _ts(data[train_start]),
@@ -109,7 +110,7 @@ def evaluate_windows(
     window_reports = []
 
     for window in windows:
-        train = data[window["train_start"]:window["train_end"]]
+        train = data[window["train_start"]:window["train_end"] + 1]
         trades = []
         for i in range(window["test_start"], window["test_end"]):
             signal = signal_fn(i, train, data)

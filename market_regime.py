@@ -21,6 +21,7 @@ def classify_regime(btc_closes, breadth_pct, atr_pct=None):
     short = closes[-5]
     long = closes[-20]
     momentum = (short / long - 1.0) * 100.0 if long else 0.0
+    trend_spread_pct = (e20 / e50 - 1.0) * 100.0 if e50 else 0.0
     breadth = float(breadth_pct or 0.0)
     vol = float(atr_pct or 0.0)
 
@@ -31,13 +32,13 @@ def classify_regime(btc_closes, breadth_pct, atr_pct=None):
     else:
         volatility = "NORMAL"
 
-    if closes[-1] > e20 > e50 and momentum >= 2.0 and breadth >= 55:
+    if closes[-1] > e20 > e50 and trend_spread_pct >= 0.25 and momentum >= 2.0 and breadth >= 55:
         state = "BULL_EXPANSION"
-    elif closes[-1] > e20 and e20 > e50 and breadth >= 45:
+    elif closes[-1] > e20 and e20 > e50 and trend_spread_pct >= 0.25 and breadth >= 45:
         state = "BULLISH"
-    elif closes[-1] < e20 < e50 and momentum <= -2.0 and breadth <= 45:
+    elif closes[-1] < e20 < e50 and trend_spread_pct <= -0.25 and momentum <= -2.0 and breadth <= 45:
         state = "BEAR_EXPANSION"
-    elif closes[-1] < e20 and e20 < e50 and breadth <= 55:
+    elif closes[-1] < e20 and e20 < e50 and trend_spread_pct <= -0.25 and breadth <= 55:
         state = "BEARISH"
     else:
         state = "SIDEWAYS"
