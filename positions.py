@@ -158,8 +158,10 @@ def open_picks(picks, cfg, source="daily"):
         _journal_open(pos)
         try:
             signal_history.record_signal(r)
+            import signal_lifecycle
+            signal_lifecycle.activate(pos)
         except Exception as exc:
-            log("POSITIONS", "signal history record error:", exc)
+            log("POSITIONS", "signal lifecycle/history record error:", exc)
     if opened:
         save(positions)
         log("POSITIONS", f"opened {opened} tracked paper positions ({source})")
