@@ -314,6 +314,16 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             "structure_score": round(structure["score"], 1), "bos": structure["bos"],
             "choch": structure["choch"], "liquidity_sweep": structure["liquidity_sweep"],
             "higher_lows": structure["higher_lows"], "compression": structure["compression"],
+            "component_flags": {
+                "compression": float(structure.get("compression", 0.0)) >= 0.15,
+                "liquidity_sweep": bool(entry.get("liquidity_sweep_confirmed")),
+                "reclaim": bool(entry.get("reclaim_confirmed")),
+                "bos": bool(entry.get("bos_confirmed")),
+                "retest": bool(entry.get("retest_confirmed")),
+                "volume_acceleration": float(expansion.get("volume_ratio", 0.0)) >= 1.5,
+                "early_expansion": expansion["state"] == "EARLY_EXPANSION",
+                "expansion": expansion["state"] in ("EARLY_EXPANSION", "EXPANSION"),
+            },
         }
         stats = outcome_stats
         result["historical_win_pct"] = stats["win_pct"]
