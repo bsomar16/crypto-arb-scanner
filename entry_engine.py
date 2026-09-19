@@ -22,7 +22,6 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
         if lows[i] < prior_low - tol * 0.15 and closes[i] > prior_low:
             sweep = {"index": i, "level": prior_low, "low": lows[i], "reclaim": closes[i]}
             break
-
     bos = None
     if sweep:
         pre_high = max(highs[max(0, sweep["index"] - 18):sweep["index"]])
@@ -38,7 +37,6 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
                 break
     if bos is None or (require_sweep and sweep is None):
         return None
-
     broken_level = bos["level"]
     retest = None
     confirm = None
@@ -51,7 +49,6 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
                 if c > o and c >= broken_level and body >= 0.35:
                     confirm = {"index": i + 1, "open": o, "high": h, "low": l, "close": c, "body_strength": body}
             break
-
     if require_retest and (retest is None or confirm is None):
         return None
     if confirm is None:
@@ -59,18 +56,19 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
                    "low": lows[retest["index"]], "close": closes[retest["index"]],
                    "body_strength": _body_strength(opens[retest["index"]], highs[retest["index"]],
                                                     lows[retest["index"]], closes[retest["index"]])}
-
     entry_price = confirm["close"]
     if entry_price <= broken_level:
         return None
     sweep_ok = sweep is not None and sweep["index"] < bos["index"]
     retest_pct = abs(_pct(retest["close"], broken_level)) if retest else 0.0
     extension_pct = max(0.0, _pct(entry_price, broken_level))
-    quality = 45.0 + (15 if sweep_ok else 0) + 15 + (12 if retest else 0) + 8
-    if confirm["body_strength"] >= 0.55:
-        quality += 3
-    if extension_pct > 2.0:
-        quality -= min(12.0, extension_pct * 2.0)
+    extension_atr = extension_pct / max((atr / max(broken_level, 1e-12)) * 100.0, 1e-9)
+    quality = 42.0 + (14 if sweep_ok else 0) + 16 + (12 if retest else 0)
+    quality += min(8.0, max(0.0, confirm["body_strength"]) * 10.0)
+    if extension_atr > 0.8:
+        quality -= min(18.0, (extension_atr - 0.8) * 8.0)
+    elif extension_atr <= 0.35:
+        quality += 4
     quality = max(0.0, min(100.0, quality))
     return {
         "entry_price": entry_price,
@@ -86,6 +84,7 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
         "retest_level": retest["level"] if retest else broken_level,
         "retest_distance_pct": round(retest_pct, 3),
         "extension_pct": round(extension_pct, 3),
+        "extension_atr": round(extension_atr, 3),
         "confirmation_body": round(confirm["body_strength"], 3),
         "trigger_index": confirm["index"],
     }
