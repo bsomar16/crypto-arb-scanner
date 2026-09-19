@@ -24,7 +24,7 @@ import traps as traps_mod
 import store as store_mod
 import positions as positions_mod
 import exposure as exposure_mod
-from realtime import BinanceKlineCache
+from realtime import BinanceKlineCache\nimport signal_outcomes
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -71,7 +71,7 @@ DEFAULTS = {
     "realtime_kline_enabled": True,
     "realtime_kline_intervals": ["5m", "15m", "1h"],
     "realtime_kline_max_symbols": 100,
-    "realtime_kline_max_bars": 120,
+    "realtime_kline_max_bars": 120,\n    "outcome_tracking_enabled": True,\n    "outcome_refresh_seconds": 300,\n    "outcome_max_pending": 60,\n    "outcome_horizon_bars": {"5m": 288, "15m": 96, "1h": 48},
 }
 
 def load_cfg():
