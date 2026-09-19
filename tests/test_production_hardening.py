@@ -18,6 +18,18 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertIn(snap["state"], ("BULLISH", "MIXED"))
         self.assertTrue(snap["higher_lows"])
 
+    def test_buy_signal_pool_has_no_daily_quota(self):
+        hits = [
+            {"coin": f"C{i}", "entry_quality": 80, "score": 80 - i, "expansion_score": 85,
+             "rr": 2.0, "potential_pct": 20}
+            for i in range(8)
+        ]
+        fresh, updates = scanner._dedupe_buy_signals(
+            hits, {}, 1_700_000_000, active_coins=set(), limit=None
+        )
+        self.assertEqual(len(fresh), 8)
+        self.assertEqual(len(updates), 8)
+
     def test_ranking_does_not_invent_historical_edge(self):
         hits = [
             {"coin": "A", "entry_quality": 90, "score": 80, "expansion_score": 90, "rr": 2.5, "potential_pct": 40},
