@@ -32,6 +32,7 @@ import outcome_attribution
 import signal_history
 import market_regime
 import signal_lifecycle
+import validation as validation_mod
 import multi_exchange
 import shadow_trading
 
@@ -548,6 +549,12 @@ def run_price(token, chat_id):
 def run_backtest(token, chat_id):
     text = backtest_mod.run_backtest(load_cfg()); telegram_msg(token, chat_id, text); return True
 
+def run_validate(token, chat_id):
+    report = validation_mod.run(load_cfg())
+    text = validation_mod.format_report(report)
+    telegram_msg(token, chat_id, text)
+    return True
+
 def run_portfolio(token, chat_id):
     cfg = load_cfg(); rows = portfolio_mod.portfolio_rows(cfg.get("holdings", [])); telegram_msg(token, chat_id, "\n".join([f"💰 <b>CRYPTO PORTFOLIO</b> · {now_s()}", *portfolio_mod.format_portfolio(rows)])); return True
 
@@ -572,7 +579,7 @@ def run_report(fmt):
     except Exception as e: log("REPORT", "html write error:", e)
     print(text); return text
 
-MODES = ["arb", "daily", "buy", "realtime", "price", "backtest", "portfolio", "check", "report", "all"]
+MODES = ["arb", "daily", "buy", "realtime", "price", "backtest", "validate", "portfolio", "check", "report", "all"]
 
 def main():
     ap = ArgumentParser(); ap.add_argument("--mode", choices=MODES, default="buy"); ap.add_argument("--all", action="store_true")
@@ -591,6 +598,7 @@ def main():
     elif mode == "arb": run_arb(token, chat_id)
     elif mode == "price": run_price(token, chat_id)
     elif mode == "backtest": run_backtest(token, chat_id)
+    elif mode == "validate": run_validate(token, chat_id)
     elif mode == "portfolio": run_portfolio(token, chat_id)
     elif mode == "check": run_check(token, chat_id)
 
