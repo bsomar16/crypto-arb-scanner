@@ -31,6 +31,7 @@ import outcome_attribution
 import signal_history
 import market_regime
 import signal_lifecycle
+import market_quality
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -89,6 +90,15 @@ DEFAULTS = {
     "max_pairwise_correlation": 0.88,
     "correlation_workers": 8,
     "correlation_risk_hard_block": False,
+    # Market quality is tradability context; it does not suppress signals by default.
+    "market_quality_enabled": True,
+    "market_quality_depth": 50,
+    "market_quality_notional_usdt": 1000.0,
+    "market_quality_max_spread_pct": 0.35,
+    "market_quality_max_slippage_pct": 0.25,
+    "market_quality_min_depth_usdt": 25000.0,
+    "market_quality_hard_block": False,
+    "market_quality_max_candidates": 30,
 }
 
 def load_cfg():
@@ -349,6 +359,37 @@ def run_buy(token, chat_id, realtime_cache=None):
     # Signal generation is quality-gated, not quota-gated.
     # Portfolio exposure limits must not suppress a valid market signal.
     ranked = _rank_trade_candidates(fresh, cfg)
+
+    # Assess visible SPOT liquidity after technical ranking so expensive
+    # order-book calls are bounded. Quality metadata never suppresses a valid
+    # signal unless the explicit hard-block policy is enabled downstream.
+    quality_limit = max(0, int(cfg.get("market_quality_max_candidates", 30)))
+    for idx, r in enumerate(ranked):
+        if not bool(cfg.get("market_quality_enabled", True)) or idx >= quality_limit:
+            r["market_quality_state"] = "UNASSESSED"
+            r["market_quality_data_available"] = False
+            r["market_quality_modifier"] = 0.0
+            continue
+        try:
+            mq = market_quality.assess(
+                r.get("coin"),
+                notional_usdt=r.get("notional_usdt", cfg.get("market_quality_notional_usdt", 1000.0)),
+                cfg=cfg,
+            )
+        except Exception as e:
+            log("BUY", f"market quality unavailable for {r.get('coin')}:", e)
+            mq = {"state": "UNKNOWN", "risk_action": "ALLOW", "data_available": False, "modifier": 0.0}
+        r["market_quality_state"] = mq.get("state", "UNKNOWN")
+        r["market_quality_risk_action"] = mq.get("risk_action", "ALLOW")
+        r["market_quality_data_available"] = bool(mq.get("data_available", False))
+        r["market_quality_spread_pct"] = mq.get("spread_pct")
+        r["market_quality_estimated_slippage_pct"] = mq.get("estimated_slippage_pct")
+        r["market_quality_depth_usdt"] = mq.get("depth_usdt")
+        r["market_quality_filled_pct"] = mq.get("filled_pct")
+        r["market_quality_modifier"] = float(mq.get("modifier", 0.0) or 0.0)
+        r["market_quality_reason"] = mq.get("reason", "")
+        r["trade_quality"] = round(max(0.0, min(100.0, float(r.get("trade_quality", 0.0)) + r["market_quality_modifier"])), 1)
+    ranked.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     selected = ranked
     for r in selected:
         r["star"] = r["coin"] in star
