@@ -31,7 +31,7 @@ class ExecutionEngineTests(unittest.TestCase):
 
     def test_withdrawal_requires_a_second_confirmation(self):
         with tempfile.TemporaryDirectory() as d:
-            e = ExecutionEngine({"execution_max_notional_usdt": 300}, d)
+            e = ExecutionEngine({"execution_max_notional_usdt": 300, "execution_live_enabled": False}, d)
             intent = e.create_intent(self.opp())
             e.confirm(intent, True)
             with self.assertRaises(PermissionError):
@@ -60,10 +60,17 @@ class ExecutionEngineTests(unittest.TestCase):
 
     def test_spot_gate_rejects_non_spot_requests_and_allows_spot(self):
         with tempfile.TemporaryDirectory() as d:
-            e = ExecutionEngine({}, d)
+            e = ExecutionEngine({"execution_live_enabled": True}, d)
             with self.assertRaises(ValueError):
                 e.validate_order("binance", "BTCUSDT", 1, "BUY", confirmed=True, market_type="FUTURES")
-            e.validate_order("binance", "BTCUSDT", 0.01, "BUY", confirmed=True)
+            import os
+            old = os.environ.get("EXECUTION_ENABLED")
+            os.environ["EXECUTION_ENABLED"] = "true"
+            try:
+                e.validate_order("binance", "BTCUSDT", 0.01, "BUY", confirmed=True)
+            finally:
+                if old is None: os.environ.pop("EXECUTION_ENABLED", None)
+                else: os.environ["EXECUTION_ENABLED"] = old
 
 
 if __name__ == "__main__":
