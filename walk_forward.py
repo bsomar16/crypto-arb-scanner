@@ -280,11 +280,18 @@ def run_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     symbols = [str(x).upper() for x in (cfg.get("backtest_symbols") or ["BTC", "ETH", "SOL"])]
     intervals = [x for x in (cfg.get("backtest_intervals") or ("5m", "15m", "1h")) if x in ("5m", "15m", "1h")]
     results = [run_symbol(symbol, interval, cfg) for symbol in symbols for interval in intervals]
+    all_trades = [
+        trade
+        for result in results
+        for window in ((result.get("report") or {}).get("windows") or [])
+        for trade in window.get("trades", [])
+    ]
     aggregate = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "method": "fixed-length rolling walk-forward",
         "outcome_source": "walk_forward",
         "results": results,
+        "regime_summary": summarize_by_regime(all_trades),
     }
     path = str(cfg.get("walk_forward_stats_path", PATH))
     persist(aggregate, path)
