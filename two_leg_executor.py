@@ -383,7 +383,6 @@ class TwoLegExecutor:
         if not coordinator.intent.sell_order_id:
             raise ValueError("sell order id is missing")
         before = coordinator.intent.state.value
-        snap = reconcile_order(adapter, execution_intent.symbol, coordinator.intent.sell_order_id)
         if before == LegState.SELL_FILLED.value and snap.status == "FILLED":
             return coordinator.intent.state
         fill = LegFill(coordinator.intent.sell_order_id, snap.status, coordinator.intent.transferred_qty,
