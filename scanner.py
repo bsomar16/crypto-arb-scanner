@@ -403,8 +403,20 @@ def run_buy(token, chat_id, realtime_cache=None):
         r["star"] = r["coin"] in star
 
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
+    audit_snapshot = audit.snapshot()
+    audit_snapshot.update({
+        "scans": len(tasks),
+        "hits": len(hits),
+        "fresh": len(fresh),
+        "selected": len(selected),
+        "deep_candidates": len(cands),
+        "mtf_scans": len(tasks),
+        "generated_at": now_s(),
+    })
+    save_json("state/buy_audit_latest.json", audit_snapshot)
     if not selected and not fired_alerts:
         log("[BUY] no new signals")
+        log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
         return False
 
     opened = 0
