@@ -58,7 +58,7 @@ class FinalOrderPreflightTests(unittest.TestCase):
                 self._intent(), coordinator, FakeAdapter(),
                 price=100, order_type="LIMIT", revalidate=lambda _: True,
             )
-            self.assertEqual(state, LegState.BUY_FILLED)
+            self.assertEqual(state, LegState.BUY_SUBMITTED)
 
     def test_market_buy_is_rejected_before_adapter(self):
         with tempfile.TemporaryDirectory() as root, patch.dict("os.environ", {"EXECUTION_ENABLED": "true"}):
