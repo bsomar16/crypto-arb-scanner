@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from statistics import median
 
 from botutil import esc, telegram_msg, load_json, save_json, fmt_price, env_float, env_int, log, set_json_logs
+from signal_audit import SignalAudit
 from markets import (EXCHANGES, fetch_exchange, fetch_binance_24h, crypto_quote,
                      coin_status, calc_net, depth_estimate, volume_spike)
 from signals import analyze_coin_daily, intraday_signal
@@ -222,7 +223,7 @@ def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
-def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None):
+def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None, audit=None):
     """Return one BUY notification per coin.
 
     A coin is silent while it has an open tracked position. After that signal
@@ -247,21 +248,29 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
     for coin, r in best_by_coin.items():
         # Never emit another BUY while this coin's previous signal is active.
         if coin in active_coins:
+            if audit is not None:
+                audit.reject("dedupe_active_position")
             continue
 
         old = fired.get(coin, {})
         old_entry = float(old.get("entry", 0) or 0)
         old_setup = str(old.get("setup_type", "") or "")
         old_interval = str(old.get("interval", "") or "")
+        old_candle = int(old.get("candle_open_time", 0) or 0)
+        old_score = float(old.get("score", 0) or 0)
+        candle_changed = int(r.get("candle_open_time", 0) or 0) > old_candle if old_candle else False
         if old_entry <= 0:
             is_new_signal = True
         else:
             entry_changed = abs(float(r["entry"]) - old_entry) / old_entry >= entry_change_pct
             setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
             interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
-            is_new_signal = entry_changed or setup_changed or interval_changed
+            score_strengthened = float(r.get("score", 0) or 0) - old_score >= 5.0
+            is_new_signal = entry_changed or setup_changed or interval_changed or (candle_changed and score_strengthened)
 
         if old and not is_new_signal:
+            if audit is not None:
+                audit.reject("dedupe_unchanged")
             continue
 
         updates[coin] = {
@@ -270,6 +279,7 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             "score": r["score"],
             "setup_type": r.get("setup_type", ""),
             "interval": r.get("interval", ""),
+            "candle_open_time": int(r.get("candle_open_time", 0) or 0),
         }
         fresh.append(r)
 
@@ -305,6 +315,8 @@ def run_buy(token, chat_id, realtime_cache=None):
         cands = cands[:max(deep_n, len(star))]
     tasks = [(sym, interval) for interval in intervals for sym in cands]
 
+    audit = SignalAudit()
+
     def scan(task):
         sym, interval = task
         return intraday_signal(
@@ -319,6 +331,7 @@ def run_buy(token, chat_id, realtime_cache=None):
             min_rr=float(cfg.get("signal_min_rr", 1.5)),
             realtime_bars=(realtime_cache.get(sym, interval) if realtime_cache is not None else None),
             cfg=cfg,
+            audit=audit,
         )
 
     workers = int(cfg.get("deep_scan_workers", 16))
@@ -352,6 +365,7 @@ def run_buy(token, chat_id, realtime_cache=None):
         active_coins=active_coins,
         entry_change_pct=float(cfg.get("buy_signal_entry_change_pct", 0.02)),
         limit=None,
+        audit=audit,
     )
 
     # Signal generation is quality-gated, not quota-gated.
@@ -392,37 +406,7 @@ def run_buy(token, chat_id, realtime_cache=None):
         log("[BUY] no new signals")
         return False
 
-    if updates:
-        fired.update(updates)
-    if updates or migrated_fired:
-        save_json("state/fired_signals.json", fired)
-
-    # Persist the lifecycle independently of Telegram formatting or ranking.
-    for r in selected:
-        try:
-            signal_lifecycle.register(r)
-        except Exception as e:
-            log("BUY", "signal lifecycle register error:", e)
-
-    shadow_result = {"opened": 0, "closed": 0, "outcome_source": "shadow"}
-    if bool(cfg.get("shadow_trading_enabled", False)):
-        try:
-            prices = {str(r.get("coin", "")).upper(): float(r.get("entry", r.get("price", 0))) for r in selected}
-            shadow_result = shadow_trading.run_once(
-                selected,
-                lambda coin: prices.get(str(coin).upper()),
-                cfg,
-                path=str(cfg.get("shadow_state_path", "state/shadow_trades.jsonl")),
-            )
-            log("SHADOW", f"opened {shadow_result.get('opened', 0)} / closed {shadow_result.get('closed', 0)}")
-        except Exception as e:
-            log("SHADOW", "shadow trading error:", e)
-
     opened = 0
-    try:
-        opened = positions_mod.open_picks(selected, cfg, source="buy")
-    except Exception as e:
-        log("BUY", "positions open error:", e)
     lines = [
         f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}",
         f"🔎 Wide discovery: {len(discovery_rows)} candidates · deep: {len(cands)} · {len(tasks)} MTF scans",
@@ -445,8 +429,42 @@ def run_buy(token, chat_id, realtime_cache=None):
         "24h volume is a liquidity filter only; BUY requires multi-factor confirmation.",
         "Signals are quality-gated; there is no daily BUY quota.",
     ])
-    log(f"[BUY] {len(selected)} quality signals / {opened} opened from {len(fresh)} qualified signals / {len(tasks)} deep scans")
+    log(f"[BUY] {len(selected)} quality signals / {len(fresh)} qualified signals / {len(tasks)} deep scans")
+    log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
+
+    # Telegram delivery is the notification commit point. Do not persist a
+    # signal as fired or open paper/shadow positions until notification succeeds.
     telegram_msg(token, chat_id, "\n".join(lines))
+
+    if updates:
+        fired.update(updates)
+    if updates or migrated_fired:
+        save_json("state/fired_signals.json", fired)
+
+    for r in selected:
+        try:
+            signal_lifecycle.register(r)
+        except Exception as e:
+            log("BUY", "signal lifecycle register error:", e)
+
+    shadow_result = {"opened": 0, "closed": 0, "outcome_source": "shadow"}
+    if bool(cfg.get("shadow_trading_enabled", False)):
+        try:
+            prices = {str(r.get("coin", "")).upper(): float(r.get("entry", r.get("price", 0))) for r in selected}
+            shadow_result = shadow_trading.run_once(
+                selected,
+                lambda coin: prices.get(str(coin).upper()),
+                cfg,
+                path=str(cfg.get("shadow_state_path", "state/shadow_trades.jsonl")),
+            )
+            log("SHADOW", f"opened {shadow_result.get('opened', 0)} / closed {shadow_result.get('closed', 0)}")
+        except Exception as e:
+            log("SHADOW", "shadow trading error:", e)
+
+    try:
+        opened = positions_mod.open_picks(selected, cfg, source="buy")
+    except Exception as e:
+        log("BUY", "positions open error:", e)
     return True
 
 
