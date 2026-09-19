@@ -17,7 +17,7 @@ import os
 
 DEFAULT_TRAIN_BARS = 2000
 DEFAULT_TEST_BARS = 500
-DEFAULT_STEP_BARS = 250
+DEFAULT_STEP_BARS = 500
 DEFAULT_MIN_TRAIN_BARS = 500
 DEFAULT_MAX_WINDOWS = 20
 PATH = "state/walk_forward_stats.json"
@@ -55,7 +55,7 @@ def build_windows(
     n = len(data)
     train_bars = max(1, int(train_bars))
     test_bars = max(1, int(test_bars))
-    step_bars = max(1, int(step_bars))
+    step_bars = max(test_bars, int(step_bars))
     min_train_bars = max(1, int(min_train_bars))
     max_windows = max(1, int(max_windows))
 
@@ -75,7 +75,7 @@ def build_windows(
             "test_end": test_end,
             "train_start_ts": _ts(data[train_start]),
             "train_end_ts": _ts(data[train_end - 1]),
-            "test_start_ts": _ts(data[test_end - 1]) if test_end == train_end + 1 else _ts(data[train_end]),
+            "test_start_ts": _ts(data[train_end]),
             "test_end_ts": _ts(data[test_end - 1]),
         })
         if len(windows) >= max_windows:
