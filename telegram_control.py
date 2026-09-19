@@ -47,7 +47,36 @@ class TelegramControl:
             "reply_markup": json.dumps(keyboard, separators=(",", ":")),
         })
 
-    def _authorized_callback(self, callback: Dict[str, Any]) -> bool:
+
+    def send_execution_intent(self, intent: Any, *, chat_id: Optional[str] = None) -> Dict[str, Any]:
+        """Send a compact execution-review message; buttons are never authorization by themselves."""
+        text = (
+            f"⚠️ <b>EXECUTION REVIEW | {intent.symbol.upper()}</b>\n"
+            f"🟢 BUY: <b>{intent.buy_exchange.upper()}</b> @ {intent.buy_price}\n"
+            f"🔴 SELL: <b>{intent.sell_exchange.upper()}</b> @ {intent.sell_price}\n"
+            f"💰 Notional: <b>{intent.notional_usdt:.2f} USDT</b>\n"
+            f"📈 Net spread: <b>{intent.net_pct:.2f}%</b>\n"
+            f"🆔 <code>{intent.id}</code>\n\n"
+            "Confirming here only requests execution review; the backend must "
+            "revalidate the opportunity immediately before any adapter call."
+        )
+        return self.send_opportunity(intent.id, text, chat_id=chat_id)
+
+    def callback_handler(self, engine: Any, revalidator: Callable[[Any], bool]) -> Callable[[str, str], None]:
+        """Create a Telegram callback handler backed by ExecutionEngine."""
+        def handle(action: str, intent_id: str) -> None:
+            intent = engine.get_intent(intent_id)
+            if intent is None:
+                raise ValueError("unknown execution intent")
+            if action == "cancel":
+                engine.transition(intent, "CANCELLED")
+                return
+            if action == "confirm":
+                engine.confirm(intent, True, revalidator=revalidator)
+                return
+            raise ValueError("unsupported Telegram execution action")
+        return handle
+\n    def _authorized_callback(self, callback: Dict[str, Any]) -> bool:
         message = callback.get("message") or {}
         callback_chat = str((message.get("chat") or {}).get("id", ""))
         if not self.chat_id or callback_chat != self.chat_id:
