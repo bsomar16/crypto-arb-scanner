@@ -82,6 +82,12 @@ DEFAULTS = {
     "market_regime_enabled": True,
     "market_regime_breadth_min_quote_volume": 1000000,
     "market_regime_breadth_limit": 100,
+    # Portfolio correlation is execution/risk context, not signal generation.
+    "correlation_interval": "1h",
+    "correlation_lookback_bars": 72,
+    "max_pairwise_correlation": 0.88,
+    "correlation_workers": 8,
+    "correlation_risk_hard_block": False,
 }
 
 def load_cfg():
