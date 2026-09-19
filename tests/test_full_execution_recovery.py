@@ -166,7 +166,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         coordinator = executor.coordinator(intent, 2.8)
         executor.submit_buy(intent, coordinator, source, price=100, revalidate=lambda _: True)
         buy_id = coordinator.intent.buy_order_id
-        source.orders[buy_id].update({"status": "FILLED", "executedQty": 3.0, "avgPrice": 100.0})
+        source.orders[buy_id].update({"status": "FILLED", "executedQty": 2.8, "avgPrice": 100.0})
         executor.reconcile_buy(intent, coordinator, source)
         engine.confirm_withdrawal(intent, True)
         executor.submit_transfer(intent, coordinator, source, destination, "SOL", revalidate=lambda _: True)
