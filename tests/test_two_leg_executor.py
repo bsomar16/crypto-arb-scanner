@@ -80,7 +80,7 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_journal = trade_journal.PATH
         trade_journal.PATH = os.path.join(self.tmp.name, "trade_journal.jsonl")
-        self.engine = ExecutionEngine({"execution_max_notional_usdt": 300, "execution_allow_withdrawals": True}, self.tmp.name)
+        self.engine = ExecutionEngine({"execution_live_enabled": True, "execution_max_notional_usdt": 300, "execution_allow_withdrawals": True}, self.tmp.name)
         self.opportunity = SimpleNamespace(
             symbol="SOLUSDT", buy_exchange="binance", sell_exchange="bybit",
             executable_notional_usdt=100, buy_ask=100, sell_bid=102, net_pct=1.5,
