@@ -1,6 +1,6 @@
+import signal_outcomes
 import unittest
 
-import signal_outcomes
 
 
 class SignalOutcomeTests(unittest.TestCase):
@@ -49,3 +49,14 @@ class SignalOutcomeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_evaluate_tracks_staged_targets():
+    signal = {"candle_open_time": 0, "entry": 100, "stop": 95, "target": 120, "t1": 105, "t2": 110, "t3": 120}
+    rows = [
+        [1, 100, 106, 99, 104, 1],
+        [2, 104, 111, 103, 109, 1],
+        [3, 109, 121, 108, 119, 1],
+    ]
+    result = signal_outcomes._evaluate(signal, rows, 10)
+    assert result["staged_target_hits"] == {"t1": True, "t2": True, "t3": True}
