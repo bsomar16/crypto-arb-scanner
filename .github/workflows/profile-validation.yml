@@ -2,6 +2,14 @@ name: profile-validation
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'signals.py'
+      - 'backtest.py'
+      - 'validation.py'
+      - 'config.json'
+      - 'tests/test_profile_validation.py'
+      - '.github/workflows/profile-validation.yml'
 
 jobs:
   validate:
