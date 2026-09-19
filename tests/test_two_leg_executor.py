@@ -88,6 +88,7 @@ class TwoLegExecutorTests(unittest.TestCase):
         )
         self.intent = self.engine.create_intent(self.opportunity)
         self.engine.confirm(self.intent, True, lambda _: True)
+        self.engine.confirm_withdrawal(self.intent, True)
         self.executor = TwoLegExecutor(self.engine, self.tmp.name)
         self.coordinator = self.executor.coordinator(self.intent, 1.0)
         self.adapter = FakeAdapter()
