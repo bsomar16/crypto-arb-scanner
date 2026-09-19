@@ -114,7 +114,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         coordinator2 = executor2.coordinator(intent2, 2.8)
         self.assertEqual(coordinator2.intent.buy_order_id, buy_id)
         source.orders[buy_id].update({"status": "FILLED", "executedQty": 2.8, "avgPrice": 100.0,
-                                      "feeAmount": 0.003, "feeCurrency": "SOL"})
+                                      "feeAmount": 0.0, "feeCurrency": "SOL"})
         self.assertEqual(executor2.reconcile_buy(intent2, coordinator2, source), LegState.BUY_FILLED)
         self.assertEqual(coordinator2.intent.filled_qty, 2.8)
 
