@@ -82,6 +82,18 @@ class ExecutionEngine:
         self._write(intent)
         return intent
 
+    def get_intent(self, intent_id: str) -> Optional[ExecutionIntent]:
+        row = self._intents.get(str(intent_id))
+        if not row:
+            return None
+        fields = ExecutionIntent.__dataclass_fields__
+        return ExecutionIntent(**{k: v for k, v in row.items() if k in fields})
+
+    def cancel(self, intent: ExecutionIntent) -> ExecutionIntent:
+        if intent.status not in {"PENDING_CONFIRMATION", "DRY_RUN_CONFIRMED", "READY_FOR_ADAPTER"}:
+            raise ValueError(f"intent cannot be cancelled from state: {intent.status}")
+        return self.transition(intent, "CANCELLED")
+
     def confirm(self, intent: ExecutionIntent, explicit_confirmation: bool,
                 revalidator: Optional[Callable[[ExecutionIntent], bool]] = None) -> ExecutionIntent:
         now = int(time.time() * 1000)
