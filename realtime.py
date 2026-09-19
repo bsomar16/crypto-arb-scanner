@@ -52,6 +52,8 @@ class BinanceKlineCache:
             if not k or not k.get("x"):
                 return
             symbol = str(k.get("s", "")).upper()
+            if symbol.endswith("USDT"):
+                symbol = symbol[:-4]
             interval = str(k.get("i", ""))
             if not symbol or interval not in INTERVALS:
                 return
