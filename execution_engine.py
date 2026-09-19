@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from execution_guard import ExecutionRequest, validate_spot_request
+from execution_guard import ExecutionRequest, validate_spot_request, validate_execution_order, validate_withdrawal_request
 from execution_recovery import ACTIVE, ExecutionSafety, recover_active_intents
 
 
@@ -36,6 +36,7 @@ class ExecutionIntent:
     confirmed_ms: Optional[int] = None
     last_revalidated_ms: Optional[int] = None
     idempotency_key: str = ""
+    withdrawal_confirmed: bool = False
     error: Optional[str] = None
 
 
@@ -53,9 +54,11 @@ class ExecutionEngine:
     def create_intent(self, opportunity: Any) -> ExecutionIntent:
         if opportunity.net_pct < float(self.cfg.get("realtime_min_net_pct", 0.5)):
             raise ValueError("opportunity below execution threshold")
-        notional = min(float(opportunity.executable_notional_usdt), self.max_notional)
+        notional = float(opportunity.executable_notional_usdt)
         if notional <= 0:
             raise ValueError("opportunity has no executable notional")
+        if notional > self.max_notional:
+            raise ValueError("opportunity notional exceeds execution limit")
         idem = self._idempotency_key(opportunity)
         existing = self._find_by_idempotency(idem)
         if existing is not None:
@@ -100,6 +103,16 @@ class ExecutionEngine:
         self._write(intent)
         return intent
 
+    def confirm_withdrawal(self, intent: ExecutionIntent, explicit_confirmation: bool) -> ExecutionIntent:
+        if not explicit_confirmation:
+            raise PermissionError("explicit withdrawal confirmation is required")
+        if intent.status not in {"READY_FOR_ADAPTER", "BUY_SUBMITTED", "BUY_PARTIAL", "BUY_FILLED"}:
+            raise ValueError(f"withdrawal confirmation is invalid for state: {intent.status}")
+        intent.withdrawal_confirmed = True
+        self._intents[intent.id] = asdict(intent)
+        self._write(intent)
+        return intent
+
     def revalidate_before_adapter(self, intent: ExecutionIntent,
                                   revalidator: Callable[[ExecutionIntent], bool]) -> ExecutionIntent:
         if not self.enabled:
@@ -127,19 +140,30 @@ class ExecutionEngine:
         return self.transition(intent, target)
 
     def validate_order(self, exchange: str, symbol: str, quantity: float, side: str, *, confirmed: bool,
-                       market_type: str = "SPOT") -> None:
+                       market_type: str = "SPOT", order_type: str = "LIMIT",
+                       price: float | None = None, reference_price: float | None = None,
+                       signal_price: float | None = None, market_quality: dict | None = None,
+                       fresh: bool = True) -> dict:
         if market_type.upper() != "SPOT":
             raise ValueError("SPOT-only policy: non-SPOT market rejected")
-        validate_spot_request(ExecutionRequest(
+        return validate_execution_order(ExecutionRequest(
             product="SPOT", side=side, symbol=symbol, exchange=exchange,
-            quantity=quantity, confirmed=confirmed,
-        ))
+            quantity=quantity, confirmed=confirmed, order_type=order_type, price=price,
+        ), cfg=self.cfg, reference_price=reference_price,
+           signal_price=signal_price, market_quality=market_quality, fresh=fresh)
 
-    def validate_withdrawal(self, exchange: str, asset: str, quantity: float, *, confirmed: bool) -> None:
-        validate_spot_request(ExecutionRequest(
+    def validate_withdrawal(self, exchange: str, asset: str, quantity: float, *, confirmed: bool,
+                            network: str = "", network_enabled: bool = False,
+                            destination_confirmed: bool = False) -> dict:
+        if not self.enabled:
+            raise PermissionError("live execution is disabled")
+        if not self._intents:
+            raise PermissionError("no active execution intent is available")
+        return validate_withdrawal_request(ExecutionRequest(
             product="SPOT", side="SELL", symbol=asset, exchange=exchange,
             quantity=quantity, confirmed=confirmed, withdrawal_confirmed=confirmed,
-        ), is_withdrawal=True)
+        ), cfg=self.cfg, network_enabled=network_enabled,
+           destination_confirmed=destination_confirmed, network=network)
 
     def _idempotency_key(self, opportunity: Any) -> str:
         return "|".join(str(x) for x in (
@@ -150,7 +174,10 @@ class ExecutionEngine:
 
     def _find_by_idempotency(self, key: str) -> Optional[ExecutionIntent]:
         row = next((v for v in self._intents.values() if v.get("idempotency_key") == key and v.get("status") not in {"FAILED", "CANCELLED", "EXPIRED", "COMPLETED"}), None)
-        return ExecutionIntent(**row) if row else None
+        if not row:
+            return None
+        fields = ExecutionIntent.__dataclass_fields__
+        return ExecutionIntent(**{k: v for k, v in row.items() if k in fields})
 
     def _daily_notional(self, exclude: Optional[str] = None) -> float:
         cutoff = int(time.time() * 1000) - 86400000

@@ -80,7 +80,7 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_journal = trade_journal.PATH
         trade_journal.PATH = os.path.join(self.tmp.name, "trade_journal.jsonl")
-        self.engine = ExecutionEngine({"execution_max_notional_usdt": 300}, self.tmp.name)
+        self.engine = ExecutionEngine({"execution_max_notional_usdt": 300, "execution_allow_withdrawals": True}, self.tmp.name)
         self.opportunity = SimpleNamespace(
             symbol="SOLUSDT", buy_exchange="binance", sell_exchange="bybit",
             executable_notional_usdt=100, buy_ask=100, sell_bid=102, net_pct=1.5,
@@ -88,6 +88,7 @@ class TwoLegExecutorTests(unittest.TestCase):
         )
         self.intent = self.engine.create_intent(self.opportunity)
         self.engine.confirm(self.intent, True, lambda _: True)
+        self.engine.confirm_withdrawal(self.intent, True)
         self.executor = TwoLegExecutor(self.engine, self.tmp.name)
         self.coordinator = self.executor.coordinator(self.intent, 1.0)
         self.adapter = FakeAdapter()
@@ -132,6 +133,15 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.assertEqual(self.executor.submit_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
         self.assertEqual(self.coordinator.intent.transferred_qty, 0.998)
         self.assertEqual(self.adapter.withdrawals[0][1], 0.998)
+
+    def test_transfer_requires_separate_withdrawal_confirmation(self):
+        self._buy_filled()
+        self.intent.withdrawal_confirmed = False
+        destination = FakeAdapter()
+        with self.assertRaises(PermissionError):
+            self.executor.submit_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL",
+                                          revalidate=lambda _: True)
+        self.assertEqual(self.adapter.withdrawals, [])
 
     def test_transfer_propagates_destination_memo(self):
         self._buy_filled()
