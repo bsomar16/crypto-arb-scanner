@@ -201,6 +201,25 @@ def run_walk_forward(
     return report
 
 
+
+def summarize_by_regime(trades: Sequence[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Aggregate outcomes by the causal 4h regime at signal time."""
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for trade in trades or []:
+        buckets.setdefault(str(trade.get("market_regime") or "UNKNOWN").upper(), []).append(trade)
+    result = {}
+    for regime, items in buckets.items():
+        closed = [t for t in items if str(t.get("outcome", "")).upper() in ("WIN", "LOSS")]
+        wins = sum(str(t.get("outcome", "")).upper() == "WIN" for t in closed)
+        mfe = [float(t["mfe_pct"]) for t in items if t.get("mfe_pct") is not None]
+        mae = [float(t["mae_pct"]) for t in items if t.get("mae_pct") is not None]
+        result[regime] = {"signals": len(items), "closed": len(closed), "wins": wins,
+                          "losses": len(closed)-wins,
+                          "win_pct": wins / len(closed) * 100.0 if closed else None,
+                          "avg_mfe_pct": mean(mfe) if mfe else None,
+                          "avg_mae_pct": mean(mae) if mae else None}
+    return result
+
 def run_symbol(symbol: str, interval: str, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run the existing closed-candle signal rules through walk-forward windows.
 
@@ -227,9 +246,11 @@ def run_symbol(symbol: str, interval: str, cfg: dict[str, Any] | None = None) ->
     horizon = int(backtest.HORIZON_BARS.get(interval, 48))
 
     def signal_fn(i, train, all_rows):
+        signal_ts = all_rows[i][0]
+        eligible_trend = [x for x in trend_rows if x[0] <= signal_ts]
         return backtest._signal_at(
             all_rows, i, interval, min_vol_x, min_potential,
-            max_potential, min_score, min_rr, trend_rows
+            max_potential, min_score, min_rr, eligible_trend
         )
 
     def outcome_fn(i, signal, all_rows):
@@ -241,6 +262,7 @@ def run_symbol(symbol: str, interval: str, cfg: dict[str, Any] | None = None) ->
         result["target"] = signal.get("target")
         result["potential_pct"] = signal.get("potential_pct")
         result["rr"] = signal.get("rr")
+        result["market_regime"] = signal.get("trend_4h", "UNKNOWN")
         return result
 
     return {
@@ -258,11 +280,18 @@ def run_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     symbols = [str(x).upper() for x in (cfg.get("backtest_symbols") or ["BTC", "ETH", "SOL"])]
     intervals = [x for x in (cfg.get("backtest_intervals") or ("5m", "15m", "1h")) if x in ("5m", "15m", "1h")]
     results = [run_symbol(symbol, interval, cfg) for symbol in symbols for interval in intervals]
+    all_trades = [
+        trade
+        for result in results
+        for window in ((result.get("report") or {}).get("windows") or [])
+        for trade in window.get("trades", [])
+    ]
     aggregate = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "method": "fixed-length rolling walk-forward",
         "outcome_source": "walk_forward",
         "results": results,
+        "regime_summary": summarize_by_regime(all_trades),
     }
     path = str(cfg.get("walk_forward_stats_path", PATH))
     persist(aggregate, path)
