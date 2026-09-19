@@ -134,6 +134,11 @@ class TwoLegExecutor:
             raise ValueError("buy order id is missing")
         before = coordinator.intent.state.value
         snap = reconcile_order(adapter, execution_intent.symbol, coordinator.intent.buy_order_id)
+        if not snap.provider_order_id:
+            raise RuntimeError("buy reconciliation returned no provider order id")
+        if snap.status == "UNKNOWN":
+            raise RuntimeError("buy reconciliation is inconclusive; refusing to resubmit")
+
         if before == LegState.BUY_FILLED.value and snap.status == "FILLED":
             return coordinator.intent.state
         fill = LegFill(coordinator.intent.buy_order_id, snap.status, coordinator.intent.requested_qty,
@@ -365,6 +370,16 @@ class TwoLegExecutor:
         return state
 
     def reconcile_sell(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, adapter: Any) -> LegState:
+        if not coordinator.intent.sell_order_id:
+            raise ValueError("sell order id is missing")
+        snap = reconcile_order(adapter, execution_intent.symbol, coordinator.intent.sell_order_id)
+        if not snap.provider_order_id:
+            raise RuntimeError("sell reconciliation returned no provider order id")
+        if snap.status == "UNKNOWN":
+            raise RuntimeError("sell reconciliation is inconclusive; refusing to resubmit")
+        return self._accept_reconciled_sell(execution_intent, coordinator, snap)
+
+    def _accept_reconciled_sell(self, execution_intent: ExecutionIntent, coordinator: TwoLegCoordinator, snap: Any) -> LegState:
         if not coordinator.intent.sell_order_id:
             raise ValueError("sell order id is missing")
         before = coordinator.intent.state.value
