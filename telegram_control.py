@@ -107,8 +107,12 @@ class TelegramControl:
                 parts = data.split(":")
                 if len(parts) != 3 or parts[0] != "arb" or parts[1] not in {"confirm", "cancel"}:
                     continue
-                handler(parts[1], parts[2])
+                try:
+                    handler(parts[1], parts[2])
+                    callback_text = "Recorded. Backend revalidation is required before execution."
+                except Exception:
+                    callback_text = "Request rejected by execution safety controls."
                 if callback_id:
                     self._call("answerCallbackQuery", {"callback_query_id": callback_id,
-                                                        "text": "Recorded. Execution gate will revalidate the intent."})
+                                                        "text": callback_text})
             time.sleep(0.1)
