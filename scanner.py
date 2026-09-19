@@ -64,8 +64,6 @@ DEFAULTS = {
     "trap_expiry_days": TRAP_EXPIRY_DAYS,
     "position_expiry_days": 14,
     "max_open_positions": 5,
-    "max_trade_entries_per_day": 5,
-    "preferred_trade_entries_per_day": 3,
     "realtime_scan_interval_seconds": 60,
     "realtime_discovery_refresh_seconds": 900,
     "realtime_monitor_candidates": 25,
@@ -154,7 +152,7 @@ def _candidate_universe(cfg, q, star, t24=None):
     return discovered, results
 
 def _rank_trade_candidates(hits, cfg):
-    """Rank qualified signals into the small daily entry budget."""
+    """Rank qualified BUY signals by setup quality; no daily signal quota."""
     scored = []
     for r in hits:
         historical = r.get("historical_win_pct")
@@ -186,7 +184,7 @@ def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
-def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=15):
+def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None):
     """Return one BUY notification per coin.
 
     A coin is silent while it has an open tracked position. After that signal
@@ -238,7 +236,7 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
         fresh.append(r)
 
     fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"]))
-    return fresh[:limit], updates
+    return (fresh if limit is None else fresh[:limit]), updates
 
 def run_buy(token, chat_id, realtime_cache=None):
     cfg = load_cfg()
@@ -315,19 +313,13 @@ def run_buy(token, chat_id, realtime_cache=None):
         now_ts,
         active_coins=active_coins,
         entry_change_pct=float(cfg.get("buy_signal_entry_change_pct", 0.02)),
-        limit=int(cfg.get("buy_signal_pool_size", 20)),
+        limit=None,
     )
 
-    # Stage 4: enforce a real UTC-day entry budget across repeated scan runs.
+    # Signal generation is quality-gated, not quota-gated.
+    # Portfolio exposure limits must not suppress a valid market signal.
     ranked = _rank_trade_candidates(fresh, cfg)
-    daily_state = load_json("state/daily_entries.json", {}) or {}
-    today = datetime.now(timezone.utc).date().isoformat()
-    if daily_state.get("date") != today:
-        daily_state = {"date": today, "count": 0}
-    max_daily = max(0, min(int(cfg.get("max_trade_entries_per_day", 5)), 5))
-    used_today = max(0, int(daily_state.get("count", 0) or 0))
-    remaining = max(0, max_daily - used_today)
-    selected, exposure_blocked = exposure_mod.select_diversified(ranked[:remaining], cfg)
+    selected = ranked
     for r in selected:
         r["star"] = r["coin"] in star
 
@@ -346,14 +338,10 @@ def run_buy(token, chat_id, realtime_cache=None):
         opened = positions_mod.open_picks(selected, cfg, source="buy")
     except Exception as e:
         log("BUY", "positions open error:", e)
-    if opened:
-        daily_state["count"] = used_today + opened
-        save_json("state/daily_entries.json", daily_state)
-
     lines = [
         f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}",
         f"🔎 Wide discovery: {len(discovery_rows)} candidates · deep: {len(cands)} · {len(tasks)} MTF scans",
-        f"🎯 Selected {len(selected)} of {len(fresh)} qualified signals · daily entries {used_today + opened}/{max_daily}",
+        f"🎯 Quality-qualified signals: {len(selected)} of {len(fresh)}",
         "",
     ]
     for i, r in enumerate(selected, 1):
@@ -370,9 +358,9 @@ def run_buy(token, chat_id, realtime_cache=None):
         "━━━━━━━━━━━━━━━━━━━━",
         "Potential = model target, not guaranteed profit.",
         "24h volume is a liquidity filter only; BUY requires multi-factor confirmation.",
-        "Daily budget limits selections; the bot does not manufacture trades when fewer qualified setups exist.",
+        "Signals are quality-gated; there is no daily BUY quota.",
     ])
-    log(f"[BUY] {len(selected)} selected / {opened} opened today={used_today + opened}/{max_daily} from {len(fresh)} qualified signals / {len(tasks)} deep scans")
+    log(f"[BUY] {len(selected)} quality signals / {opened} opened from {len(fresh)} qualified signals / {len(tasks)} deep scans")
     telegram_msg(token, chat_id, "\n".join(lines))
     return True
 
