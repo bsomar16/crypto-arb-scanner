@@ -32,6 +32,7 @@ import signal_history
 import market_regime
 import signal_lifecycle
 import multi_exchange
+import shadow_trading
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -93,6 +94,9 @@ DEFAULTS = {
     "max_pairwise_correlation": 0.88,
     "correlation_workers": 8,
     "correlation_risk_hard_block": False,
+    "shadow_trading_enabled": False,
+    "shadow_notional_usdt": 300.0,
+    "shadow_state_path": "state/shadow_trades.jsonl",
 }
 
 def load_cfg():
@@ -399,6 +403,20 @@ def run_buy(token, chat_id, realtime_cache=None):
             signal_lifecycle.register(r)
         except Exception as e:
             log("BUY", "signal lifecycle register error:", e)
+
+    shadow_result = {"opened": 0, "closed": 0, "outcome_source": "shadow"}
+    if bool(cfg.get("shadow_trading_enabled", False)):
+        try:
+            prices = {str(r.get("coin", "")).upper(): float(r.get("entry", r.get("price", 0))) for r in selected}
+            shadow_result = shadow_trading.run_once(
+                selected,
+                lambda coin: prices.get(str(coin).upper()),
+                cfg,
+                path=str(cfg.get("shadow_state_path", "state/shadow_trades.jsonl")),
+            )
+            log("SHADOW", f"opened {shadow_result.get('opened', 0)} / closed {shadow_result.get('closed', 0)}")
+        except Exception as e:
+            log("SHADOW", "shadow trading error:", e)
 
     opened = 0
     try:
