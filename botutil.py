@@ -148,7 +148,7 @@ def _format_buy_message(text):
                 f"⭐ <b>Score:</b> {score.group(1)}",
                 "",
                 "🔍 <b>Technical Context:</b>",
-                f"• <b>Data:</b> RSI {score.group(2)} | Vol ×{score.group(3)} | 24h {score.group(4)} | 4h: {re.search(r'4h: ([^\\n]+)', joined).group(1) if re.search(r'4h: ([^\\n]+)', joined) else '?'}",
+                f"• <b>Data:</b> RSI {score.group(2)} | Vol ×{score.group(3)} | 24h {score.group(4)} | 4h: {context_4h.group(1) if context_4h else '?'}",
                 f"• <b>Why:</b> {why.group(1) if why else 'EMA structure &amp; MACD confirmation'}",
             ])
             if j < len(lines) and lines[j].startswith("🔔 <b>PRICE ALERTS</b>"):
