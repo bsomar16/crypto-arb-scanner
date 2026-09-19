@@ -2,8 +2,8 @@
 """Wide-market crypto discovery and price-structure helpers.
 
 The discovery layer is intentionally cheap: 24h ticker data narrows the Binance
-USDT SPOT universe, then a small 1h candle sample finds acceleration/compression
-candidates before expensive multi-timeframe analysis.
+USDT SPOT universe, then 1h + 15m acceleration finds candidates before expensive
+multi-timeframe analysis.
 """
 from __future__ import annotations
 
@@ -27,6 +27,31 @@ def _klines(symbol: str, interval: str = "1h", limit: int = 32):
         return None
 
 
+def _early_move_score(price_1h: float, price_6h: float, vol_x: float,
+                      micro_change_pct: float, micro_vol_x: float,
+                      relative: float, compression: float) -> float:
+    """Score early expansion without requiring a large 24h move.
+
+    This is a discovery/ranking score, never a trade signal or win probability.
+    """
+    score = 0.0
+    if price_1h > 0:
+        score += 14
+    if price_6h > 0:
+        score += 8
+    if micro_change_pct > 0:
+        score += min(14, micro_change_pct * 4)
+    if micro_vol_x >= 1.15:
+        score += min(16, (micro_vol_x - 1) * 16)
+    if vol_x >= 1.2:
+        score += min(12, (vol_x - 1) * 8)
+    if relative > 0:
+        score += min(10, relative * 0.7)
+    if compression >= 0.15:
+        score += min(10, compression * 25)
+    return max(0.0, min(100.0, score))
+
+
 def _fast_one(symbol: str, qv: float, chg24: float, btc_chg24: float):
     data = _klines(symbol)
     if not data:
@@ -38,7 +63,6 @@ def _fast_one(symbol: str, qv: float, chg24: float, btc_chg24: float):
     highs = [float(k[2]) for k in closed]
     lows = [float(k[3]) for k in closed]
     vols = [float(k[5]) for k in closed]
-    quote_vols = [float(k[7]) for k in closed]
 
     last = closes[-1]
     prev1 = closes[-2]
@@ -62,26 +86,46 @@ def _fast_one(symbol: str, qv: float, chg24: float, btc_chg24: float):
     atr_pct = atr / last * 100 if last else 0
     relative = chg24 - btc_chg24
 
-    # Cheap early-expansion score. This is a discovery score, not a win rate.
-    score = 0.0
+    base_score = 0.0
     if e9 > e20:
-        score += 18
+        base_score += 18
     if price_1h > 0:
-        score += 12
+        base_score += 12
     if price_6h > 0:
-        score += 10
+        base_score += 10
     if relative > 0:
-        score += min(12, relative * 0.8)
+        base_score += min(12, relative * 0.8)
     if vol_x >= 1.2:
-        score += min(18, (vol_x - 1) * 12)
+        base_score += min(18, (vol_x - 1) * 12)
     if compression >= 0.15:
-        score += min(12, compression * 30)
+        base_score += min(12, compression * 30)
     if 45 <= rsi <= 68:
-        score += 10
+        base_score += 10
     elif 68 < rsi <= 75:
-        score += 5
+        base_score += 5
     if 0 < atr_pct < 8:
-        score += 5
+        base_score += 5
+
+    micro = _klines(symbol, "15m", 12)
+    micro_change = 0.0
+    micro_vol_x = 0.0
+    if micro and len(micro) >= 8:
+        mc = micro[:-1]
+        mclose = [float(k[4]) for k in mc]
+        mvol = [float(k[5]) for k in mc]
+        if len(mclose) >= 2 and mclose[-2]:
+            micro_change = (mclose[-1] / mclose[-2] - 1) * 100
+        if len(mvol) >= 8:
+            micro_base = mean(mvol[-8:-2])
+            micro_recent = mean(mvol[-2:])
+            micro_vol_x = micro_recent / micro_base if micro_base > 0 else 0.0
+
+    early_score = _early_move_score(
+        price_1h, price_6h, vol_x, micro_change, micro_vol_x, relative, compression
+    )
+    # Blend the new micro-acceleration evidence without allowing it to replace
+    # the established 1h liquidity/trend context.
+    score = 0.75 * min(100.0, base_score) + 0.25 * early_score
 
     return {
         "coin": symbol,
@@ -94,6 +138,9 @@ def _fast_one(symbol: str, qv: float, chg24: float, btc_chg24: float):
         "compression": compression,
         "relative_strength": relative,
         "rsi": rsi,
+        "micro_15m_change_pct": micro_change,
+        "micro_15m_vol_x": micro_vol_x,
+        "early_move_score": early_score,
         "score": max(0.0, min(100.0, score)),
     }
 
@@ -131,7 +178,7 @@ def discover(t24, cfg):
             if result:
                 results.append(result)
 
-    results.sort(key=lambda r: (-r["score"], -r["qv"]))
+    results.sort(key=lambda r: (-r["score"], -r["early_move_score"], -r["qv"]))
     deep_n = int(cfg.get("discovery_deep_candidates", 100))
     return results, results[:deep_n]
 
@@ -159,9 +206,6 @@ def structure_snapshot(closes, highs, lows):
 
     higher_highs = len(last_ph) >= 2 and last_ph[-1][1] > last_ph[-2][1]
     higher_lows = len(last_pl) >= 2 and last_pl[-1][1] > last_pl[-2][1]
-    # A monotonic trend may not create local pivots; use rolling swing lows as a
-    # deterministic fallback so structure does not become UNKNOWN/MIXED solely
-    # because every candle makes a new high/low.
     if not higher_lows and len(lows) >= 8:
         earlier_low = min(lows[-8:-4])
         recent_low = min(lows[-4:])
