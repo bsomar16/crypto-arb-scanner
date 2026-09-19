@@ -43,7 +43,7 @@ class ExecutionIntent:
 class ExecutionEngine:
     def __init__(self, cfg: dict, state_dir: str = "state"):
         self.cfg = cfg
-        self.enabled = os.getenv("EXECUTION_ENABLED", "false").lower() == "true"
+        self.enabled = (os.getenv("EXECUTION_ENABLED", "false").lower() == "true" and bool(cfg.get("execution_live_enabled", False)))
         self.confirm_ttl_ms = int(cfg.get("execution_confirmation_ttl_ms", 30000))
         self.max_notional = float(cfg.get("execution_max_notional_usdt", 300.0))
         self.state = Path(state_dir)
