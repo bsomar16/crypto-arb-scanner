@@ -102,7 +102,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         source = PaperAdapter("binance")
         destination = PaperAdapter("bybit", sell=True)
         executor = TwoLegExecutor(engine, self.tmp.name)
-        coordinator = executor.coordinator(intent, 3.0)
+        coordinator = executor.coordinator(intent, 2.8)
 
         self.assertEqual(executor.submit_buy(intent, coordinator, source, price=100, revalidate=lambda _: True), LegState.BUY_SUBMITTED)
         buy_id = coordinator.intent.buy_order_id
@@ -111,12 +111,12 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         engine2 = ExecutionEngine(self.cfg, self.tmp.name)
         intent2 = type(intent)(**engine2._intents[intent.id])
         executor2 = TwoLegExecutor(engine2, self.tmp.name)
-        coordinator2 = executor2.coordinator(intent2, 3.0)
+        coordinator2 = executor2.coordinator(intent2, 2.8)
         self.assertEqual(coordinator2.intent.buy_order_id, buy_id)
-        source.orders[buy_id].update({"status": "FILLED", "executedQty": 3.0, "avgPrice": 100.0,
+        source.orders[buy_id].update({"status": "FILLED", "executedQty": 2.8, "avgPrice": 100.0,
                                       "feeAmount": 0.003, "feeCurrency": "SOL"})
         self.assertEqual(executor2.reconcile_buy(intent2, coordinator2, source), LegState.BUY_FILLED)
-        self.assertEqual(coordinator2.intent.filled_qty, 3.0)
+        self.assertEqual(coordinator2.intent.filled_qty, 2.8)
 
         engine2.confirm_withdrawal(intent2, True)
         self.assertEqual(executor2.submit_transfer(intent2, coordinator2, source, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
@@ -126,12 +126,12 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         engine3 = ExecutionEngine(self.cfg, self.tmp.name)
         intent3 = type(intent)(**engine3._intents[intent.id])
         executor3 = TwoLegExecutor(engine3, self.tmp.name)
-        coordinator3 = executor3.coordinator(intent3, 3.0)
+        coordinator3 = executor3.coordinator(intent3, 2.8)
         self.assertEqual(coordinator3.intent.transfer_id, transfer_id)
         self.assertEqual(len(source.withdrawals), 1)
 
         destination.deposit_record = {"id": "deposit-1", "coin": "SOL", "network": "SOL",
-                                      "amount": "2.997", "status": 3, "txId": "paper-tx",
+                                      "amount": "2.797", "status": 3, "txId": "paper-tx",
                                       "address": "paper-destination"}
         state, result = executor3.reconcile_transfer(intent3, coordinator3, source, destination, "SOL", transfer_id)
         self.assertEqual(result.status, "COMPLETED")
@@ -142,7 +142,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         engine4 = ExecutionEngine(self.cfg, self.tmp.name)
         intent4 = type(intent)(**engine4._intents[intent.id])
         executor4 = TwoLegExecutor(engine4, self.tmp.name)
-        coordinator4 = executor4.coordinator(intent4, 3.0)
+        coordinator4 = executor4.coordinator(intent4, 2.8)
         self.assertEqual(coordinator4.intent.state, LegState.TRANSFER_CONFIRMED)
         self.assertTrue(coordinator4.intent.destination_deposit_confirmed)
         self.assertEqual(coordinator4.intent.transfer_id, transfer_id)
@@ -154,7 +154,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.assertEqual(len(destination.orders), 1)
         self.assertEqual(sell_id, coordinator4.intent.sell_order_id)
 
-        destination.orders[sell_id].update({"status": "FILLED", "executedQty": 2.997, "avgPrice": 104.0,
+        destination.orders[sell_id].update({"status": "FILLED", "executedQty": 2.797, "avgPrice": 104.0,
                                              "feeAmount": 0.001, "feeCurrency": "USDT"})
         self.assertEqual(executor4.reconcile_sell(intent4, coordinator4, destination), LegState.COMPLETED)
 
