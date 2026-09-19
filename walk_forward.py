@@ -201,5 +201,71 @@ def run_walk_forward(
     return report
 
 
-if __name__ == "__main__":
+def run_symbol(symbol: str, interval: str, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run the existing closed-candle signal rules through walk-forward windows.
+
+    This adapter intentionally uses backtest._signal_at/_evaluate so the
+    historical entry/exit semantics stay identical to the normal backtest.
+    """
+    import backtest
+
+    cfg = cfg or {}
+    bars = int(cfg.get("walk_forward_history_bars",
+                      int(cfg.get("walk_forward_train_bars", DEFAULT_TRAIN_BARS))
+                      + int(cfg.get("walk_forward_test_bars", DEFAULT_TEST_BARS))
+                      + int(cfg.get("walk_forward_step_bars", DEFAULT_STEP_BARS)) * int(cfg.get("walk_forward_max_windows", DEFAULT_MAX_WINDOWS))))
+    rows = backtest._fetch_history(symbol, interval, bars)
+    trend_rows = backtest._fetch_history(symbol, "4h", max(500, bars // 8))
+    if len(rows) < int(cfg.get("walk_forward_min_train_bars", DEFAULT_MIN_TRAIN_BARS)) + int(cfg.get("walk_forward_test_bars", DEFAULT_TEST_BARS)):
+        return {"symbol": symbol, "interval": interval, "report": None, "reason": "insufficient_history"}
+
+    min_vol_x = float(cfg.get("buy_min_vol_x", 1.15))
+    min_potential = float(cfg.get("signal_min_potential_pct", 5.0))
+    max_potential = float(cfg.get("signal_max_potential_pct", 80.0))
+    min_score = float(cfg.get("signal_min_score", 55.0))
+    min_rr = float(cfg.get("signal_min_rr", 1.5))
+    horizon = int(backtest.HORIZON_BARS.get(interval, 48))
+
+    def signal_fn(i, train, all_rows):
+        return backtest._signal_at(
+            all_rows, i, interval, min_vol_x, min_potential,
+            max_potential, min_score, min_rr, trend_rows
+        )
+
+    def outcome_fn(i, signal, all_rows):
+        result = backtest._evaluate(all_rows, i, signal, horizon)
+        result = dict(result)
+        result["timestamp"] = signal.get("timestamp")
+        result["setup_type"] = signal.get("setup_type")
+        result["entry"] = signal.get("entry")
+        result["target"] = signal.get("target")
+        result["potential_pct"] = signal.get("potential_pct")
+        result["rr"] = signal.get("rr")
+        return result
+
+    return {
+        "symbol": symbol,
+        "interval": interval,
+        "report": run_walk_forward(rows, signal_fn, outcome_fn, cfg),
+    }
+
+
+def run_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run configured symbols/intervals and persist one aggregate report."""
+    cfg = cfg or {}
+    if not bool(cfg.get("walk_forward_enabled", True)):
+        return {"enabled": False}
+    symbols = [str(x).upper() for x in (cfg.get("backtest_symbols") or ["BTC", "ETH", "SOL"])]
+    intervals = [x for x in (cfg.get("backtest_intervals") or ("5m", "15m", "1h")) if x in ("5m", "15m", "1h")]
+    results = [run_symbol(symbol, interval, cfg) for symbol in symbols for interval in intervals]
+    aggregate = {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "method": "fixed-length rolling walk-forward",
+        "outcome_source": "walk_forward",
+        "results": results,
+    }
+    path = str(cfg.get("walk_forward_stats_path", PATH))
+    persist(aggregate, path)
+    return aggregate
+
     print("walk_forward.py provides the chronological evaluation API; use run_walk_forward().")
