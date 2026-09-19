@@ -182,6 +182,8 @@ class TwoLegExecutor:
         self.engine.revalidate_before_adapter(execution_intent, revalidate)
         coordinator.revalidate_transfer = lambda _: revalidate(execution_intent)
         before = coordinator.intent.state.value
+        if not execution_intent.withdrawal_confirmed:
+            raise PermissionError("separate withdrawal confirmation is required before transfer")
         transfer_amount = self._transferable_buy_qty(coordinator, asset)
         state = coordinator.begin_transfer(transfer_amount)
         if state != LegState.TRANSFER_PENDING:
@@ -191,8 +193,6 @@ class TwoLegExecutor:
         network = execution_intent.network
         if not network:
             return self._fail_transfer(execution_intent, coordinator, "no validated transfer network")
-        if not execution_intent.withdrawal_confirmed:
-            raise PermissionError("separate withdrawal confirmation is required before transfer")
         self._validate_transfer_route(execution_intent, source_adapter, destination_adapter,
                                       asset, network, coordinator.intent.transferred_qty)
         source_network = self._network(source_adapter.get_networks(asset), network)
