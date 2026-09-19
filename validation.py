@@ -47,7 +47,7 @@ def run(cfg=None):
     cfg = cfg or {}
     symbols = [str(x).upper() for x in (cfg.get("backtest_symbols") or ["BTC", "ETH", "SOL"])]
     intervals = [x for x in (cfg.get("backtest_intervals") or ("5m", "15m", "1h"))
-                 if x in STRATEGY_PROFILES]
+                 if x in {p["interval"] for p in STRATEGY_PROFILES.values()}]
     bars = int(cfg.get("backtest_bars", 3000))
     results = []
     for symbol in symbols:
