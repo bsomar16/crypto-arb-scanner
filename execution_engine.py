@@ -103,7 +103,17 @@ class ExecutionEngine:
         self._write(intent)
         return intent
 
-    def confirm_withdrawal(self, intent: ExecutionIntent, explicit_confirmation: bool) -> ExecutionIntent:\n        if not explicit_confirmation:\n            raise PermissionError("explicit withdrawal confirmation is required")\n        if intent.status not in {"READY_FOR_ADAPTER", "BUY_SUBMITTED", "BUY_PARTIAL", "BUY_FILLED"}:\n            raise ValueError(f"withdrawal confirmation is invalid for state: {intent.status}")\n        intent.withdrawal_confirmed = True\n        self._intents[intent.id] = asdict(intent)\n        self._write(intent)\n        return intent\n\n    def revalidate_before_adapter(self, intent: ExecutionIntent,
+    def confirm_withdrawal(self, intent: ExecutionIntent, explicit_confirmation: bool) -> ExecutionIntent:
+        if not explicit_confirmation:
+            raise PermissionError("explicit withdrawal confirmation is required")
+        if intent.status not in {"READY_FOR_ADAPTER", "BUY_SUBMITTED", "BUY_PARTIAL", "BUY_FILLED"}:
+            raise ValueError(f"withdrawal confirmation is invalid for state: {intent.status}")
+        intent.withdrawal_confirmed = True
+        self._intents[intent.id] = asdict(intent)
+        self._write(intent)
+        return intent
+
+    def revalidate_before_adapter(self, intent: ExecutionIntent,
                                   revalidator: Callable[[ExecutionIntent], bool]) -> ExecutionIntent:
         if not self.enabled:
             raise PermissionError("live execution is disabled")
