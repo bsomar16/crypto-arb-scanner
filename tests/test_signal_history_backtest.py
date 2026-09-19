@@ -44,7 +44,8 @@ class SignalHistoryBacktestTests(unittest.TestCase):
                 stats = signal_history.comparable_stats(signal, min_samples=20)
                 self.assertEqual(stats["sample"], 20)
                 self.assertEqual(stats["win_pct"], 60.0)
-                self.assertEqual(stats["scope"], "exact")\n                self.assertEqual(stats["source"], "live")
+                self.assertEqual(stats["scope"], "exact")
+                self.assertEqual(stats["source"], "live")
             finally:
                 signal_history.PATH = old_path
                 signal_history.BACKTEST_STATS_PATH = old_bt
