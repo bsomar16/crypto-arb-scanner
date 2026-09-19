@@ -69,12 +69,12 @@ class ExecutionEngineTests(unittest.TestCase):
 
     def test_spot_gate_rejects_non_spot_requests_and_allows_spot(self):
         with tempfile.TemporaryDirectory() as d:
-            e = ExecutionEngine({"execution_live_enabled": True}, d)
-            with self.assertRaises(ValueError):
-                e.validate_order("binance", "BTCUSDT", 1, "BUY", confirmed=True, market_type="FUTURES")
             old = os.environ.get("EXECUTION_ENABLED")
             os.environ["EXECUTION_ENABLED"] = "true"
             try:
+                e = ExecutionEngine({"execution_live_enabled": True}, d)
+                with self.assertRaises(ValueError):
+                    e.validate_order("binance", "BTCUSDT", 1, "BUY", confirmed=True, market_type="FUTURES")
                 e.validate_order("binance", "BTCUSDT", 0.01, "BUY", confirmed=True)
             finally:
                 if old is None:
