@@ -17,8 +17,8 @@ class FakeAdapter:
     def place_spot_order(self, symbol, side, quantity, *, price=None, order_type="LIMIT", client_order_id=None):
         return {
             "orderId": client_order_id,
-            "status": "FILLED",
-            "executedQty": str(quantity),
+            "status": "NEW",
+            "executedQty": "0",
             "avgPrice": str(price),
         }
 
@@ -58,7 +58,7 @@ class FinalOrderPreflightTests(unittest.TestCase):
                 self._intent(), coordinator, FakeAdapter(),
                 price=100, order_type="LIMIT", revalidate=lambda _: True,
             )
-            self.assertEqual(state, LegState.BUY_FILLED)
+            self.assertEqual(state, LegState.BUY_SUBMITTED)
 
     def test_market_buy_is_rejected_before_adapter(self):
         with tempfile.TemporaryDirectory() as root, patch.dict("os.environ", {"EXECUTION_ENABLED": "true"}):

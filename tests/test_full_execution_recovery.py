@@ -18,7 +18,7 @@ class PaperAdapter:
         self.withdrawals = []
         self.deposit_record = {}
         self.balance = 10.0
-        self.withdraw_fee = 0.01
+        self.withdraw_fee = 0.0
 
     def get_spot_markets(self):
         return [SpotMarket("SOLUSDT", "SOL", "USDT", 0.001, 5.0, 0.001, 0.01)]
@@ -76,7 +76,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_journal = trade_journal.PATH
         trade_journal.PATH = os.path.join(self.tmp.name, "trade_journal.jsonl")
-        self.cfg = {"execution_max_notional_usdt": 300, "realtime_min_net_pct": 0.5}
+        self.cfg = {"execution_live_enabled": True, "execution_allow_withdrawals": True, "execution_max_notional_usdt": 300, "realtime_min_net_pct": 0.5}
         self.opportunity = SimpleNamespace(
             symbol="SOLUSDT", buy_exchange="binance", sell_exchange="bybit",
             executable_notional_usdt=300, buy_ask=100, sell_bid=104, net_pct=2.8,
@@ -102,7 +102,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         source = PaperAdapter("binance")
         destination = PaperAdapter("bybit", sell=True)
         executor = TwoLegExecutor(engine, self.tmp.name)
-        coordinator = executor.coordinator(intent, 3.0)
+        coordinator = executor.coordinator(intent, 2.8)
 
         self.assertEqual(executor.submit_buy(intent, coordinator, source, price=100, revalidate=lambda _: True), LegState.BUY_SUBMITTED)
         buy_id = coordinator.intent.buy_order_id
@@ -111,13 +111,14 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         engine2 = ExecutionEngine(self.cfg, self.tmp.name)
         intent2 = type(intent)(**engine2._intents[intent.id])
         executor2 = TwoLegExecutor(engine2, self.tmp.name)
-        coordinator2 = executor2.coordinator(intent2, 3.0)
+        coordinator2 = executor2.coordinator(intent2, 2.8)
         self.assertEqual(coordinator2.intent.buy_order_id, buy_id)
-        source.orders[buy_id].update({"status": "FILLED", "executedQty": 3.0, "avgPrice": 100.0,
-                                      "feeAmount": 0.003, "feeCurrency": "SOL"})
+        source.orders[buy_id].update({"status": "FILLED", "executedQty": 2.8, "avgPrice": 100.0,
+                                      "feeAmount": 0.0, "feeCurrency": "SOL"})
         self.assertEqual(executor2.reconcile_buy(intent2, coordinator2, source), LegState.BUY_FILLED)
-        self.assertEqual(coordinator2.intent.filled_qty, 3.0)
+        self.assertEqual(coordinator2.intent.filled_qty, 2.8)
 
+        engine2.confirm_withdrawal(intent2, True)
         self.assertEqual(executor2.submit_transfer(intent2, coordinator2, source, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
         transfer_id = coordinator2.intent.transfer_id
         self.assertEqual(len(source.withdrawals), 1)
@@ -125,12 +126,12 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         engine3 = ExecutionEngine(self.cfg, self.tmp.name)
         intent3 = type(intent)(**engine3._intents[intent.id])
         executor3 = TwoLegExecutor(engine3, self.tmp.name)
-        coordinator3 = executor3.coordinator(intent3, 3.0)
+        coordinator3 = executor3.coordinator(intent3, 2.8)
         self.assertEqual(coordinator3.intent.transfer_id, transfer_id)
         self.assertEqual(len(source.withdrawals), 1)
 
         destination.deposit_record = {"id": "deposit-1", "coin": "SOL", "network": "SOL",
-                                      "amount": "2.997", "status": 3, "txId": "paper-tx",
+                                      "amount": "2.8", "status": 3, "txId": "paper-tx",
                                       "address": "paper-destination"}
         state, result = executor3.reconcile_transfer(intent3, coordinator3, source, destination, "SOL", transfer_id)
         self.assertEqual(result.status, "COMPLETED")
@@ -141,7 +142,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         engine4 = ExecutionEngine(self.cfg, self.tmp.name)
         intent4 = type(intent)(**engine4._intents[intent.id])
         executor4 = TwoLegExecutor(engine4, self.tmp.name)
-        coordinator4 = executor4.coordinator(intent4, 3.0)
+        coordinator4 = executor4.coordinator(intent4, 2.8)
         self.assertEqual(coordinator4.intent.state, LegState.TRANSFER_CONFIRMED)
         self.assertTrue(coordinator4.intent.destination_deposit_confirmed)
         self.assertEqual(coordinator4.intent.transfer_id, transfer_id)
@@ -153,7 +154,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.assertEqual(len(destination.orders), 1)
         self.assertEqual(sell_id, coordinator4.intent.sell_order_id)
 
-        destination.orders[sell_id].update({"status": "FILLED", "executedQty": 2.997, "avgPrice": 104.0,
+        destination.orders[sell_id].update({"status": "FILLED", "executedQty": 2.8, "avgPrice": 104.0,
                                              "feeAmount": 0.001, "feeCurrency": "USDT"})
         self.assertEqual(executor4.reconcile_sell(intent4, coordinator4, destination), LegState.COMPLETED)
 
@@ -162,11 +163,12 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         source = PaperAdapter("binance")
         destination = PaperAdapter("bybit", sell=True)
         executor = TwoLegExecutor(engine, self.tmp.name)
-        coordinator = executor.coordinator(intent, 3.0)
+        coordinator = executor.coordinator(intent, 2.8)
         executor.submit_buy(intent, coordinator, source, price=100, revalidate=lambda _: True)
         buy_id = coordinator.intent.buy_order_id
-        source.orders[buy_id].update({"status": "FILLED", "executedQty": 3.0, "avgPrice": 100.0})
+        source.orders[buy_id].update({"status": "FILLED", "executedQty": 2.8, "avgPrice": 100.0})
         executor.reconcile_buy(intent, coordinator, source)
+        engine.confirm_withdrawal(intent, True)
         executor.submit_transfer(intent, coordinator, source, destination, "SOL", revalidate=lambda _: True)
         with self.assertRaises(ValueError):
             executor.submit_sell(intent, coordinator, destination, price=104, revalidate=lambda _: True)
