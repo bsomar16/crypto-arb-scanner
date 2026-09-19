@@ -307,6 +307,9 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         result["historical_wins"] = stats["wins"]
         result["historical_losses"] = stats["losses"]
         result["historical_scope"] = stats["scope"]
+        result["historical_avg_mfe_pct"] = stats.get("avg_mfe_pct", 0.0)
+        result["historical_avg_mae_pct"] = stats.get("avg_mae_pct", 0.0)
+        result["historical_milestone_rates"] = stats.get("milestone_rates", {})
         if stats["win_pct"] is not None:
             scope = "exact setup" if stats["scope"] == "exact" else "setup/timeframe"
             reasons.append(f"historical {stats['win_pct']:.0f}% ({stats['sample']} {scope} results)")
