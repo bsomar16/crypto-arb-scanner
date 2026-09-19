@@ -177,6 +177,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         entry = evaluate_entry(
             closes, highs, lows, [float(k[1]) for k in data], interval, atr=a,
             require_retest=True,
+            require_sweep=False,
         )
         if not entry:
             return _audit_reject(audit, "entry_confirmation")
