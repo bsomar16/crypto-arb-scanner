@@ -29,6 +29,7 @@ import signal_outcomes
 import component_quality
 import outcome_attribution
 import signal_history
+import market_regime
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -78,6 +79,9 @@ DEFAULTS = {
     "outcome_refresh_seconds": 300,
     "outcome_max_pending": 60,
     "outcome_horizon_bars": {"5m": 288, "15m": 96, "1h": 48},
+    "market_regime_enabled": True,
+    "market_regime_breadth_min_quote_volume": 1000000,
+    "market_regime_breadth_limit": 100,
 }
 
 def load_cfg():
@@ -157,6 +161,15 @@ def _candidate_universe(cfg, q, star, t24=None):
 def _rank_trade_candidates(hits, cfg):
     """Rank qualified BUY signals by setup quality; no daily signal quota."""
     attribution = outcome_attribution.aggregate(signal_history._read(), min_samples=30)
+    try:
+        regime = market_regime.detect_regime(
+            fetch_binance_24h(),
+            breadth_min_quote_volume=float(cfg.get("market_regime_breadth_min_quote_volume", 1000000)),
+            breadth_limit=int(cfg.get("market_regime_breadth_limit", 100)),
+        ) if bool(cfg.get("market_regime_enabled", True)) else {"state": "UNKNOWN", "score_modifier": 0.0}
+    except Exception as e:
+        log("BUY", "market regime unavailable:", e)
+        regime = {"state": "UNKNOWN", "score_modifier": 0.0}
     scored = []
     for r in hits:
         historical = r.get("historical_win_pct")
@@ -181,7 +194,11 @@ def _rank_trade_candidates(hits, cfg):
         row = dict(r)
         component_modifier = component_quality.ranking_modifier(row, attribution, min_samples=30)
         row["component_quality_modifier"] = component_modifier
-        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier)), 1)
+        row["market_regime"] = regime.get("state", "UNKNOWN")
+        row["market_regime_volatility"] = regime.get("volatility", "UNKNOWN")
+        row["market_regime_breadth_pct"] = regime.get("breadth_pct", 0.0)
+        row["market_regime_modifier"] = float(regime.get("score_modifier", 0.0) or 0.0)
+        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier + row["market_regime_modifier"])), 1)
         scored.append(row)
     scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     return scored
