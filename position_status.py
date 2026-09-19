@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import position_state
 import positions
 import signal_history
+import signal_lifecycle
 import store
 import trade_journal
 from botutil import fmt_price, log, esc, env_float, telegram_msg, load_json, save_json
@@ -221,6 +222,10 @@ def run_cycle(token, chat_id, cfg):
                 continue
             if price >= float(level) and not pos.get(f"{event}_hit"):
                 _apply_tp(pos, event, price)
+                try:
+                    signal_lifecycle.record_target(pos, int(event[-1]), price=price)
+                except Exception as exc:
+                    log("POSITION_STATUS", "lifecycle target error:", exc)
                 if event == "tp3":
                     _close(pos, "closed_tp3", price, now, "WIN")
                     if _emit_event(token, chat_id, pos, "tp3", _status_message(pos, price), notifications):
