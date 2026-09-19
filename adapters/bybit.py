@@ -120,6 +120,9 @@ class BybitSpotAdapter(ExchangeAdapter):
         side = side.upper(); order_type = order_type.upper()
         if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"):
             raise ValueError("Bybit adapter accepts SPOT BUY/SELL with LIMIT or MARKET only")
+        side = side.upper(); order_type = order_type.upper()
+        if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"):
+            raise ValueError("Bybit adapter accepts SPOT BUY/SELL with LIMIT or MARKET only")
         validate_spot_request(ExecutionRequest("SPOT", side, symbol, self.name, quantity, True, False))
         body: Dict[str, Any] = {"category": "spot", "symbol": symbol.upper(), "side": side.title(), "orderType": order_type.title(), "qty": str(quantity), "isLeverage": 0, "timeInForce": "IOC"}
         if client_order_id:
