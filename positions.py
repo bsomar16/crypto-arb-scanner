@@ -156,6 +156,10 @@ def open_picks(picks, cfg, source="daily"):
         store.position_event("open", coin, entry, price=entry,
                              note=f"position_id={pos['position_id']};source={source};setup={r.get('setup_type','daily')}")
         _journal_open(pos)
+        try:
+            signal_history.record_signal(r)
+        except Exception as exc:
+            log("POSITIONS", "signal history record error:", exc)
     if opened:
         save(positions)
         log("POSITIONS", f"opened {opened} tracked paper positions ({source})")
