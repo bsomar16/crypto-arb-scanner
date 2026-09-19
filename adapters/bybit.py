@@ -117,6 +117,9 @@ class BybitSpotAdapter(ExchangeAdapter):
     def place_spot_order(self, symbol: str, side: str, quantity: float, *, price: Optional[float] = None, order_type: str = "LIMIT", client_order_id: Optional[str] = None) -> Dict[str, Any]:
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true":
             raise RuntimeError("live execution is disabled; set EXECUTION_ENABLED=true deliberately")
+        side = side.upper(); order_type = order_type.upper()
+        if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"):
+            raise ValueError("Bybit adapter accepts SPOT BUY/SELL with LIMIT or MARKET only")
         validate_spot_request(ExecutionRequest("SPOT", side, symbol, self.name, quantity, True, False))
         body: Dict[str, Any] = {"category": "spot", "symbol": symbol.upper(), "side": side.title(), "orderType": order_type.title(), "qty": str(quantity), "isLeverage": 0, "timeInForce": "IOC"}
         if client_order_id:
@@ -125,7 +128,7 @@ class BybitSpotAdapter(ExchangeAdapter):
             if price is None:
                 raise ValueError("LIMIT order requires price")
             body["price"] = str(price)
-        return self._result(self._private("POST", "/v5/order/create", body=body))
+        return self._private("POST", "/v5/order/create", body=body)
 
     def get_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
         # Realtime lookup is the fast path. For Spot, orderId is supported while
