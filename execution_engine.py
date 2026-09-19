@@ -36,6 +36,7 @@ class ExecutionIntent:
     confirmed_ms: Optional[int] = None
     last_revalidated_ms: Optional[int] = None
     idempotency_key: str = ""
+    withdrawal_confirmed: bool = False
     error: Optional[str] = None
 
 
@@ -53,9 +54,11 @@ class ExecutionEngine:
     def create_intent(self, opportunity: Any) -> ExecutionIntent:
         if opportunity.net_pct < float(self.cfg.get("realtime_min_net_pct", 0.5)):
             raise ValueError("opportunity below execution threshold")
-        notional = min(float(opportunity.executable_notional_usdt), self.max_notional)
+        notional = float(opportunity.executable_notional_usdt)
         if notional <= 0:
             raise ValueError("opportunity has no executable notional")
+        if notional > self.max_notional:
+            raise ValueError("opportunity notional exceeds execution limit")
         idem = self._idempotency_key(opportunity)
         existing = self._find_by_idempotency(idem)
         if existing is not None:
@@ -100,7 +103,7 @@ class ExecutionEngine:
         self._write(intent)
         return intent
 
-    def revalidate_before_adapter(self, intent: ExecutionIntent,
+    def confirm_withdrawal(self, intent: ExecutionIntent, explicit_confirmation: bool) -> ExecutionIntent:\n        if not explicit_confirmation:\n            raise PermissionError("explicit withdrawal confirmation is required")\n        if intent.status not in {"READY_FOR_ADAPTER", "BUY_SUBMITTED", "BUY_PARTIAL", "BUY_FILLED"}:\n            raise ValueError(f"withdrawal confirmation is invalid for state: {intent.status}")\n        intent.withdrawal_confirmed = True\n        self._intents[intent.id] = asdict(intent)\n        self._write(intent)\n        return intent\n\n    def revalidate_before_adapter(self, intent: ExecutionIntent,
                                   revalidator: Callable[[ExecutionIntent], bool]) -> ExecutionIntent:
         if not self.enabled:
             raise PermissionError("live execution is disabled")
