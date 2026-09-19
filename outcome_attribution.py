@@ -48,19 +48,19 @@ def aggregate(records, min_samples=20):
     minimum = max(1, int(min_samples))
     result = {"components": {}, "combinations": {}, "buckets": {}}
 
-    def add(key, chosen):
+    def add(container, key, chosen):
         if len(chosen) < minimum:
             return
-        result[key] = _stats(chosen)
+        result[container][key] = _stats(chosen)
 
     for component in COMPONENTS:
-        add(component, [
+        add("components", component, [
             r for r in rows
             if bool((r.get("component_flags") or {}).get(component))
         ])
 
     for combo in COMBINATIONS:
-        add("+".join(combo), [
+        add("combinations", "+".join(combo), [
             r for r in rows
             if all(bool((r.get("component_flags") or {}).get(c)) for c in combo)
         ])

@@ -124,6 +124,10 @@ def staged_target_stats(min_samples=30):
     """
     rows = []
     for outcome in _live_outcomes():
+        # Staged-target evidence requires an explicit live source so legacy rows
+        # without provenance cannot silently enter the denominator.
+        if str(outcome.get("outcome_source", "")).lower() != "live":
+            continue
         hits = outcome.get("staged_target_hits")
         targets = outcome.get("staged_targets")
         if not isinstance(hits, dict) or not isinstance(targets, dict):
