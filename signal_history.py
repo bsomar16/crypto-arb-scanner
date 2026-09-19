@@ -54,7 +54,13 @@ def record_signal(signal):
                 "target": float(signal.get("target", signal.get("t1", 0))),
                 "potential_pct": float(signal.get("potential_pct", 0)),
                 "rr": float(signal.get("rr", 0)),
-                "trend_4h": signal.get("trend_4h"),\n                "candle_open_time": int(signal.get("candle_open_time", signal.get("timestamp", 0)) or 0),\n                "t1": float(signal.get("t1", 0) or 0),\n                "t2": float(signal.get("t2", 0) or 0),\n                "t3": float(signal.get("t3", signal.get("target", 0)) or 0),\n                "expansion_state": signal.get("expansion_state"),\n                "entry_trigger": signal.get("entry_trigger")})
+                "trend_4h": signal.get("trend_4h"),
+                "candle_open_time": int(signal.get("candle_open_time", signal.get("timestamp", 0)) or 0),
+                "t1": float(signal.get("t1", 0) or 0),
+                "t2": float(signal.get("t2", 0) or 0),
+                "t3": float(signal.get("t3", signal.get("target", 0)) or 0),
+                "expansion_state": signal.get("expansion_state"),
+                "entry_trigger": signal.get("entry_trigger")})
     return sid
 
 
@@ -68,7 +74,8 @@ def record_outcome(signal, outcome, exit_price=None, details=None):
     if any(r.get("kind") == "outcome" and r.get("id") == sid for r in rows):
         return
     _write({"kind": "outcome", "id": sid, "ts": _ts(),
-            "outcome": str(outcome).upper(), "exit_price": exit_price,\n            **(details or {})})
+            "outcome": str(outcome).upper(), "exit_price": exit_price,
+            **(details or {})})
 
 
 def _backtest_stats(signal):
