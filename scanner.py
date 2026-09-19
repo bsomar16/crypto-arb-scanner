@@ -282,6 +282,7 @@ def run_buy(token, chat_id, realtime_cache=None):
             min_score=float(cfg.get("signal_min_score", 55)),
             min_rr=float(cfg.get("signal_min_rr", 1.5)),
             realtime_bars=(realtime_cache.get(sym, interval) if realtime_cache is not None else None),
+            cfg=cfg,
         )
 
     workers = int(cfg.get("deep_scan_workers", 16))
