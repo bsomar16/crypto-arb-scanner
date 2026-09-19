@@ -103,6 +103,9 @@ class BinanceSpotAdapter(ExchangeAdapter):
         side = side.upper(); order_type = order_type.upper()
         if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"):
             raise ValueError("Binance adapter accepts SPOT BUY/SELL with LIMIT or MARKET only")
+        side = side.upper(); order_type = order_type.upper()
+        if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"):
+            raise ValueError("Binance adapter accepts SPOT BUY/SELL with LIMIT or MARKET only")
         validate_spot_request(ExecutionRequest("SPOT", side, symbol, self.name, quantity, True, False))
         params: Dict[str, Any] = {"symbol": symbol.upper(), "side": side.upper(), "type": order_type.upper(),
                                   "quantity": quantity}
