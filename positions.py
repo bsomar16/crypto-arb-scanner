@@ -121,6 +121,10 @@ def open_picks(picks, cfg, source="daily"):
             log("RISK", f"blocked {coin}: portfolio correlation limit")
             continue
 
+        if r.get("market_quality_risk_action") == "BLOCK":
+            log("RISK", f"blocked {coin}: market quality limit")
+            continue
+
         pos = {
             "position_id": _position_id(coin, source),
             "notification_enabled": True,
