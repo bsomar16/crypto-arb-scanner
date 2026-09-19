@@ -17,7 +17,7 @@ class FakeAdapter:
     def place_spot_order(self, symbol, side, quantity, *, price=None, order_type="LIMIT", client_order_id=None):
         return {
             "orderId": client_order_id,
-            "status": "FILLED",
+            "status": "NEW",
             "executedQty": str(quantity),
             "avgPrice": str(price),
         }
