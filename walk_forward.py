@@ -42,7 +42,7 @@ def build_windows(
     train_bars: int = DEFAULT_TRAIN_BARS,
     test_bars: int = DEFAULT_TEST_BARS,
     step_bars: int = DEFAULT_STEP_BARS,
-    min_train_bars: int = DEFAULT_MIN_TRAIN_BARS,
+    min_train_bars: int | None = None,
     max_windows: int = DEFAULT_MAX_WINDOWS,
 ) -> list[dict[str, Any]]:
     """Build non-overlapping chronological test windows.
@@ -56,7 +56,7 @@ def build_windows(
     train_bars = max(1, int(train_bars))
     test_bars = max(1, int(test_bars))
     step_bars = max(test_bars, int(step_bars))
-    min_train_bars = max(1, int(min_train_bars))
+    min_train_bars = train_bars if min_train_bars is None else max(1, int(min_train_bars))
     max_windows = max(1, int(max_windows))
 
     windows = []
