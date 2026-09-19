@@ -30,6 +30,7 @@ import component_quality
 import outcome_attribution
 import signal_history
 import market_regime
+import signal_lifecycle
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -361,6 +362,13 @@ def run_buy(token, chat_id, realtime_cache=None):
         fired.update(updates)
     if updates or migrated_fired:
         save_json("state/fired_signals.json", fired)
+
+    # Persist the lifecycle independently of Telegram formatting or ranking.
+    for r in selected:
+        try:
+            signal_lifecycle.register(r)
+        except Exception as e:
+            log("BUY", "signal lifecycle register error:", e)
 
     opened = 0
     try:
