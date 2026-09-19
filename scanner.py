@@ -161,11 +161,15 @@ def _candidate_universe(cfg, q, star, t24=None):
 def _rank_trade_candidates(hits, cfg):
     """Rank qualified BUY signals by setup quality; no daily signal quota."""
     attribution = outcome_attribution.aggregate(signal_history._read(), min_samples=30)
-    regime = market_regime.detect_regime(
-        fetch_binance_24h(),
-        breadth_min_quote_volume=float(cfg.get("market_regime_breadth_min_quote_volume", 1000000)),
-        breadth_limit=int(cfg.get("market_regime_breadth_limit", 100)),
-    ) if bool(cfg.get("market_regime_enabled", True)) else {"state": "UNKNOWN", "score_modifier": 0.0}
+    try:
+        regime = market_regime.detect_regime(
+            fetch_binance_24h(),
+            breadth_min_quote_volume=float(cfg.get("market_regime_breadth_min_quote_volume", 1000000)),
+            breadth_limit=int(cfg.get("market_regime_breadth_limit", 100)),
+        ) if bool(cfg.get("market_regime_enabled", True)) else {"state": "UNKNOWN", "score_modifier": 0.0}
+    except Exception as e:
+        log("BUY", "market regime unavailable:", e)
+        regime = {"state": "UNKNOWN", "score_modifier": 0.0}
     scored = []
     for r in hits:
         historical = r.get("historical_win_pct")
