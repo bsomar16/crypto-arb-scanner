@@ -76,7 +76,8 @@ class TelegramControl:
                 return
             raise ValueError("unsupported Telegram execution action")
         return handle
-\n    def _authorized_callback(self, callback: Dict[str, Any]) -> bool:
+
+    def _authorized_callback(self, callback: Dict[str, Any]) -> bool:
         message = callback.get("message") or {}
         callback_chat = str((message.get("chat") or {}).get("id", ""))
         if not self.chat_id or callback_chat != self.chat_id:

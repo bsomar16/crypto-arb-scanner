@@ -118,6 +118,12 @@ class OKXSpotAdapter(ExchangeAdapter):
                          order_type: str = "LIMIT", client_order_id: Optional[str] = None) -> Dict[str, Any]:
         if os.getenv("EXECUTION_ENABLED", "false").lower() != "true":
             raise RuntimeError("live execution is disabled; set EXECUTION_ENABLED=true deliberately")
+        side = side.upper(); order_type = order_type.upper()
+        if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"):
+            raise ValueError("OKX adapter accepts SPOT BUY/SELL with LIMIT or MARKET only")
+        side = side.upper(); order_type = order_type.upper()
+        if side not in ("BUY", "SELL") or order_type not in ("LIMIT", "MARKET"):
+            raise ValueError("OKX adapter accepts SPOT BUY/SELL with LIMIT or MARKET only")
         validate_spot_request(ExecutionRequest("SPOT", side, symbol, self.name, quantity, True, False))
         body: Dict[str, Any] = {"instId": symbol.upper(), "tdMode": "cash", "side": side.lower(),
                                 "ordType": order_type.lower(), "sz": str(quantity)}

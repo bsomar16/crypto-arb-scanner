@@ -83,4 +83,9 @@ def aggregate(records, min_samples=20):
                 if len(chosen) >= minimum:
                     result["buckets"][f"{interval}|{setup}|{component}"] = _stats(chosen)
 
+    # Preserve the historical flat component keys while exposing the newer grouped shape.
+    for key, value in result["components"].items():
+        result.setdefault(key, value)
+    for key, value in result["components"].items():
+        result.setdefault(key, value)
     return result
