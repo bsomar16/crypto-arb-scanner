@@ -97,7 +97,7 @@ def _backtest_stats(signal):
             return None
         return {"win_pct": float(row["win_pct"]), "wins": int(row.get("wins", 0)),
                 "losses": int(row.get("losses", 0)), "sample": sample,
-                "scope": scope, "generated_at": payload.get("generated_at")}
+                "scope": scope, "source": "backtest", "generated_at": payload.get("generated_at")}
     except (FileNotFoundError, OSError, ValueError, TypeError, json.JSONDecodeError):
         return None
 
@@ -148,7 +148,7 @@ def comparable_stats(signal, min_samples=20):
             vals = [x.get("milestones", {}).get(str(milestone), False) for x in chosen]
             milestone_rates[str(milestone)] = sum(bool(v) for v in vals) / len(vals) * 100 if vals else 0.0
         return {"win_pct": wins / len(sample) * 100, "wins": wins,
-                "losses": losses, "sample": len(sample), "scope": scope,
+                "losses": losses, "sample": len(sample), "scope": scope, "source": "live",
                 "avg_mfe_pct": avg("mfe_pct"), "avg_mae_pct": avg("mae_pct"),
                 "milestone_rates": milestone_rates}
 

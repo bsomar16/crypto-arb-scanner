@@ -131,6 +131,44 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertLess(t2, target)
 
 
+    def test_adaptive_thresholds_ignore_backtest_only_stats(self):
+        import adaptive
+        result = adaptive.adaptive_thresholds(
+            "15m", "MOMENTUM", 60, 1.25, 1.70,
+            {"sample": 40, "source": "backtest", "win_pct": 95,
+             "avg_mfe_pct": 20, "avg_mae_pct": -1,
+             "milestone_rates": {"5": 95, "10": 90, "20": 80}},
+            {"adaptive_min_score_floor": 55,
+             "adaptive_min_vol_x_floor": 1.15,
+             "adaptive_min_rr_floor": 1.50},
+        )
+        self.assertEqual(result["mode"], "BASE")
+
+    def test_adaptive_thresholds_can_relax_to_configured_floors(self):
+        import adaptive
+        result = adaptive.adaptive_thresholds(
+            "15m", "MOMENTUM", 60, 1.25, 1.70,
+            {"sample": 40, "source": "live", "win_pct": 90,
+             "avg_mfe_pct": 20, "avg_mae_pct": -0.5,
+             "milestone_rates": {"5": 95, "10": 90, "20": 80}},
+            {"adaptive_min_score_floor": 55,
+             "adaptive_min_vol_x_floor": 1.15,
+             "adaptive_min_rr_floor": 1.50},
+        )
+        self.assertEqual(result["mode"], "ADAPTIVE")
+        self.assertGreaterEqual(result["min_score"], 55)
+        self.assertGreaterEqual(result["min_vol_x"], 1.15)
+        self.assertGreaterEqual(result["min_rr"], 1.50)
+
+    def test_adaptive_thresholds_can_be_disabled(self):
+        import adaptive
+        result = adaptive.adaptive_thresholds(
+            "15m", "MOMENTUM", 60, 1.25, 1.70,
+            {"sample": 40, "source": "live", "win_pct": 90},
+            {"adaptive_thresholds_enabled": False},
+        )
+        self.assertEqual(result["mode"], "BASE")
+
     def test_adaptive_thresholds_need_sample_and_stay_bounded(self):
         import adaptive
         base = adaptive.adaptive_thresholds("15m", "MOMENTUM", 60, 1.25, 1.70,
