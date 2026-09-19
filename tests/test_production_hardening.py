@@ -131,5 +131,38 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertLess(t2, target)
 
 
+    def test_adaptive_thresholds_need_sample_and_stay_bounded(self):
+        import adaptive
+        base = adaptive.adaptive_thresholds("15m", "MOMENTUM", 60, 1.25, 1.70,
+                                           {"sample": 10, "win_pct": 100}, {})
+        self.assertEqual(base["mode"], "BASE")
+        strong = adaptive.adaptive_thresholds(
+            "15m", "MOMENTUM", 60, 1.25, 1.70,
+            {"sample": 30, "win_pct": 80,
+             "avg_mfe_pct": 12, "avg_mae_pct": -1,
+             "milestone_rates": {"5": 90, "10": 80, "20": 60},
+             "scope": "setup/timeframe"},
+            {"adaptive_min_score_floor": 58,
+             "adaptive_min_vol_x_floor": 1.20,
+             "adaptive_min_rr_floor": 1.60},
+        )
+        self.assertEqual(strong["mode"], "ADAPTIVE")
+        self.assertGreaterEqual(strong["min_score"], 58)
+        self.assertGreaterEqual(strong["min_vol_x"], 1.20)
+        self.assertGreaterEqual(strong["min_rr"], 1.60)
+        weak = adaptive.adaptive_thresholds(
+            "15m", "MOMENTUM", 60, 1.25, 1.70,
+            {"sample": 30, "win_pct": 30,
+             "avg_mfe_pct": 2, "avg_mae_pct": -8,
+             "milestone_rates": {"5": 20, "10": 10, "20": 5}},
+            {"adaptive_min_score_floor": 58,
+             "adaptive_min_vol_x_floor": 1.20,
+             "adaptive_min_rr_floor": 1.60},
+        )
+        self.assertGreaterEqual(weak["min_score"], 60)
+        self.assertGreaterEqual(weak["min_vol_x"], 1.25)
+        self.assertGreaterEqual(weak["min_rr"], 1.70)
+
+
 if __name__ == "__main__":
     unittest.main()
