@@ -223,7 +223,7 @@ def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
-def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None):
+def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None, audit=None):
     """Return one BUY notification per coin.
 
     A coin is silent while it has an open tracked position. After that signal
@@ -248,6 +248,8 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
     for coin, r in best_by_coin.items():
         # Never emit another BUY while this coin's previous signal is active.
         if coin in active_coins:
+            if audit is not None:
+                audit.reject("dedupe_active_position")
             continue
 
         old = fired.get(coin, {})
@@ -267,6 +269,8 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             is_new_signal = entry_changed or setup_changed or interval_changed or (candle_changed and score_strengthened)
 
         if old and not is_new_signal:
+            if audit is not None:
+                audit.reject("dedupe_unchanged")
             continue
 
         updates[coin] = {
@@ -361,6 +365,7 @@ def run_buy(token, chat_id, realtime_cache=None):
         active_coins=active_coins,
         entry_change_pct=float(cfg.get("buy_signal_entry_change_pct", 0.02)),
         limit=None,
+        audit=audit,
     )
 
     # Signal generation is quality-gated, not quota-gated.
