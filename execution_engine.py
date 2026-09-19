@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 
 from execution_guard import ExecutionRequest, validate_spot_request, validate_execution_order, validate_withdrawal_request
 from execution_recovery import ACTIVE, ExecutionSafety, recover_active_intents
+from operational_controls import assert_controlled_live
 
 
 @dataclass
