@@ -6,6 +6,7 @@ from botutil import http_json
 
 EXCHANGES = {
     "BINANCE": "https://data-api.binance.vision/api/v3/ticker/price",
+    "BYBIT": "https://api.bybit.com/v5/market/tickers?category=spot",
     "BITGET": "https://api.bitget.com/api/v2/spot/market/tickers",
     "OKX": "https://www.okx.com/api/v5/market/tickers?instType=SPOT",
     "GATE": "https://api.gateio.ws/api/v4/spot/tickers",
@@ -16,7 +17,7 @@ EXCHANGES = {
 }
 
 BN = "https://data-api.binance.vision"
-FEE_TAKER = {"BINANCE": 0.0010, "BITGET": 0.0010, "OKX": 0.0010, "GATE": 0.0015,
+FEE_TAKER = {"BINANCE": 0.0010, "BYBIT": 0.0010, "BITGET": 0.0010, "OKX": 0.0010, "GATE": 0.0015,
              "MEXC": 0.0010, "POLONIEX": 0.0015, "KUCOIN": 0.0010, "HTX": 0.0020}
 API_PRIVATE_STATUS = ("BINANCE", "OKX", "MEXC")
 
@@ -44,6 +45,7 @@ def _norm_levels(pair_list):
 
 
 def _depth_url(ex, symbol):
+    if ex == "BYBIT": return f"https://api.bybit.com/v5/market/orderbook?category=spot&symbol={symbol}USDT&limit=50"
     if ex == "BINANCE": return f"{BN}/api/v3/depth?symbol={symbol}USDT&limit=20"
     if ex == "BITGET": return f"https://api.bitget.com/api/v2/spot/market/orderbook?symbol={symbol}USDT&type=step0&limit=20"
     if ex == "OKX": return f"https://www.okx.com/api/v5/market/books?instId={symbol}-USDT&sz=20"
@@ -60,7 +62,9 @@ def fetch_orderbook(ex, symbol, limit=20):
     if not url: return None
     try:
         d = http_json(url, timeout=12)
-        if ex in ("BINANCE", "MEXC", "GATE", "POLONIEX"):
+        if ex == "BYBIT":
+            r = d.get("result", {}); asks, bids = _norm_levels(r.get("a", [])), _norm_levels(r.get("b", []))
+        elif ex in ("BINANCE", "MEXC", "GATE", "POLONIEX"):
             asks, bids = _norm_levels(d.get("asks", [])), _norm_levels(d.get("bids", []))
         elif ex == "BITGET":
             r = d.get("data", {}); asks, bids = _norm_levels(r.get("asks", [])), _norm_levels(r.get("bids", []))
@@ -136,6 +140,9 @@ def fetch_exchange(name):
             for t in data:
                 s=t["symbol"]
                 if s.endswith("USDT") and s != "USDTUSDT" and "USDT" not in s[:-4]: m[s[:-4]]=float(t["price"])
+        elif name == "BYBIT":
+            for t in data.get("result", {}).get("list", []):
+                if str(t.get("symbol", "")).endswith("USDT"): m[t["symbol"][:-4]]=float(t["lastPrice"])
         elif name == "BITGET":
             for t in data.get("data", []):
                 if t["symbol"].endswith("USDT"): m[t["symbol"][:-4]]=float(t["lastPr"])
