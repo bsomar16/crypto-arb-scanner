@@ -28,6 +28,7 @@ from realtime import BinanceKlineCache
 import signal_outcomes
 import component_quality
 import outcome_attribution
+import signal_history
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
