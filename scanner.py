@@ -26,6 +26,8 @@ import positions as positions_mod
 import exposure as exposure_mod
 from realtime import BinanceKlineCache
 import signal_outcomes
+import component_quality
+import outcome_attribution
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -153,6 +155,7 @@ def _candidate_universe(cfg, q, star, t24=None):
 
 def _rank_trade_candidates(hits, cfg):
     """Rank qualified BUY signals by setup quality; no daily signal quota."""
+    attribution = outcome_attribution.aggregate(signal_history._read(), min_samples=30)
     scored = []
     for r in hits:
         historical = r.get("historical_win_pct")
@@ -175,7 +178,9 @@ def _rank_trade_candidates(hits, cfg):
         else:
             quality = base_quality / 0.82
         row = dict(r)
-        row["trade_quality"] = round(max(0.0, min(100.0, quality)), 1)
+        component_modifier = component_quality.ranking_modifier(row, attribution, min_samples=30)
+        row["component_quality_modifier"] = component_modifier
+        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier)), 1)
         scored.append(row)
     scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     return scored
