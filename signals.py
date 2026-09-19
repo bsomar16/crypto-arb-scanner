@@ -301,7 +301,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
                 "t3": target,
                 "target": target,
                 "risk_pct": risk_pct,
-                "rr": rr,
+                "rr": effective_min_rr,
                 "interval": interval,
                 "setup_type": setup,
                 "min_potential_pct": min_potential_pct,
