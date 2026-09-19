@@ -38,11 +38,11 @@ class ExecutionEngineTests(unittest.TestCase):
                 e = ExecutionEngine({"execution_max_notional_usdt": 300, "execution_live_enabled": True}, d)
                 intent = e.create_intent(self.opp())
                 e.confirm(intent, True, revalidator=lambda _: True)
-            with self.assertRaises(PermissionError):
+                with self.assertRaises(PermissionError):
                 e.confirm_withdrawal(intent, False)
-            self.assertFalse(intent.withdrawal_confirmed)
-            e.confirm_withdrawal(intent, True)
-            self.assertTrue(intent.withdrawal_confirmed)
+                self.assertFalse(intent.withdrawal_confirmed)
+                e.confirm_withdrawal(intent, True)
+                self.assertTrue(intent.withdrawal_confirmed)
             finally:
                 if old is None: os.environ.pop("EXECUTION_ENABLED", None)
                 else: os.environ["EXECUTION_ENABLED"] = old
