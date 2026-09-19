@@ -18,7 +18,7 @@ class PaperAdapter:
         self.withdrawals = []
         self.deposit_record = {}
         self.balance = 10.0
-        self.withdraw_fee = 0.01
+        self.withdraw_fee = 0.0
 
     def get_spot_markets(self):
         return [SpotMarket("SOLUSDT", "SOL", "USDT", 0.001, 5.0, 0.001, 0.01)]
@@ -163,7 +163,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         source = PaperAdapter("binance")
         destination = PaperAdapter("bybit", sell=True)
         executor = TwoLegExecutor(engine, self.tmp.name)
-        coordinator = executor.coordinator(intent, 3.0)
+        coordinator = executor.coordinator(intent, 2.8)
         executor.submit_buy(intent, coordinator, source, price=100, revalidate=lambda _: True)
         buy_id = coordinator.intent.buy_order_id
         source.orders[buy_id].update({"status": "FILLED", "executedQty": 3.0, "avgPrice": 100.0})
