@@ -60,7 +60,8 @@ def record_signal(signal):
                 "t2": float(signal.get("t2", 0) or 0),
                 "t3": float(signal.get("t3", signal.get("target", 0)) or 0),
                 "expansion_state": signal.get("expansion_state"),
-                "entry_trigger": signal.get("entry_trigger")})
+                "entry_trigger": signal.get("entry_trigger"),
+                "component_flags": signal.get("component_flags", {})})
     return sid
 
 
