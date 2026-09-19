@@ -278,7 +278,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         t2 = price + (target - price) * 0.65
 
         result = {
-            "coin": coin, "interval": interval, "strategy": profile["kind"],\n            "candle_open_time": int(data[-1][0]),
+            "coin": coin, "interval": interval, "strategy": profile["kind"],
+            "candle_open_time": int(data[-1][0]),
             "strategy_id": next(k for k, v in STRATEGY_PROFILES.items() if v is profile),
             "price": price, "entry": price, "stop": stop,
             "t1": t1, "t2": t2, "t3": target, "target": target,
