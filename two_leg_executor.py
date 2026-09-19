@@ -99,6 +99,17 @@ class TwoLegExecutor:
             price if price is not None else execution_intent.buy_price,
         )
         coordinator.intent.requested_qty = normalized_qty
+        self.engine.validate_order(
+            execution_intent.buy_exchange,
+            execution_intent.symbol,
+            normalized_qty,
+            "BUY",
+            confirmed=True,
+            order_type=order_type,
+            price=normalized_price,
+            reference_price=normalized_price,
+            signal_price=execution_intent.buy_price,
+        )
         coordinator.prepare_buy()
         client_id = "arb-" + execution_intent.id[:24]
         raw = adapter.place_spot_order(execution_intent.symbol, "BUY", normalized_qty,
@@ -322,6 +333,17 @@ class TwoLegExecutor:
         normalized_qty, normalized_price = self._normalize_sell_order(
             adapter, execution_intent.symbol, coordinator.intent.transferred_qty,
             price if price is not None else execution_intent.sell_price,
+        )
+        self.engine.validate_order(
+            execution_intent.sell_exchange,
+            execution_intent.symbol,
+            normalized_qty,
+            "SELL",
+            confirmed=True,
+            order_type=order_type,
+            price=normalized_price,
+            reference_price=normalized_price,
+            signal_price=execution_intent.sell_price,
         )
         coordinator.prepare_sell()
         client_id = "arb-" + execution_intent.id[:24] + "-s"
