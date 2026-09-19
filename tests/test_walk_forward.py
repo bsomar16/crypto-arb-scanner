@@ -19,7 +19,7 @@ class WalkForwardTests(unittest.TestCase):
         self.assertEqual(windows[0]["test_end"], windows[1]["test_start"])
 
     def test_signal_can_see_history_but_training_ends_before_test(self):
-        rows = self.rows()
+        rows = self.rows(20)
         seen = []
         def signal_fn(i, train, all_rows):
             seen.append((i, train[-1][0], all_rows[i][0]))
