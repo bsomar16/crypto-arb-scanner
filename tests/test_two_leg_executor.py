@@ -134,6 +134,15 @@ class TwoLegExecutorTests(unittest.TestCase):
         self.assertEqual(self.coordinator.intent.transferred_qty, 0.998)
         self.assertEqual(self.adapter.withdrawals[0][1], 0.998)
 
+    def test_transfer_requires_separate_withdrawal_confirmation(self):
+        self._buy_filled()
+        self.intent.withdrawal_confirmed = False
+        destination = FakeAdapter()
+        with self.assertRaises(PermissionError):
+            self.executor.submit_transfer(self.intent, self.coordinator, self.adapter, destination, "SOL",
+                                          revalidate=lambda _: True)
+        self.assertEqual(self.adapter.withdrawals, [])
+
     def test_transfer_propagates_destination_memo(self):
         self._buy_filled()
         destination = FakeAdapter(memo_required=True, memo="123456")
