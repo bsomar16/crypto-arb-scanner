@@ -1,0 +1,22 @@
+name: profile-validation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Profile-aware historical validation
+        run: python validation.py
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-validation
+          path: state/profile_validation.json
+          if-no-files-found: error
