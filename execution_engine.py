@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from execution_guard import ExecutionRequest, validate_spot_request
+from execution_guard import ExecutionRequest, validate_spot_request, validate_execution_order, validate_withdrawal_request
 from execution_recovery import ACTIVE, ExecutionSafety, recover_active_intents
 
 
@@ -130,19 +130,30 @@ class ExecutionEngine:
         return self.transition(intent, target)
 
     def validate_order(self, exchange: str, symbol: str, quantity: float, side: str, *, confirmed: bool,
-                       market_type: str = "SPOT") -> None:
+                       market_type: str = "SPOT", order_type: str = "LIMIT",
+                       price: float | None = None, reference_price: float | None = None,
+                       signal_price: float | None = None, market_quality: dict | None = None,
+                       fresh: bool = True) -> dict:
         if market_type.upper() != "SPOT":
             raise ValueError("SPOT-only policy: non-SPOT market rejected")
-        validate_spot_request(ExecutionRequest(
+        return validate_execution_order(ExecutionRequest(
             product="SPOT", side=side, symbol=symbol, exchange=exchange,
-            quantity=quantity, confirmed=confirmed,
-        ))
+            quantity=quantity, confirmed=confirmed, order_type=order_type, price=price,
+        ), cfg={**self.cfg, "execution_live_enabled": self.enabled}, reference_price=reference_price,
+           signal_price=signal_price, market_quality=market_quality, fresh=fresh)
 
-    def validate_withdrawal(self, exchange: str, asset: str, quantity: float, *, confirmed: bool) -> None:
-        validate_spot_request(ExecutionRequest(
+    def validate_withdrawal(self, exchange: str, asset: str, quantity: float, *, confirmed: bool,
+                            network: str = "", network_enabled: bool = False,
+                            destination_confirmed: bool = False) -> dict:
+        if not self.enabled:
+            raise PermissionError("live execution is disabled")
+        if not self._intents:
+            raise PermissionError("no active execution intent is available")
+        return validate_withdrawal_request(ExecutionRequest(
             product="SPOT", side="SELL", symbol=asset, exchange=exchange,
             quantity=quantity, confirmed=confirmed, withdrawal_confirmed=confirmed,
-        ), is_withdrawal=True)
+        ), cfg=self.cfg, network_enabled=network_enabled,
+           destination_confirmed=destination_confirmed, network=network)
 
     def _idempotency_key(self, opportunity: Any) -> str:
         return "|".join(str(x) for x in (
