@@ -401,6 +401,23 @@ class TwoLegExecutor:
         self._journal_transition(execution_intent, before, state.value, leg="transfer", error=reason)
         return state
 
+    def recover_coordinator(self, execution_intent: ExecutionIntent, quantity: float) -> TwoLegCoordinator:
+        """Restore the latest persisted two-leg state after a process restart.
+
+        Recovery is deliberately state-only: it never submits an exchange order.
+        The caller must reconcile any submitted BUY/SELL/transfer using the
+        persisted provider identifiers before attempting the next leg.
+        """
+        coordinator = self.coordinator(execution_intent, quantity)
+        state = coordinator.intent.state
+        if state in {LegState.BUY_SUBMITTED, LegState.BUY_PARTIAL} and not coordinator.intent.buy_order_id:
+            raise RuntimeError("recoverable BUY state has no provider order id")
+        if state in {LegState.SELL_SUBMITTED, LegState.SELL_PARTIAL} and not coordinator.intent.sell_order_id:
+            raise RuntimeError("recoverable SELL state has no provider order id")
+        if state == LegState.TRANSFER_PENDING and not coordinator.intent.transfer_id:
+            raise RuntimeError("recoverable transfer state has no transfer id")
+        return coordinator
+
     @staticmethod
     def _load_latest(intent_id: str, path) -> Optional[TwoLegIntent]:
         if not path.exists():
