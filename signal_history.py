@@ -107,6 +107,65 @@ def _backtest_stats(signal):
         return None
 
 
+def _live_outcomes():
+    return [
+        r for r in _read()
+        if r.get("kind") == "outcome"
+        and str(r.get("outcome_source", "live")).lower() == "live"
+        and str(r.get("outcome", "")).upper() in ("WIN", "LOSS", "EXPIRED")
+    ]
+
+
+def staged_target_stats(min_samples=30):
+    """Aggregate TP1/TP2/TP3 reach evidence from mature live outcomes.
+
+    Stats are descriptive only. Outcomes without staged target metadata are
+    excluded so legacy records cannot dilute or distort the denominator.
+    """
+    rows = []
+    for outcome in _live_outcomes():
+        hits = outcome.get("staged_target_hits")
+        targets = outcome.get("staged_targets")
+        if not isinstance(hits, dict) or not isinstance(targets, dict):
+            continue
+        if not all(k in hits and k in targets for k in ("t1", "t2", "t3")):
+            continue
+        rows.append(outcome)
+
+    def bucket(items):
+        sample = len(items)
+        if sample < min_samples:
+            return None
+        reached = {
+            key: sum(bool(r["staged_target_hits"].get(key)) for r in items) / sample * 100.0
+            for key in ("t1", "t2", "t3")
+        }
+        return {
+            "sample": sample,
+            "hit_rates_pct": {k: round(v, 2) for k, v in reached.items()},
+        }
+
+    overall = bucket(rows)
+    by_scope = {}
+    for interval in ("5m", "15m", "1h"):
+        for setup in ("BREAKOUT", "MOMENTUM", "PULLBACK", "REVERSAL"):
+            subset = [
+                r for r in rows
+                if r.get("interval") == interval and r.get("setup_type") == setup
+            ]
+            stats = bucket(subset)
+            if stats:
+                by_scope[f"{interval}|{setup}"] = stats
+
+    return {
+        "sample_available": len(rows),
+        "min_samples": int(min_samples),
+        "mature": overall is not None,
+        "overall": overall,
+        "by_scope": by_scope,
+    }
+
+
 def comparable_stats(signal, min_samples=20):
     """Return live comparable stats, otherwise historical backtest stats."""
     rows = _read()
@@ -157,8 +216,6 @@ def comparable_stats(signal, min_samples=20):
                 "avg_mfe_pct": avg("mfe_pct"), "avg_mae_pct": avg("mae_pct"),
                 "milestone_rates": milestone_rates}
 
-    # Do not mix simulated/backtested outcomes into the live outcome log.
-    # They are exposed separately so the alert remains transparent.
     historical = _backtest_stats(signal)
     if historical and historical["sample"] >= min_samples:
         return historical
