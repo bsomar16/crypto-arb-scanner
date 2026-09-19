@@ -17,9 +17,9 @@ def classify_expansion(closes, highs, lows, volumes, atr, entry_index=None):
                 "compression": 0.0, "expansion": 0.0, "late": False}
 
     price = float(closes[i])
-    lookback = closes[max(0, i - 20):i]
-    prior_high = max(highs[max(0, i - 20):i])
-    prior_low = min(lows[max(0, i - 20):i])
+    lookback = closes[max(0, i - 20):i + 1]
+    prior_high = max(highs[max(0, i - 20):i + 1])
+    prior_low = min(lows[max(0, i - 20):i + 1])
     move_from_low = _pct(price, prior_low)
     move_from_high = _pct(price, prior_high)
 
