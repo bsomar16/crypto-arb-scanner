@@ -21,7 +21,6 @@ STATE_PATH = "state/signal_outcomes.json"
 REFRESH_PATH = "state/signal_outcomes_refresh.json"
 MILESTONES = (5, 10, 20, 30, 50, 80)
 DEFAULT_HORIZON_BARS = {"5m": 288, "15m": 96, "1h": 48}
-INTERVAL_MS = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000}
 
 
 def _now():
@@ -56,6 +55,33 @@ def _fetch_closed(symbol, interval, limit=500):
     return [r for r in rows[:-1] if len(r) >= 6]
 
 
+def _staged_targets(signal, entry):
+    """Return valid staged TP levels above entry, preserving TP1/TP2/TP3 names."""
+    targets = {}
+    for key in ("t1", "t2", "t3"):
+        try:
+            value = float(signal.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > entry:
+            targets[key] = value
+    return targets
+
+
+def _result(outcome, exit_price, mfe, mae, bars_held, milestones, staged_hits):
+    return {
+        "outcome": outcome,
+        "exit_price": exit_price,
+        "mfe_pct": round(mfe, 3),
+        "mae_pct": round(mae, 3),
+        "bars_held": bars_held,
+        "milestones": milestones,
+        "staged_targets": staged_hits["targets"],
+        "staged_target_hits": staged_hits["hits"],
+        "evaluated_at": _now(),
+    }
+
+
 def _evaluate(signal, rows, horizon_bars):
     entry_time = int(signal.get("candle_open_time") or 0)
     if not entry_time:
@@ -76,11 +102,14 @@ def _evaluate(signal, rows, horizon_bars):
     if entry <= 0 or stop <= 0 or target <= entry:
         return None
 
+    staged = _staged_targets(signal, entry)
+    staged_hits = {"targets": {k: round(v, 12) for k, v in staged.items()},
+                   "hits": {k: False for k in staged}}
     mfe = 0.0
     mae = 0.0
     reached = {str(p): False for p in MILESTONES}
 
-    for row in future:
+    for bars_held, row in enumerate(future, 1):
         high = float(row[2])
         low = float(row[3])
         mfe = max(mfe, (high / entry - 1.0) * 100.0)
@@ -89,45 +118,25 @@ def _evaluate(signal, rows, horizon_bars):
         # Conservative ordering: if the same candle touches SL and a target,
         # SL is treated as first because intrabar ordering is unknowable.
         if low <= stop:
-            return {
-                "outcome": "LOSS",
-                "exit_price": stop,
-                "mfe_pct": round(mfe, 3),
-                "mae_pct": round(mae, 3),
-                "bars_held": future.index(row) + 1,
-                "milestones": reached,
-                "evaluated_at": _now(),
-            }
+            return _result("LOSS", stop, mfe, mae, bars_held, reached, staged_hits)
 
         for pct in MILESTONES:
             if high >= entry * (1.0 + pct / 100.0):
                 reached[str(pct)] = True
 
+        for key, level in staged.items():
+            if high >= level:
+                staged_hits["hits"][key] = True
+
         if high >= target:
-            return {
-                "outcome": "WIN",
-                "exit_price": target,
-                "mfe_pct": round(mfe, 3),
-                "mae_pct": round(mae, 3),
-                "bars_held": future.index(row) + 1,
-                "milestones": reached,
-                "evaluated_at": _now(),
-            }
+            return _result("WIN", target, mfe, mae, bars_held, reached, staged_hits)
 
     # Do not close an outcome until the full horizon is available.
     if len(future) < max(1, int(horizon_bars)):
         return None
 
     last = float(future[-1][4])
-    return {
-        "outcome": "EXPIRED",
-        "exit_price": last,
-        "mfe_pct": round(mfe, 3),
-        "mae_pct": round(mae, 3),
-        "bars_held": len(future),
-        "milestones": reached,
-        "evaluated_at": _now(),
-    }
+    return _result("EXPIRED", last, mfe, mae, len(future), reached, staged_hits)
 
 
 def update_pending(cfg=None, force=False):
