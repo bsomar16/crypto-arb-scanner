@@ -131,7 +131,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.assertEqual(len(source.withdrawals), 1)
 
         destination.deposit_record = {"id": "deposit-1", "coin": "SOL", "network": "SOL",
-                                      "amount": "2.797", "status": 3, "txId": "paper-tx",
+                                      "amount": "2.8", "status": 3, "txId": "paper-tx",
                                       "address": "paper-destination"}
         state, result = executor3.reconcile_transfer(intent3, coordinator3, source, destination, "SOL", transfer_id)
         self.assertEqual(result.status, "COMPLETED")
@@ -154,7 +154,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.assertEqual(len(destination.orders), 1)
         self.assertEqual(sell_id, coordinator4.intent.sell_order_id)
 
-        destination.orders[sell_id].update({"status": "FILLED", "executedQty": 2.797, "avgPrice": 104.0,
+        destination.orders[sell_id].update({"status": "FILLED", "executedQty": 2.8, "avgPrice": 104.0,
                                              "feeAmount": 0.001, "feeCurrency": "USDT"})
         self.assertEqual(executor4.reconcile_sell(intent4, coordinator4, destination), LegState.COMPLETED)
 
