@@ -10,6 +10,7 @@ import store
 import signal_history
 import trade_journal
 import risk_engine
+import exposure as exposure_mod
 
 POS_FILE = "state/positions.json"
 STATUS_FILE = "state/position_status.json"
@@ -99,6 +100,27 @@ def open_picks(picks, cfg, source="daily"):
         if not allowed:
             log("RISK", f"blocked {coin}: {reason}")
             continue
+
+        # Portfolio correlation is a risk/execution context, never a signal
+        # filter. By default it flags highly correlated entries for review;
+        # a hard block is opt-in via correlation_risk_hard_block.
+        try:
+            correlation = exposure_mod.assess_candidate(coin, positions, cfg)
+        except Exception as exc:
+            log("RISK", f"correlation assessment unavailable for {coin}:", exc)
+            correlation = {
+                "risk_action": "ALLOW",
+                "correlated": False,
+                "data_available": False,
+                "reason": "correlation_assessment_failed",
+                "conflicts": [],
+                "max_correlation": 0.0,
+                "avg_correlation": 0.0,
+            }
+        if correlation.get("risk_action") == "BLOCK":
+            log("RISK", f"blocked {coin}: portfolio correlation limit")
+            continue
+
         pos = {
             "position_id": _position_id(coin, source),
             "notification_enabled": True,
@@ -117,6 +139,13 @@ def open_picks(picks, cfg, source="daily"):
             "risk_pct": r.get("risk_pct"), "rr": r.get("rr"),
             "setup_type": r.get("setup_type"), "interval": r.get("interval"),
             "source": source, "mode": "paper", "exchange": r.get("exchange"),
+            "portfolio_risk_action": correlation.get("risk_action", "ALLOW"),
+            "portfolio_correlated": bool(correlation.get("correlated", False)),
+            "portfolio_max_correlation": float(correlation.get("max_correlation", 0.0) or 0.0),
+            "portfolio_avg_correlation": float(correlation.get("avg_correlation", 0.0) or 0.0),
+            "portfolio_conflicts": correlation.get("conflicts", []),
+            "portfolio_correlation_data_available": bool(correlation.get("data_available", False)),
+            "portfolio_risk_reason": correlation.get("reason", ""),
             "order_id": r.get("order_id"), "entry_fill_qty": r.get("entry_fill_qty"),
             "entry_fee": r.get("entry_fee"), "notional_usdt": notional,
             "last_price": entry, "last_pct": 0.0,
