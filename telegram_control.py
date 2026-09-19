@@ -69,7 +69,7 @@ class TelegramControl:
             if intent is None:
                 raise ValueError("unknown execution intent")
             if action == "cancel":
-                engine.transition(intent, "CANCELLED")
+                engine.cancel(intent)
                 return
             if action == "confirm":
                 engine.confirm(intent, True, revalidator=revalidator)
