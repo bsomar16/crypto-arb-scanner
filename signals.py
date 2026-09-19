@@ -7,6 +7,7 @@ import signal_history
 from discovery import structure_snapshot
 from entry_engine import evaluate_entry
 from expansion import classify_expansion
+from adaptive import adaptive_thresholds
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
@@ -152,7 +153,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         recent_vol = sum(vols[-2:]) / 2
         base_vol = sum(vols[-22:-2]) / 20
         vol_ratio = recent_vol / base_vol if base_vol > 0 else 0
-        if vol_ratio < effective_min_vol_x:
+        strategy_min_vol_x = profile["min_vol_x"]
+        if vol_ratio < strategy_min_vol_x:
             return None
 
         resistance = max(highs[-21:-1])
@@ -249,8 +251,6 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         potential = min(float(max_potential_pct), potential)
         target = price * (1 + potential / 100)
         rr = potential / risk_pct if risk_pct > 0 else 0
-        if score < effective_min_score or rr < effective_min_rr:
-            return None
         if trend["state"] == "BEARISH" and setup != "REVERSAL":
             return None
 
@@ -271,6 +271,19 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             reasons.append("early expansion")
         elif expansion["state"] == "EXPANSION":
             reasons.append("expansion confirmed")
+
+        provisional = {"coin": coin, "interval": interval, "setup_type": setup}
+        outcome_stats = signal_history.comparable_stats(provisional, min_samples=20)
+        adaptive = adaptive_thresholds(
+            interval, setup, effective_min_score, effective_min_vol_x,
+            effective_min_rr, outcome_stats, cfg=None,
+        )
+        if score < adaptive["min_score"] or vol_ratio < adaptive["min_vol_x"] or rr < adaptive["min_rr"]:
+            return None
+        reasons.append(
+            f"thresholds {adaptive['mode'].lower()}"
+            + (f" ({adaptive['sample']} outcomes)" if adaptive["sample"] else "")
+        )
 
         # Stage the three targets across the modelled move so TP1/TP2 are
         # meaningful partial exits instead of merely 1R/2R placeholders.
@@ -301,7 +314,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             "choch": structure["choch"], "liquidity_sweep": structure["liquidity_sweep"],
             "higher_lows": structure["higher_lows"], "compression": structure["compression"],
         }
-        stats = signal_history.comparable_stats(result, min_samples=20)
+        stats = outcome_stats
         result["historical_win_pct"] = stats["win_pct"]
         result["historical_sample"] = stats["sample"]
         result["historical_wins"] = stats["wins"]
