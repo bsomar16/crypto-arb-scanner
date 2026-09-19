@@ -118,6 +118,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.assertEqual(executor2.reconcile_buy(intent2, coordinator2, source), LegState.BUY_FILLED)
         self.assertEqual(coordinator2.intent.filled_qty, 3.0)
 
+        engine2.confirm_withdrawal(intent2, True)
         self.assertEqual(executor2.submit_transfer(intent2, coordinator2, source, destination, "SOL", revalidate=lambda _: True), LegState.TRANSFER_PENDING)
         transfer_id = coordinator2.intent.transfer_id
         self.assertEqual(len(source.withdrawals), 1)
@@ -167,6 +168,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         buy_id = coordinator.intent.buy_order_id
         source.orders[buy_id].update({"status": "FILLED", "executedQty": 3.0, "avgPrice": 100.0})
         executor.reconcile_buy(intent, coordinator, source)
+        engine.confirm_withdrawal(intent, True)
         executor.submit_transfer(intent, coordinator, source, destination, "SOL", revalidate=lambda _: True)
         with self.assertRaises(ValueError):
             executor.submit_sell(intent, coordinator, destination, price=104, revalidate=lambda _: True)
