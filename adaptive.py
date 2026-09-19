@@ -12,6 +12,12 @@ def adaptive_thresholds(interval, setup_type, base_score, base_vol_x, base_rr,
                         stats=None, cfg=None):
     cfg = cfg or {}
     stats = stats or {}
+    if not bool(cfg.get("adaptive_thresholds_enabled", True)) or stats.get("source") != "live":
+        return {
+            "min_score": float(base_score), "min_vol_x": float(base_vol_x),
+            "min_rr": float(base_rr), "mode": "BASE",
+            "sample": int(stats.get("sample", 0) or 0),
+        }
     sample = int(stats.get("sample", 0) or 0)
     if sample < int(cfg.get("adaptive_min_samples", MIN_SAMPLE)):
         return {
