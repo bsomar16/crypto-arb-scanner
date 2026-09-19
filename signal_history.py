@@ -76,6 +76,7 @@ def record_outcome(signal, outcome, exit_price=None, details=None):
         return
     _write({"kind": "outcome", "id": sid, "ts": _ts(),
             "outcome": str(outcome).upper(), "exit_price": exit_price,
+            "outcome_source": "live",
             **(details or {})})
 
 

@@ -181,6 +181,35 @@ class ProductionHardeningTests(unittest.TestCase):
         )
         self.assertEqual(result["mode"], "BASE")
 
+    def test_component_attribution_is_live_only_and_setup_aware(self):
+        from outcome_attribution import aggregate
+        rows = []
+        for i in range(20):
+            rows.append({
+                "outcome": "WIN",
+                "outcome_source": "live",
+                "interval": "15m",
+                "setup_type": "MOMENTUM",
+                "component_flags": {
+                    "compression": True, "liquidity_sweep": True,
+                    "reclaim": True, "bos": True,
+                },
+                "milestones": {"5": True, "10": True, "20": i < 10},
+            })
+        rows.append({
+            "outcome": "WIN",
+            "outcome_source": "backtest",
+            "interval": "15m",
+            "setup_type": "MOMENTUM",
+            "component_flags": {"compression": True},
+            "milestones": {"5": False, "10": False, "20": False},
+        })
+        stats = aggregate(rows, min_samples=20)
+        self.assertEqual(stats["components"]["compression"]["sample"], 20)
+        self.assertEqual(stats["components"]["compression"]["win_pct"], 100.0)
+        self.assertEqual(stats["buckets"]["15m|MOMENTUM|compression"]["sample"], 20)
+        self.assertEqual(stats["combinations"]["liquidity_sweep+reclaim+bos"]["sample"], 20)
+
     def test_component_attribution_requires_minimum_sample(self):
         from outcome_attribution import aggregate
         rows = []
