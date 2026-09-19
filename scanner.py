@@ -31,6 +31,7 @@ import outcome_attribution
 import signal_history
 import market_regime
 import signal_lifecycle
+import multi_exchange
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -83,6 +84,9 @@ DEFAULTS = {
     "market_regime_enabled": True,
     "market_regime_breadth_min_quote_volume": 1000000,
     "market_regime_breadth_limit": 100,
+    "multi_exchange_enabled": True,
+    "multi_exchange_max_dispersion_pct": 1.5,
+    "multi_exchange_max_candidates": 30,
     # Portfolio correlation is execution/risk context, not signal generation.
     "correlation_interval": "1h",
     "correlation_lookback_bars": 72,
@@ -349,6 +353,32 @@ def run_buy(token, chat_id, realtime_cache=None):
     # Signal generation is quality-gated, not quota-gated.
     # Portfolio exposure limits must not suppress a valid market signal.
     ranked = _rank_trade_candidates(fresh, cfg)
+
+    # Cross-exchange SPOT price consensus is informational/ranking context.
+    # Only a bounded set is queried; it never creates or suppresses signals.
+    mx_limit = max(0, int(cfg.get("multi_exchange_max_candidates", 30)))
+    for idx, r in enumerate(ranked):
+        if not bool(cfg.get("multi_exchange_enabled", True)) or idx >= mx_limit:
+            r["multi_exchange_state"] = "UNASSESSED"
+            r["multi_exchange_data_available"] = False
+            r["multi_exchange_modifier"] = 0.0
+            continue
+        try:
+            mx = multi_exchange.assess(r.get("coin"), cfg=cfg)
+        except Exception as e:
+            log("BUY", f"multi-exchange intelligence unavailable for {r.get('coin')}:", e)
+            mx = {"state": "UNKNOWN", "data_available": False, "modifier": 0.0}
+        r["multi_exchange_state"] = mx.get("state", "UNKNOWN")
+        r["multi_exchange_data_available"] = bool(mx.get("data_available", False))
+        r["multi_exchange_count"] = int(mx.get("exchange_count", 0) or 0)
+        r["multi_exchange_low_exchange"] = mx.get("low_exchange")
+        r["multi_exchange_high_exchange"] = mx.get("high_exchange")
+        r["multi_exchange_dispersion_pct"] = mx.get("price_dispersion_pct")
+        r["multi_exchange_fee_adjusted_gap_pct"] = mx.get("fee_adjusted_gap_pct")
+        r["multi_exchange_modifier"] = float(mx.get("modifier", 0.0) or 0.0)
+        r["multi_exchange_reason"] = mx.get("reason", "")
+        r["trade_quality"] = round(max(0.0, min(100.0, float(r.get("trade_quality", 0.0)) + r["multi_exchange_modifier"])), 1)
+    ranked.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     selected = ranked
     for r in selected:
         r["star"] = r["coin"] in star
