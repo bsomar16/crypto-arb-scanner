@@ -20,7 +20,7 @@ class ProductionHardeningTests(unittest.TestCase):
 
     def test_buy_signal_pool_has_no_daily_quota(self):
         hits = [
-            {"coin": f"C{i}", "entry_quality": 80, "score": 80 - i, "expansion_score": 85,
+            {"coin": f"C{i}", "entry": 100.0, "entry_quality": 80, "score": 80 - i, "expansion_score": 85,
              "rr": 2.0, "potential_pct": 20}
             for i in range(8)
         ]
