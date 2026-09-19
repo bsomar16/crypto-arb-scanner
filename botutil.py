@@ -127,6 +127,7 @@ def _format_buy_message(text):
             metrics = re.search(r"Potential: <b>\+?([^<]+)</b> · Risk: ([^ ]+) · R:R ([^\n]+)", joined)
             score = re.search(r"Score: <b>([^<]+)</b> · RSI ([^ ]+) · volume ×([^ ]+) · 24h ([^\n]+)", joined)
             why = re.search(r"Why: ([^\n]+)", joined)
+            context_4h = re.search(r"4h: ([^\n]+)", joined)
             if not (entry and stop and t1 and t2 and t3 and metrics and score):
                 i = j
                 continue
