@@ -139,7 +139,7 @@ class ExecutionEngine:
         return validate_execution_order(ExecutionRequest(
             product="SPOT", side=side, symbol=symbol, exchange=exchange,
             quantity=quantity, confirmed=confirmed, order_type=order_type, price=price,
-        ), cfg={**self.cfg, "execution_live_enabled": self.enabled}, reference_price=reference_price,
+        ), cfg=self.cfg, reference_price=reference_price,
            signal_price=signal_price, market_quality=market_quality, fresh=fresh)
 
     def validate_withdrawal(self, exchange: str, asset: str, quantity: float, *, confirmed: bool,
