@@ -69,14 +69,17 @@ def signal_id(signal):
     return "|".join(str(signal.get(k, "")) for k in ("coin", "interval", "setup_type", "entry"))
 
 
-def record_outcome(signal, outcome, exit_price=None, details=None):
+def record_outcome(signal, outcome, exit_price=None, details=None, source="live"):
     sid = signal_id(signal)
     rows = _read()
     if any(r.get("kind") == "outcome" and r.get("id") == sid for r in rows):
         return
     _write({"kind": "outcome", "id": sid, "ts": _ts(),
+            "coin": signal.get("coin"), "interval": signal.get("interval"),
+            "setup_type": signal.get("setup_type"),
+            "component_flags": signal.get("component_flags", {}),
             "outcome": str(outcome).upper(), "exit_price": exit_price,
-            "outcome_source": "live",
+            "outcome_source": str(source or "live").lower(),
             **(details or {})})
 
 
@@ -173,4 +176,4 @@ def backfill_from_backtest(results):
                       "rr": trade.get("rr", 0), "stop": trade.get("stop", 0),
                       "target": trade.get("target", 0), "trend_4h": trade.get("trend_4h")}
             record_signal(signal)
-            record_outcome(signal, trade.get("outcome"), trade.get("exit_price"))
+            record_outcome(signal, trade.get("outcome"), trade.get("exit_price"), source="backtest")
