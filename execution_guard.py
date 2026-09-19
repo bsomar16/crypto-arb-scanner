@@ -75,7 +75,7 @@ def validate_execution_order(req: ExecutionRequest, *, cfg: Optional[dict[str, A
     """Fail-closed preflight for an order immediately before the adapter boundary."""
     cfg = cfg or {}
     validate_spot_request(req, is_withdrawal=False)
-    if not bool(cfg.get("execution_live_enabled", True)):
+    if not bool(cfg.get("execution_live_enabled", False)):
         raise PermissionError("live execution is disabled by policy")
     allowed = cfg.get("execution_allowed_exchanges")
     if allowed and req.exchange.upper() not in {str(x).upper() for x in allowed}:

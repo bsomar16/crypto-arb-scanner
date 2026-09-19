@@ -158,6 +158,8 @@ class ExecutionEngine:
                        fresh: bool = True) -> dict:
         if market_type.upper() != "SPOT":
             raise ValueError("SPOT-only policy: non-SPOT market rejected")
+        if not self.enabled:
+            raise PermissionError("live execution is disabled")
         return validate_execution_order(ExecutionRequest(
             product="SPOT", side=side, symbol=symbol, exchange=exchange,
             quantity=quantity, confirmed=confirmed, order_type=order_type, price=price,
