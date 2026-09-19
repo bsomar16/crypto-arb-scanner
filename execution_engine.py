@@ -164,7 +164,10 @@ class ExecutionEngine:
 
     def _find_by_idempotency(self, key: str) -> Optional[ExecutionIntent]:
         row = next((v for v in self._intents.values() if v.get("idempotency_key") == key and v.get("status") not in {"FAILED", "CANCELLED", "EXPIRED", "COMPLETED"}), None)
-        return ExecutionIntent(**row) if row else None
+        if not row:
+            return None
+        fields = ExecutionIntent.__dataclass_fields__
+        return ExecutionIntent(**{k: v for k, v in row.items() if k in fields})
 
     def _daily_notional(self, exclude: Optional[str] = None) -> float:
         cutoff = int(time.time() * 1000) - 86400000
