@@ -19,14 +19,14 @@ def _shrink_rate(observed, sample, prior):
     return (value * n + prior * PRIOR_WEIGHT) / (n + PRIOR_WEIGHT)
 
 
-def _scope_stats(signal, stats):
+def _scope_stats(signal, stats, min_samples=MIN_SAMPLES):
     interval = str(signal.get("interval", ""))
     setup = str(signal.get("setup_type", ""))
     scoped = (stats.get("by_scope") or {}).get(f"{interval}|{setup}")
-    if scoped and int(scoped.get("sample", 0) or 0) >= MIN_SAMPLES:
+    if scoped and int(scoped.get("sample", 0) or 0) >= int(min_samples):
         return scoped, "exact"
     overall = stats.get("overall")
-    if overall and int(overall.get("sample", 0) or 0) >= MIN_SAMPLES:
+    if overall and int(overall.get("sample", 0) or 0) >= int(min_samples):
         return overall, "overall"
     return None, None
 
@@ -62,7 +62,7 @@ def optimize_targets(signal, stats, min_samples=MIN_SAMPLES, enabled=True):
     if not enabled or not stats or base_entry <= 0 or base_t3 <= base_entry:
         return unchanged("no mature live target evidence")
     threshold = max(1, int(min_samples))
-    scoped, scope = _scope_stats(signal, stats)
+    scoped, scope = _scope_stats(signal, stats, threshold)
     if not scoped or int(scoped.get("sample", 0) or 0) < threshold:
         return unchanged("insufficient live target evidence")
 
