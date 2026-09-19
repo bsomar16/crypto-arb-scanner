@@ -363,7 +363,7 @@ def run_buy(token, chat_id, realtime_cache=None):
     # Assess visible SPOT liquidity after technical ranking so expensive
     # order-book calls are bounded. Quality metadata never suppresses a valid
     # signal unless the explicit hard-block policy is enabled downstream.
-    quality_limit = max(0, int(cfg.get("market_quality_max_candidates", 30)))
+    quality_limit = len(ranked) if bool(cfg.get("market_quality_hard_block", False)) else max(0, int(cfg.get("market_quality_max_candidates", 30)))
     for idx, r in enumerate(ranked):
         if not bool(cfg.get("market_quality_enabled", True)) or idx >= quality_limit:
             r["market_quality_state"] = "UNASSESSED"
