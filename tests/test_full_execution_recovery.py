@@ -76,7 +76,7 @@ class FullExecutionRecoveryTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_journal = trade_journal.PATH
         trade_journal.PATH = os.path.join(self.tmp.name, "trade_journal.jsonl")
-        self.cfg = {"execution_max_notional_usdt": 300, "realtime_min_net_pct": 0.5}
+        self.cfg = {"execution_live_enabled": True, "execution_max_notional_usdt": 300, "realtime_min_net_pct": 0.5}
         self.opportunity = SimpleNamespace(
             symbol="SOLUSDT", buy_exchange="binance", sell_exchange="bybit",
             executable_notional_usdt=300, buy_ask=100, sell_bid=104, net_pct=2.8,
