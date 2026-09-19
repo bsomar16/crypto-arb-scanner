@@ -24,7 +24,8 @@ import traps as traps_mod
 import store as store_mod
 import positions as positions_mod
 import exposure as exposure_mod
-from realtime import BinanceKlineCache\nimport signal_outcomes
+from realtime import BinanceKlineCache
+import signal_outcomes
 
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
@@ -71,7 +72,11 @@ DEFAULTS = {
     "realtime_kline_enabled": True,
     "realtime_kline_intervals": ["5m", "15m", "1h"],
     "realtime_kline_max_symbols": 100,
-    "realtime_kline_max_bars": 120,\n    "outcome_tracking_enabled": True,\n    "outcome_refresh_seconds": 300,\n    "outcome_max_pending": 60,\n    "outcome_horizon_bars": {"5m": 288, "15m": 96, "1h": 48},
+    "realtime_kline_max_bars": 120,
+    "outcome_tracking_enabled": True,
+    "outcome_refresh_seconds": 300,
+    "outcome_max_pending": 60,
+    "outcome_horizon_bars": {"5m": 288, "15m": 96, "1h": 48},
 }
 
 def load_cfg():
@@ -153,27 +158,30 @@ def _rank_trade_candidates(hits, cfg):
     scored = []
     for r in hits:
         historical = r.get("historical_win_pct")
+        sample = int(r.get("historical_sample", 0) or 0)
         rr_component = min(100.0, float(r.get("rr", 0)) / 3.0 * 100.0)
-        if historical is not None:
-            quality = (
-                float(r.get("entry_quality", 50.0)) * 0.30
-                + float(r.get("score", 0)) * 0.25
-                + float(r.get("expansion_score", 0)) * 0.20
-                + float(historical) * 0.15
-                + rr_component * 0.10
-            )
+        base_quality = (
+            float(r.get("entry_quality", 50.0)) * 0.28
+            + float(r.get("score", 0)) * 0.24
+            + float(r.get("expansion_score", 0)) * 0.20
+            + rr_component * 0.10
+        )
+        outcome_quality = 0.0
+        if historical is not None and sample >= 20:
+            rates = r.get("historical_milestone_rates", {}) or {}
+            early = float(rates.get("5", 0.0)) * 0.35 + float(rates.get("10", 0.0)) * 0.25 + float(rates.get("20", 0.0)) * 0.15
+            mfe = min(100.0, max(0.0, float(r.get("historical_avg_mfe_pct", 0.0))) * 2.0)
+            mae = min(100.0, max(0.0, -float(r.get("historical_avg_mae_pct", 0.0))) * 8.0)
+            outcome_quality = float(historical) * 0.45 + early * 0.35 + mfe * 0.10 + (100.0 - mae) * 0.10
+            quality = base_quality * 0.72 + outcome_quality * 0.28
         else:
-            quality = (
-                float(r.get("entry_quality", 50.0)) * 0.35
-                + float(r.get("score", 0)) * 0.30
-                + float(r.get("expansion_score", 0)) * 0.23
-                + rr_component * 0.12
-            )
+            quality = base_quality / 0.82
         row = dict(r)
         row["trade_quality"] = round(max(0.0, min(100.0, quality)), 1)
         scored.append(row)
     scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     return scored
+
 def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]

@@ -54,7 +54,13 @@ def record_signal(signal):
                 "target": float(signal.get("target", signal.get("t1", 0))),
                 "potential_pct": float(signal.get("potential_pct", 0)),
                 "rr": float(signal.get("rr", 0)),
-                "trend_4h": signal.get("trend_4h"),\n                "candle_open_time": int(signal.get("candle_open_time", signal.get("timestamp", 0)) or 0),\n                "t1": float(signal.get("t1", 0) or 0),\n                "t2": float(signal.get("t2", 0) or 0),\n                "t3": float(signal.get("t3", signal.get("target", 0)) or 0),\n                "expansion_state": signal.get("expansion_state"),\n                "entry_trigger": signal.get("entry_trigger")})
+                "trend_4h": signal.get("trend_4h"),
+                "candle_open_time": int(signal.get("candle_open_time", signal.get("timestamp", 0)) or 0),
+                "t1": float(signal.get("t1", 0) or 0),
+                "t2": float(signal.get("t2", 0) or 0),
+                "t3": float(signal.get("t3", signal.get("target", 0)) or 0),
+                "expansion_state": signal.get("expansion_state"),
+                "entry_trigger": signal.get("entry_trigger")})
     return sid
 
 
@@ -68,7 +74,8 @@ def record_outcome(signal, outcome, exit_price=None, details=None):
     if any(r.get("kind") == "outcome" and r.get("id") == sid for r in rows):
         return
     _write({"kind": "outcome", "id": sid, "ts": _ts(),
-            "outcome": str(outcome).upper(), "exit_price": exit_price,\n            **(details or {})})
+            "outcome": str(outcome).upper(), "exit_price": exit_price,
+            **(details or {})})
 
 
 def _backtest_stats(signal):
@@ -119,8 +126,31 @@ def comparable_stats(signal, min_samples=20):
     if sample:
         wins = sample.count("WIN")
         losses = sample.count("LOSS")
+        selected_ids = []
+        for sid, out in outcomes.items():
+            s = signals.get(sid)
+            if not s or out.get("outcome") not in ("WIN", "LOSS"):
+                continue
+            if (s.get("coin") == signal.get("coin") and
+                    s.get("interval") == signal.get("interval") and
+                    s.get("setup_type") == signal.get("setup_type")):
+                selected_ids.append(sid)
+            elif len(exact) < min_samples and (
+                    s.get("interval") == signal.get("interval") and
+                    s.get("setup_type") == signal.get("setup_type")):
+                selected_ids.append(sid)
+        chosen = [outcomes[sid] for sid in selected_ids if sid in outcomes]
+        def avg(key, default=0.0):
+            vals = [float(x[key]) for x in chosen if x.get(key) is not None]
+            return sum(vals) / len(vals) if vals else default
+        milestone_rates = {}
+        for milestone in (5, 10, 20, 30, 50, 80):
+            vals = [x.get("milestones", {}).get(str(milestone), False) for x in chosen]
+            milestone_rates[str(milestone)] = sum(bool(v) for v in vals) / len(vals) * 100 if vals else 0.0
         return {"win_pct": wins / len(sample) * 100, "wins": wins,
-                "losses": losses, "sample": len(sample), "scope": scope}
+                "losses": losses, "sample": len(sample), "scope": scope,
+                "avg_mfe_pct": avg("mfe_pct"), "avg_mae_pct": avg("mae_pct"),
+                "milestone_rates": milestone_rates}
 
     # Do not mix simulated/backtested outcomes into the live outcome log.
     # They are exposed separately so the alert remains transparent.
