@@ -2,7 +2,6 @@ import signal_outcomes
 import unittest
 
 
-
 class SignalOutcomeTests(unittest.TestCase):
     def _signal(self):
         return {
@@ -12,6 +11,9 @@ class SignalOutcomeTests(unittest.TestCase):
             "stop": 95.0,
             "target": 130.0,
             "candle_open_time": 1000,
+            "t1": 110.0,
+            "t2": 120.0,
+            "t3": 130.0,
         }
 
     def test_stop_wins_same_candle_against_milestone(self):
@@ -23,6 +25,10 @@ class SignalOutcomeTests(unittest.TestCase):
         self.assertEqual(result["outcome"], "LOSS")
         self.assertFalse(result["milestones"]["5"])
         self.assertLessEqual(result["mae_pct"], -5)
+        self.assertEqual(
+            result["staged_target_hits"],
+            {"t1": False, "t2": False, "t3": False},
+        )
 
     def test_mfe_mae_and_milestones_are_recorded_before_win(self):
         rows = [
@@ -37,6 +43,10 @@ class SignalOutcomeTests(unittest.TestCase):
         self.assertTrue(result["milestones"]["20"])
         self.assertGreaterEqual(result["mfe_pct"], 30)
         self.assertLess(result["mae_pct"], 0)
+        self.assertEqual(
+            result["staged_target_hits"],
+            {"t1": True, "t2": True, "t3": True},
+        )
 
     def test_incomplete_horizon_stays_pending(self):
         rows = [
@@ -46,17 +56,29 @@ class SignalOutcomeTests(unittest.TestCase):
         result = signal_outcomes._evaluate(self._signal(), rows, 3)
         self.assertIsNone(result)
 
+    def test_staged_targets_remain_unhit_when_stop_precedes_same_candle_high(self):
+        signal = {
+            **self._signal(),
+            "target": 120.0,
+            "t1": 105.0,
+            "t2": 110.0,
+            "t3": 120.0,
+        }
+        rows = [
+            [1000, 100, 101, 99, 100, 1],
+            [2000, 100, 121, 94, 99, 1],
+        ]
+        result = signal_outcomes._evaluate(signal, rows, 1)
+        self.assertEqual(result["outcome"], "LOSS")
+        self.assertEqual(
+            result["staged_targets"],
+            {"t1": 105.0, "t2": 110.0, "t3": 120.0},
+        )
+        self.assertEqual(
+            result["staged_target_hits"],
+            {"t1": False, "t2": False, "t3": False},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-
-
-def test_evaluate_tracks_staged_targets():
-    signal = {"candle_open_time": 0, "entry": 100, "stop": 95, "target": 120, "t1": 105, "t2": 110, "t3": 120}
-    rows = [
-        [1, 100, 106, 99, 104, 1],
-        [2, 104, 111, 103, 109, 1],
-        [3, 109, 121, 108, 119, 1],
-    ]
-    result = signal_outcomes._evaluate(signal, rows, 10)
-    assert result["staged_target_hits"] == {"t1": True, "t2": True, "t3": True}
