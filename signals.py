@@ -112,14 +112,14 @@ def _setup_type(price,resistance,support,e20,vol_ratio,macd_rising,rsi):
     return "MOMENTUM"
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None):
-    """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
-
-
 def _audit_reject(audit, stage):
     if audit is not None:
         audit.reject(stage)
     return None
+
+
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None):
+    """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
     profile = strategy_profile(interval)
     if not profile:
         return None
