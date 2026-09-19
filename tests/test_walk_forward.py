@@ -28,7 +28,7 @@ class WalkForwardTests(unittest.TestCase):
         def outcome_fn(i, signal, all_rows):
             return {"outcome": "WIN", "mfe_pct": 5, "mae_pct": -1, "milestones": {"5": True}}
         report = evaluate_windows(rows, signal_fn, outcome_fn,
-                                  train_bars=5, test_bars=2, step_bars=2, max_windows=2)
+                                  train_bars=5, test_bars=2, step_bars=2, min_train_bars=5, max_windows=2)
         self.assertEqual(report["outcome_source"], "walk_forward")
         self.assertTrue(seen)
 
@@ -48,7 +48,7 @@ class WalkForwardTests(unittest.TestCase):
         def outcome_fn(i, signal, all_rows):
             return {"outcome": "LOSS", "outcome_source": "backtest"}
         report = evaluate_windows(rows, signal_fn, outcome_fn,
-                                  train_bars=4, test_bars=2, step_bars=2, max_windows=1)
+                                  train_bars=4, test_bars=2, step_bars=2, min_train_bars=4, max_windows=1)
         self.assertEqual(report["windows"][0]["trades"][0]["outcome_source"], "walk_forward")
         self.assertEqual(report["outcome_source"], "walk_forward")
 
