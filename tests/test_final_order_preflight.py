@@ -18,7 +18,7 @@ class FakeAdapter:
         return {
             "orderId": client_order_id,
             "status": "NEW",
-            "executedQty": str(quantity),
+            "executedQty": "0",
             "avgPrice": str(price),
         }
 
