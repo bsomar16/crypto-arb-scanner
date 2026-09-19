@@ -443,7 +443,18 @@ def run_buy(token, chat_id, realtime_cache=None):
         "Signals are quality-gated; there is no daily BUY quota.",
     ])
     log(f"[BUY] {len(selected)} quality signals / {len(fresh)} qualified signals / {len(tasks)} deep scans")
-    audit_snapshot = audit.snapshot()\n    audit_snapshot.update({\n        "scans": len(tasks),\n        "hits": len(hits),\n        "fresh": len(fresh),\n        "selected": len(selected),\n        "deep_candidates": len(cands),\n        "mtf_scans": len(tasks),\n        "generated_at": now_s(),\n    })\n    save_json("state/buy_audit_latest.json", audit_snapshot)\n    log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
+    audit_snapshot = audit.snapshot()
+    audit_snapshot.update({
+        "scans": len(tasks),
+        "hits": len(hits),
+        "fresh": len(fresh),
+        "selected": len(selected),
+        "deep_candidates": len(cands),
+        "mtf_scans": len(tasks),
+        "generated_at": now_s(),
+    })
+    save_json("state/buy_audit_latest.json", audit_snapshot)
+    log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
 
     # Telegram delivery is the notification commit point. Do not persist a
     # signal as fired or open paper/shadow positions until notification succeeds.
