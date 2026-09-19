@@ -8,6 +8,7 @@ from discovery import structure_snapshot
 from entry_engine import evaluate_entry
 from expansion import classify_expansion
 from adaptive import adaptive_thresholds
+from target_quality import optimize_targets
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
@@ -286,10 +287,40 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             + (f" ({adaptive['sample']} outcomes)" if adaptive["sample"] else "")
         )
 
-        # Stage the three targets across the modelled move so TP1/TP2 are
-        # meaningful partial exits instead of merely 1R/2R placeholders.
-        t1 = price + (target - price) * 0.35
-        t2 = price + (target - price) * 0.65
+        # Stage the three targets across the modelled move. Mature live
+        # TP reach evidence may make a bounded adjustment, but the technical
+        # target, R:R, and 5-80% potential envelope remain hard constraints.
+        target_evidence = signal_history.staged_target_stats(
+            min_samples=int((cfg or {}).get("target_min_samples", 30) or 30)
+        )
+        target_plan = optimize_targets(
+            {
+                "entry": price,
+                "t1": price + (target - price) * 0.35,
+                "t2": price + (target - price) * 0.65,
+                "t3": target,
+                "target": target,
+                "risk_pct": risk_pct,
+                "rr": effective_min_rr,
+                "interval": interval,
+                "setup_type": setup,
+                "min_potential_pct": min_potential_pct,
+                "max_potential_pct": max_potential_pct,
+            },
+            target_evidence,
+            min_samples=int((cfg or {}).get("target_min_samples", 30) or 30),
+            enabled=bool((cfg or {}).get("target_optimization_enabled", True)),
+        )
+        t1, t2, target = target_plan["t1"], target_plan["t2"], target_plan["t3"]
+        potential = _pct(target, price)
+        rr = potential / risk_pct if risk_pct > 0 else 0
+        if rr < effective_min_rr or potential < min_potential_pct or potential > max_potential_pct:
+            return None
+        if target_plan["mode"] != "BASE":
+            reasons.append(
+                f"targets {target_plan['mode'].lower()} "
+                f"({target_plan['evidence_sample']} live outcomes)"
+            )
 
         result = {
             "coin": coin, "interval": interval, "strategy": profile["kind"],
@@ -303,6 +334,10 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             "resistance": resistance, "support": support, "setup_type": setup, "trend_4h": trend["state"],
             "e9_e21": e9[-1] > e21[-1], "macd_rising": macd_rising, "reasons": reasons,
             "entry_quality": round(entry_quality, 1), "expansion_score": round(expansion_score, 1),
+            "target_quality_mode": target_plan["mode"],
+            "target_quality_adjustment_pct": target_plan["adjustment_pct"],
+            "target_quality_evidence_scope": target_plan["evidence_scope"],
+            "target_quality_evidence_sample": target_plan["evidence_sample"],
             "expansion_state": expansion["state"], "expansion_volume_ratio": expansion["volume_ratio"],
             "expansion_range_ratio": expansion["expansion"], "expansion_extension_pct": expansion["extension_pct"],
             "entry_trigger": entry["entry_trigger"], "liquidity_sweep_confirmed": entry["liquidity_sweep_confirmed"],
