@@ -8,7 +8,7 @@ def _pct(a, b):
 def _body_strength(o, h, l, c):
     return abs(c - o) / max(h - l, 1e-12)
 
-def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retest=True, require_sweep=True):
+def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retest=True, require_sweep=True, allow_early_retest=True):
     """Return a causal long-entry confirmation or None using only closed candles."""
     n = len(closes)
     if n < 45 or len(opens) != n or len(highs) != n or len(lows) != n:
@@ -47,7 +47,12 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
                 o, h, l, c = opens[i + 1], highs[i + 1], lows[i + 1], closes[i + 1]
                 body = _body_strength(o, h, l, c)
                 if c > o and c >= broken_level and body >= 0.35:
-                    confirm = {"index": i + 1, "open": o, "high": h, "low": l, "close": c, "body_strength": body}
+                    confirm = {"index": i + 1, "open": o, "high": h, "low": l, "close": c, "body_strength": body, "early": False}
+            if confirm is None and allow_early_retest:
+                o, h, l, c = opens[i], highs[i], lows[i], closes[i]
+                body = _body_strength(o, h, l, c)
+                if c > o and c > broken_level and body >= 0.45:
+                    confirm = {"index": i, "open": o, "high": h, "low": l, "close": c, "body_strength": body, "early": True}
             break
     if require_retest and (retest is None or confirm is None):
         return None
@@ -73,7 +78,12 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
     return {
         "entry_price": entry_price,
         "entry_quality": round(quality, 1),
-        "entry_trigger": "SWEEP_RECLAIM_BOS_RETEST_CONFIRM" if sweep_ok else "BOS_RETEST_CONFIRM",
+        "entry_trigger": (
+            "SWEEP_RECLAIM_BOS_RETEST_EARLY" if sweep_ok and bool(confirm.get("early")) else
+            "BOS_RETEST_EARLY" if bool(confirm.get("early")) else
+            "SWEEP_RECLAIM_BOS_RETEST_CONFIRM" if sweep_ok else
+            "BOS_RETEST_CONFIRM"
+        ),
         "liquidity_sweep_confirmed": sweep_ok,
         "reclaim_confirmed": sweep_ok,
         "bos_confirmed": True,
