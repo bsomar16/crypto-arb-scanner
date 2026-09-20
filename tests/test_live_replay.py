@@ -19,6 +19,45 @@ class LiveReplayTests(unittest.TestCase):
         result=evaluate_outcome(rows,0,signal,1)
         self.assertEqual(result["outcome"],"LOSS")
 
+    def test_early_win_is_retained_as_complete(self):
+        rows = [
+            [0,1,1,1,1,0,0,0],
+            [1,1,1.2,0.99,1.15,0,0,0],
+            [2,1.1,1.15,1.0,1.1,0,0,0],
+        ]
+        signal={"entry":1.0,"stop":0.9,"t3":1.10}
+        result=evaluate_outcome(rows,0,signal,2)
+        self.assertEqual(result["outcome"],"WIN")
+        self.assertTrue(result["window_complete"])
+        self.assertFalse(result["censored"])
+        self.assertEqual(result["exit_i"],1)
+
+    def test_early_loss_is_retained_as_complete(self):
+        rows = [
+            [0,1,1,1,1,0,0,0],
+            [1,1,1.02,0.8,0.85,0,0,0],
+            [2,0.9,1.1,0.85,1.05,0,0,0],
+        ]
+        signal={"entry":1.0,"stop":0.9,"t3":1.10}
+        result=evaluate_outcome(rows,0,signal,2)
+        self.assertEqual(result["outcome"],"LOSS")
+        self.assertTrue(result["window_complete"])
+        self.assertFalse(result["censored"])
+        self.assertEqual(result["exit_i"],1)
+
+    def test_incomplete_expiry_is_censored(self):
+        rows = [
+            [0,1,1,1,1,0,0,0],
+            [1,1,1.05,0.99,1.04,0,0,0],
+            [2,1,1.2,0.99,1.1,0,0,0],
+        ]
+        signal={"entry":1.0,"stop":0.9,"t3":1.3}
+        result=evaluate_outcome(rows,0,signal,2,max_index=2)
+        self.assertEqual(result["outcome"],"EXPIRED")
+        self.assertEqual(result["exit_i"],1)
+        self.assertFalse(result["window_complete"])
+        self.assertTrue(result["censored"])
+
     def test_outcome_respects_oos_boundary(self):
         rows = [
             [0,1,1,1,1,0,0,0],
