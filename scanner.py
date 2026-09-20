@@ -220,8 +220,33 @@ def _rank_trade_candidates(hits, cfg):
     scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     return scored
 
+
+def _interval_due(interval, now=None):
+    from datetime import datetime, timezone
+    now = now or datetime.now(timezone.utc)
+    if interval in ("5m", "15m"):
+        return True
+    if interval == "1h":
+        return now.minute < 15
+    if interval == "4h":
+        return now.minute < 15 and now.hour % 4 == 0
+    if interval == "1d":
+        return now.minute < 15 and now.hour == 0
+    if interval == "1w":
+        return now.minute < 15 and now.hour == 0 and now.weekday() == 0
+    return False
+
+
+def _format_hold_window(r):
+    lo, hi = r.get("estimated_hold_min_hours"), r.get("estimated_hold_max_hours")
+    if lo is None or hi is None:
+        return "n/a"
+    def fmt(hours):
+        return f"{hours:.0f}h" if hours < 24 else f"{hours / 24:.0f}d"
+    return f"{fmt(float(lo))}–{fmt(float(hi))}"
+
 def _signal_message(r):
-    setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
+    setup = r.get("setup_type", "MOMENTUM"); kind = r.get("trade_horizon", "Scalp" if r["interval"] in ("5m", "15m") else "Medium"); reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
 def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None, audit=None):
@@ -314,7 +339,7 @@ def run_buy(token, chat_id, realtime_cache=None):
         cands = cands[:max(1, int(cfg.get("realtime_monitor_candidates", 25)))]
     else:
         cands = cands[:max(deep_n, len(star))]
-    tasks = [(sym, interval) for interval in intervals for sym in cands]
+    tasks = [(sym, interval) for interval in intervals if _interval_due(interval) for sym in cands]
 
     audit = SignalAudit()
 
