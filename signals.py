@@ -297,8 +297,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             reasons.append("expansion confirmed")
 
         provisional = {"coin": coin, "interval": interval, "setup_type": setup}
-        outcome_stats = signal_history.comparable_stats(provisional, min_samples=20)
         adaptive_cfg = cfg or {}
+        outcome_stats = (signal_history.comparable_stats(provisional, min_samples=20) if adaptive_cfg.get("adaptive_thresholds_enabled", True) else {"win_pct": None, "sample": 0, "wins": 0, "losses": 0, "scope": "disabled"})
         adaptive = adaptive_thresholds(
             interval, setup, effective_min_score, effective_min_vol_x,
             effective_min_rr, outcome_stats, adaptive_cfg,
@@ -313,9 +313,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         # Stage the three targets across the modelled move. Mature live
         # TP reach evidence may make a bounded adjustment, but the technical
         # target, R:R, and 5-80% potential envelope remain hard constraints.
-        target_evidence = signal_history.staged_target_stats(
-            min_samples=int((cfg or {}).get("target_min_samples", 30) or 30)
-        )
+        target_evidence = (signal_history.staged_target_stats(min_samples=int((cfg or {}).get("target_min_samples", 30) or 30)) if bool((cfg or {}).get("target_optimization_enabled", True)) else {})
         target_plan = optimize_targets(
             {
                 "entry": price,
