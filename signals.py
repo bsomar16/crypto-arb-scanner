@@ -11,13 +11,16 @@ from adaptive import adaptive_thresholds
 from target_quality import optimize_targets
 
 BN = "https://data-api.binance.vision"
-VALID_INTERVALS = {"5m", "15m", "1h", "4h"}
+VALID_INTERVALS = {"5m", "15m", "1h", "4h", "1d", "1w"}
 
 # Strategy-specific BUY profiles. 24h volume remains a liquidity filter only.\n# Recall is intentionally relaxed modestly; core entry confirmation, R:R, target\n# envelope, regime protection, and outcome-aware adaptive screening remain hard gates.\n# These are not an 80% win-rate guarantee; precision is validated out-of-sample.
 STRATEGY_PROFILES = {
     "scalp_5m": {"kind": "Scalp", "interval": "5m", "min_vol_x": 1.05, "min_score": 52, "min_rr": 1.60, "stop_atr": 1.15, "target_atr": 3.0},
     "scalp_15m": {"kind": "Scalp", "interval": "15m", "min_vol_x": 1.00, "min_score": 50, "min_rr": 1.50, "stop_atr": 1.40, "target_atr": 4.0},
-    "small_trade_1h": {"kind": "Small Trade", "interval": "1h", "min_vol_x": 1.00, "min_score": 50, "min_rr": 1.50, "stop_atr": 1.80, "target_atr": 5.5},
+    "medium_1h": {"kind": "Medium", "interval": "1h", "min_vol_x": 1.00, "min_score": 50, "min_rr": 1.50, "stop_atr": 1.80, "target_atr": 5.5, "hold_min_hours": 2, "hold_max_hours": 36},
+    "medium_4h": {"kind": "Medium", "interval": "4h", "min_vol_x": 0.95, "min_score": 50, "min_rr": 1.50, "stop_atr": 2.00, "target_atr": 5.0, "hold_min_hours": 8, "hold_max_hours": 120},
+    "long_1d": {"kind": "Long", "interval": "1d", "min_vol_x": 0.90, "min_score": 52, "min_rr": 1.60, "stop_atr": 2.20, "target_atr": 6.0, "hold_min_hours": 48, "hold_max_hours": 504},
+    "long_1w": {"kind": "Long", "interval": "1w", "min_vol_x": 0.85, "min_score": 55, "min_rr": 1.80, "stop_atr": 2.50, "target_atr": 8.0, "hold_min_hours": 168, "hold_max_hours": 2016},
 }
 
 
@@ -94,13 +97,14 @@ def _fetch_klines(coin, interval, limit):
     return data if len(data)>=70 else None
 
 
-def _trend_filter(coin):
-    data=_fetch_klines(coin,"4h",100)
+def _trend_filter(coin, interval="15m"):
+    trend_interval = "4h" if interval in ("5m", "15m", "1h") else "1d"
+    data=_fetch_klines(coin,trend_interval,100)
     if not data: return None
     closes=[float(k[4]) for k in data]; e20=ind.ema(closes,20)[-1]; e50=ind.ema(closes,50)[-1]; m,sig,_=ind.macd(closes)
-    if closes[-1]>e20>e50 and m[-1]>=sig[-1]: return {"state":"BULLISH","score":12}
-    if closes[-1]<e20<e50 and m[-1]<sig[-1]: return {"state":"BEARISH","score":-10}
-    return {"state":"MIXED","score":3}
+    if closes[-1]>e20>e50 and m[-1]>=sig[-1]: return {"state":"BULLISH","score":12,"interval":trend_interval}
+    if closes[-1]<e20<e50 and m[-1]<sig[-1]: return {"state":"BEARISH","score":-10,"interval":trend_interval}
+    return {"state":"MIXED","score":3,"interval":trend_interval}
 
 
 def _setup_type(price,resistance,support,e20,vol_ratio,macd_rising,rsi):
@@ -169,7 +173,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         range_high = max(highs[-12:-1])
         macd_rising = hist[-1] > hist[-2]
         ema_bull = e9[-1] > e21[-1] and price > e20[-1]
-        trend = _trend_filter(coin)
+        trend = _trend_filter(coin, interval)
         if not trend:
             return _audit_reject(audit, "trend_data")
 
@@ -244,7 +248,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             reasons.append("liquidity sweep + reclaim")
         if structure["compression"] > 0.15:
             reasons.append("compression before expansion")
-        reasons.append(f"4h {trend['state'].lower()}")
+        reasons.append(f"{trend['interval']} {trend['state'].lower()}")
         score = max(0, min(100, score))
 
         stop_dist = max(profile["stop_atr"] * a, price * 0.006)
@@ -331,6 +335,9 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
 
         result = {
             "coin": coin, "interval": interval, "strategy": profile["kind"],
+            "trade_horizon": profile["kind"],
+            "estimated_hold_min_hours": profile.get("hold_min_hours"),
+            "estimated_hold_max_hours": profile.get("hold_max_hours"),
             "candle_open_time": int(data[-1][0]),
             "strategy_id": next(k for k, v in STRATEGY_PROFILES.items() if v is profile),
             "price": price, "entry": price, "stop": stop,
@@ -338,7 +345,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             "rsi": round(r, 1), "vol_x": round(vol_ratio, 2), "chg24": round(float(chg24 or 0), 2),
             "st": round(score, 1), "score": round(score, 1), "potential_pct": round(potential, 1),
             "risk_pct": round(risk_pct, 2), "rr": round(rr, 2), "atr": round(a, 6),
-            "resistance": resistance, "support": support, "setup_type": setup, "trend_4h": trend["state"],
+            "resistance": resistance, "support": support, "setup_type": setup, "trend_4h": trend["state"], "trend_interval": trend["interval"],
             "e9_e21": e9[-1] > e21[-1], "macd_rising": macd_rising, "reasons": reasons,
             "entry_quality": round(entry_quality, 1), "expansion_score": round(expansion_score, 1),
             "target_quality_mode": target_plan["mode"],
