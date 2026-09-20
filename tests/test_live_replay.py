@@ -19,6 +19,17 @@ class LiveReplayTests(unittest.TestCase):
         result=evaluate_outcome(rows,0,signal,1)
         self.assertEqual(result["outcome"],"LOSS")
 
+    def test_outcome_respects_oos_boundary(self):
+        rows = [
+            [0,1,1,1,1,0,0,0],
+            [1,1,1.05,0.99,1.04,0,0,0],
+            [2,1,1.20,0.99,1.10,0,0,0],
+        ]
+        signal={"entry":1.0,"stop":0.9,"t3":1.10}
+        result=evaluate_outcome(rows,0,signal,2,max_index=2)
+        self.assertEqual(result["outcome"],"EXPIRED")
+        self.assertEqual(result["exit_i"],1)
+
     def test_milestone_is_recorded_before_target(self):
         rows = [
             [0,1,1,1,1,0,0,0],
