@@ -42,7 +42,9 @@ def optimize_targets(signal, stats, min_samples=MIN_SAMPLES, enabled=True):
     base_t3 = float(signal.get("t3", signal.get("target", 0)) or 0)
     risk_pct = float(signal.get("risk_pct", 0) or 0)
     min_rr = float(signal.get("rr", 0) or 0)
-    max_potential = float(signal.get("max_potential_pct", 200.0) or 200.0)
+    max_potential = float(signal.get("max_potential_pct", 300.0) or 300.0)
+    interval_caps = {"5m": 20.0, "15m": 35.0, "1h": 60.0, "4h": 100.0, "1d": 200.0, "1w": 300.0}
+    max_potential = min(max_potential, interval_caps.get(str(signal.get("interval", "")), max_potential))
     min_potential = float(signal.get("min_potential_pct", 5.0) or 5.0)
 
     def unchanged(reason):
