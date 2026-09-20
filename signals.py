@@ -24,6 +24,17 @@ STRATEGY_PROFILES = {
 }
 
 
+
+
+TP_POTENTIAL_CEILINGS = {
+    "5m": 20.0,
+    "15m": 35.0,
+    "1h": 60.0,
+    "4h": 100.0,
+    "1d": 200.0,
+    "1w": 300.0,
+}
+
 def strategy_profile(interval):
     return next((p for p in STRATEGY_PROFILES.values() if p["interval"] == interval), None)
 
@@ -122,7 +133,7 @@ def _audit_reject(audit, stage):
     return None
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=200.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None):
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=300.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None):
     """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
     profile = strategy_profile(interval)
     if not profile:
