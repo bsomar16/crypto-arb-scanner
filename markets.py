@@ -11,14 +11,13 @@ EXCHANGES = {
     "OKX": "https://www.okx.com/api/v5/market/tickers?instType=SPOT",
     "GATE": "https://api.gateio.ws/api/v4/spot/tickers",
     "MEXC": "https://api.mexc.com/api/v3/ticker/price",
-    "POLONIEX": "https://api.poloniex.com/markets/ticker24h",
     "KUCOIN": "https://api.kucoin.com/api/v1/market/allTickers",
     "HTX": "https://api.huobi.pro/market/tickers",
 }
 
 BN = "https://data-api.binance.vision"
 FEE_TAKER = {"BINANCE": 0.0010, "BYBIT": 0.0010, "BITGET": 0.0010, "OKX": 0.0010, "GATE": 0.0015,
-             "MEXC": 0.0010, "POLONIEX": 0.0015, "KUCOIN": 0.0010, "HTX": 0.0020}
+             "MEXC": 0.0010, "KUCOIN": 0.0010, "HTX": 0.0020}
 API_PRIVATE_STATUS = ("BINANCE", "OKX", "MEXC")
 
 
@@ -51,7 +50,6 @@ def _depth_url(ex, symbol):
     if ex == "OKX": return f"https://www.okx.com/api/v5/market/books?instId={symbol}-USDT&sz=20"
     if ex == "GATE": return f"https://api.gateio.ws/api/v4/spot/order_book?currency_pair={symbol}_USDT&limit=20"
     if ex == "MEXC": return f"https://api.mexc.com/api/v3/depth?symbol={symbol}USDT&limit=20"
-    if ex == "POLONIEX": return f"https://api.poloniex.com/markets/{symbol}_USDT/orderBook?limit=20"
     if ex == "KUCOIN": return f"https://api.kucoin.com/api/v1/market/orderbook/level2_20?symbol={symbol}-USDT"
     if ex == "HTX": return f"https://api.huobi.pro/market/depth?symbol={symbol}usdt&type=step0&depth=20"
     return None
@@ -64,7 +62,7 @@ def fetch_orderbook(ex, symbol, limit=20):
         d = http_json(url, timeout=12)
         if ex == "BYBIT":
             r = d.get("result", {}); asks, bids = _norm_levels(r.get("a", [])), _norm_levels(r.get("b", []))
-        elif ex in ("BINANCE", "MEXC", "GATE", "POLONIEX"):
+        elif ex in ("BINANCE", "MEXC", "GATE"):
             asks, bids = _norm_levels(d.get("asks", [])), _norm_levels(d.get("bids", []))
         elif ex == "BITGET":
             r = d.get("data", {}); asks, bids = _norm_levels(r.get("asks", [])), _norm_levels(r.get("bids", []))
@@ -114,8 +112,6 @@ def currency_name(ex, coin):
             return http_json(f"https://api.kucoin.com/api/v1/currencies/{coin}", timeout=12).get("data", {}).get("fullName")
         if ex == "GATE":
             return http_json(f"https://api.gateio.ws/api/v4/spot/currencies/{coin}", timeout=12).get("name")
-        if ex == "POLONIEX":
-            d = http_json(f"https://api.poloniex.com/currencies/{coin}", timeout=12); return (d.get("name") or d.get("shortName")) if isinstance(d, dict) else None
         if ex == "HTX":
             for c in http_json("https://api.huobi.pro/v2/reference/currencies", timeout=25).get("data", []):
                 if str(c.get("currency", "")).lower() == coin.lower(): return c.get("displayName") or c.get("baseCurrency")
@@ -157,9 +153,6 @@ def fetch_exchange(name):
             for t in data:
                 s=t["symbol"]
                 if s.endswith("USDT") and s != "USDTUSDT" and "USDT" not in s[:-4]: m[s[:-4]]=float(t["price"])
-        elif name == "POLONIEX":
-            for t in data:
-                if t["symbol"].endswith("_USDT"): m[t["symbol"][:-5]]=float(t["close"])
         elif name == "KUCOIN":
             for t in data["data"]["ticker"]:
                 if t["symbol"].endswith("-USDT"): m[t["symbol"][:-5]]=float(t["last"])
@@ -245,11 +238,6 @@ def coin_status(coin):
                 if chans:
                     net,fully=chain_summary(chans); out["BITGET"]={"dep":fully or any(c[1] for c in chans),"wd":fully or any(c[2] for c in chans),"net":[net],"note":""}
                 break
-    except Exception: pass
-    try:
-        for cur in http_json("https://api.poloniex.com/currencies",timeout=25):
-            if str(cur.get("currency","")).lower()==coin.lower():
-                out["POLONIEX"]={"dep":bool(cur.get("depositEnabled")) and not bool(cur.get("disallowedDeposit")),"wd":bool(cur.get("withdrawalEnabled")) and not bool(cur.get("disallowedWithdraw")),"net":["multi"],"note":""}; break
     except Exception: pass
     for ex in API_PRIVATE_STATUS: out[ex]={"dep":None,"wd":None,"net":[],"note":"API private"}
     return out
