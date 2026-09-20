@@ -40,13 +40,18 @@ def evaluate_outcome(rows, i, signal, horizon, max_index=None):
         high,low=float(rows[j][2]),float(rows[j][3])
         mfe=max(mfe,(high/entry-1)*100); mae=min(mae,(low/entry-1)*100)
         if low<=stop:
-            return {"outcome":"LOSS","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":j-i}
+            return {"outcome":"LOSS","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,
+                    "hold_bars":j-i,"window_complete":True,"censored":False}
         for p in MILESTONES:
             if high>=entry*(1+p/100): reached[str(p)]=True
         if high>=target:
-            return {"outcome":"WIN","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":j-i}
+            return {"outcome":"WIN","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,
+                    "hold_bars":j-i,"window_complete":True,"censored":False}
     last=float(rows[end-1][4])
-    return {"outcome":"EXPIRED","exit_i":end-1,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":end-1-i,"ret_pct":(last/entry-1)*100}
+    complete=end >= min(len(rows),i+1+horizon)
+    return {"outcome":"EXPIRED","exit_i":end-1,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,
+            "hold_bars":end-1-i,"ret_pct":(last/entry-1)*100,
+            "window_complete":complete,"censored":not complete}
 
 def replay_symbol(symbol, interval, rows, trend_rows, start_i, end_i, cfg=None, require_complete_outcome=True):
     cfg=dict(cfg or {})
@@ -65,7 +70,7 @@ def replay_symbol(symbol, interval, rows, trend_rows, start_i, end_i, cfg=None, 
             historical_data=window,historical_trend_data=trend_window,record_history=False)
         if signal:
             result=evaluate_outcome(rows,i,signal,horizon,max_index=end_i)
-            if require_complete_outcome and result["hold_bars"]<horizon:
+            if require_complete_outcome and result["outcome"]=="EXPIRED" and not result["window_complete"]:
                 i+=1
                 continue
             result.update(signal); result["signal_index"]=i; result["horizon_bars"]=horizon
