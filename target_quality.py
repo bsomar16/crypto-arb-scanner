@@ -42,7 +42,7 @@ def optimize_targets(signal, stats, min_samples=MIN_SAMPLES, enabled=True):
     base_t3 = float(signal.get("t3", signal.get("target", 0)) or 0)
     risk_pct = float(signal.get("risk_pct", 0) or 0)
     min_rr = float(signal.get("rr", 0) or 0)
-    max_potential = float(signal.get("max_potential_pct", 80.0) or 80.0)
+    max_potential = float(signal.get("max_potential_pct", 200.0) or 200.0)
     min_potential = float(signal.get("min_potential_pct", 5.0) or 5.0)
 
     def unchanged(reason):
@@ -92,7 +92,7 @@ def optimize_targets(signal, stats, min_samples=MIN_SAMPLES, enabled=True):
     distance = base_t3 - base_entry
     candidate = base_entry + distance * (1.0 + adjustment)
 
-    # Preserve the strategy's hard potential envelope.
+    # Preserve the strategy's hard potential envelope (now expandable up to the configured 200% ceiling).
     candidate = min(candidate, base_entry * (1.0 + max_potential / 100.0))
     candidate = max(candidate, base_entry * (1.0 + min_potential / 100.0))
 
