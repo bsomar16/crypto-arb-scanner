@@ -37,7 +37,7 @@ def replay_symbol(symbol, interval, rows, trend_rows, start_i, end_i, cfg=None):
     horizon=_bars_for_hold(interval,int(profile.get("hold_max_hours",24))); trades=[]; i=max(70,start_i)
     while i<min(end_i,len(rows)-2):
         window=rows[:i+1]; trend_window=[x for x in trend_rows if int(x[0])<=int(rows[i][0])]
-        signal=intraday_signal(symbol,interval=interval,limit=min(180,len(window)),min_vol_x=None,min_hour_vol=0,chg24=0,min_potential_pct=float(cfg.get("signal_min_potential_pct",5)),max_potential_pct=float(cfg.get("signal_max_potential_pct",300)),min_score=None,min_rr=None,cfg={**cfg,"adaptive_thresholds_enabled":False,"target_optimization_enabled":False},historical_data=window,historical_trend_data=trend_window)
+        signal=intraday_signal(symbol,interval=interval,limit=min(180,len(window)),min_vol_x=None,min_hour_vol=0,chg24=0,min_potential_pct=float(cfg.get("signal_min_potential_pct",5)),max_potential_pct=float(cfg.get("signal_max_potential_pct",300)),min_score=None,min_rr=None,cfg={**cfg,"adaptive_thresholds_enabled":False,"target_optimization_enabled":False},historical_data=window,historical_trend_data=trend_window,record_history=False)
         if signal:
             result=evaluate_outcome(rows,i,signal,horizon); result.update(signal); result["signal_index"]=i; result["horizon_bars"]=horizon; result["estimated_hold_hours"]=result["hold_bars"]*INTERVAL_MINUTES[interval]/60; trades.append(result); i=max(i+1,result["exit_i"]+1)
         else: i+=1
