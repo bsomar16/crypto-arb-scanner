@@ -325,9 +325,9 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
 
 def run_buy(token, chat_id, realtime_cache=None):
     cfg = load_cfg()
-    intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
+    intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h", "4h", "1d", "1w"]) if i in ("5m", "15m", "1h", "4h", "1d", "1w")]
     if not intervals:
-        intervals = ["5m", "15m", "1h"]
+        intervals = ["5m", "15m", "1h", "4h", "1d", "1w"]
 
     t24 = fetch_binance_24h()
     q = crypto_quote(t24)
@@ -345,7 +345,7 @@ def run_buy(token, chat_id, realtime_cache=None):
 
     # Stage 1: scan a broad liquid Binance universe with a cheap 1h discovery pass.
     cands, discovery_rows = _candidate_universe(cfg, q, star, t24=t24)
-    deep_n = int(cfg.get("discovery_deep_candidates", 200))
+    deep_n = int(cfg.get("discovery_deep_candidates", 300))
     if realtime_cache is not None:
         cands = cands[:max(1, int(cfg.get("realtime_monitor_candidates", 25)))]
     else:
@@ -363,7 +363,7 @@ def run_buy(token, chat_id, realtime_cache=None):
             min_hour_vol=float(cfg.get("buy_fast_min_hour_vol", 100000)),
             chg24=chg.get(sym),
             min_potential_pct=float(cfg.get("signal_min_potential_pct", 5.0)),
-            max_potential_pct=float(cfg.get("signal_max_potential_pct", 80.0)),
+            max_potential_pct=float(cfg.get("signal_max_potential_pct", 300.0)),
             min_score=None,
             min_rr=None,
             realtime_bars=(realtime_cache.get(sym, interval) if realtime_cache is not None else None),
