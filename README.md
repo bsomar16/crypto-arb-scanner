@@ -88,3 +88,7 @@ Before any controlled live trading is considered:
 7. Keep live execution and withdrawals disabled until the evidence and operational checks justify enabling them explicitly.
 
 No step above is a profitability guarantee.
+
+
+## Exact live-engine validation
+The validation suite now replays the production BUY signal engine on closed historical candles across 5m, 15m, 1h, 4h, 1d and 1w. It supplies historical candles directly to the same signal path, disables adaptive live-outcome thresholds and live target optimization during replay to avoid leakage, and separates train, validation and OOS periods. The OOS report includes closed-sample gating, precision, milestone reach, average potential/R:R, MAE/MFE and holding duration. Historical results are evidence only and are not a guarantee of future performance.
