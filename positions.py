@@ -298,6 +298,33 @@ def _status_msg(pos, price):
             f"Progress: {progress} · Mode: {esc(pos.get('mode','paper'))}")
 
 
+def _trail_stop_after_tp(pos, price):
+    """Ratchet protection upward after TP milestones without widening risk."""
+    entry = float(pos.get("entry") or 0)
+    if entry <= 0 or price <= entry:
+        return False
+    old_sl = float(pos.get("sl") or 0)
+    tp1 = float(pos.get("tp1") or 0)
+    tp2 = float(pos.get("tp2") or 0)
+    tp3 = float(pos.get("tp3") or 0)
+    if pos.get("tp2_hit") and tp3 > tp2:
+        # Keep a runner after TP2: protect 50% of the TP2→TP3 path.
+        new_sl = max(entry, tp2 + (tp3 - tp2) * 0.50)
+        stage = "TP2_RUNNER"
+    elif pos.get("tp1_hit") and tp2 > tp1:
+        # After TP1, lock 25% of the TP1→TP2 path while preserving upside.
+        new_sl = max(entry, tp1 + (tp2 - tp1) * 0.25)
+        stage = "TP1_TRAIL"
+    else:
+        return False
+    if new_sl > old_sl and new_sl < price:
+        pos["sl"] = new_sl
+        pos["trailing_stop_stage"] = stage
+        pos["trailing_stop_pct_from_entry"] = round((new_sl / entry - 1) * 100, 4)
+        return True
+    return False
+
+
 def check_positions(token, chat_id, cfg):
     """Update tracked positions without sending Telegram notifications.
 
@@ -342,6 +369,8 @@ def check_positions(token, chat_id, cfg):
             _close(pos, "expired", price, now, "EXPIRED")
             signal_history.record_outcome(pos, "EXPIRED", price)
             continue
+
+        _trail_stop_after_tp(pos, price)
 
         if price <= float(pos.get("sl") or 0):
             _close(pos, "closed_sl", price, now, "LOSS")
