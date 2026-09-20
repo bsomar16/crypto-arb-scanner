@@ -18,12 +18,12 @@ class BuyRecallPrecisionTests(unittest.TestCase):
         self.assertEqual(STRATEGY_PROFILES["medium_1h"]["min_rr"], 1.50)
         self.assertEqual(STRATEGY_PROFILES["scalp_5m"]["target_atr"], 3.0)
         self.assertEqual(STRATEGY_PROFILES["scalp_15m"]["target_atr"], 4.0)
-        self.assertEqual(STRATEGY_PROFILES["small_trade_1h"]["target_atr"], 5.5)
+        self.assertEqual(STRATEGY_PROFILES["medium_1h"]["target_atr"], 5.5)
 
     def test_recall_floor_does_not_remove_the_hard_potential_envelope(self):
         self.assertGreaterEqual(STRATEGY_PROFILES["scalp_5m"]["min_rr"], 1.5)
         self.assertGreaterEqual(STRATEGY_PROFILES["scalp_15m"]["min_rr"], 1.5)
-        self.assertGreaterEqual(STRATEGY_PROFILES["small_trade_1h"]["min_rr"], 1.5)
+        self.assertGreaterEqual(STRATEGY_PROFILES["medium_1h"]["min_rr"], 1.5)
 
 
 if __name__ == "__main__":
