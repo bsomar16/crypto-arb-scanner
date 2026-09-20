@@ -43,7 +43,7 @@ class TestSignals(unittest.TestCase):
         self.assertEqual(signals.rating(45), "AVOID")
 
     def test_valid_intervals(self):
-        self.assertEqual(signals.VALID_INTERVALS, {"5m", "15m", "1h", "4h"})
+        self.assertEqual(signals.VALID_INTERVALS, {"5m", "15m", "1h", "4h", "1d", "1w"})
 
 
 class TestMarkets(unittest.TestCase):
