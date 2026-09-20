@@ -134,12 +134,23 @@ def _alert_block(r, idx, total, net):
     d2 = (depth_estimate(r["high_ex"], r["coin"]) or {}).get("full_usd", 0)
     return ["", f"🚨 <b>ARB ALERT: {esc(r['coin'])} (+{net:.1f}%)</b>", f"⏱ Run: {idx} of {total}", "", f"🟢 BUY: {r['low_ex']}", f"• Price: {fmt_price(r['low'])}", f"• Depth: ~${fmt_dollar(d1)}", f"• Status: {dw_status_line(r['low_ex'], st)}", "", f"🔴 SELL: {r['high_ex']}", f"• Price: {fmt_price(r['high'])}", f"• Depth: ~${fmt_dollar(d2)}", f"• Status: {dw_status_line(r['high_ex'], st)}"]
 
+ARB_ALLOWED_EXCHANGES = frozenset({"BINANCE", "BYBIT", "OKX", "BITGET", "MEXC", "GATE", "KUCOIN", "HTX"})
+ARB_BLOCKED_EXCHANGES = frozenset({"POLONIEX"})
+
+
 def run_arb(token, chat_id):
     cfg = load_cfg(); lim = arb_limits(cfg)
+    # Defense-in-depth: even if a stale config/environment reintroduces an
+    # exchange name, ARB must never query or report a blocked venue.
+    configured = [str(ex).upper() for ex in EXCHANGES]
+    blocked = [ex for ex in configured if ex in ARB_BLOCKED_EXCHANGES]
+    if blocked:
+        log("ARB", "blocked exchanges removed:", ",".join(blocked))
+    arb_exchanges = [ex for ex in configured if ex in ARB_ALLOWED_EXCHANGES and ex not in ARB_BLOCKED_EXCHANGES]
     try: positions_mod.check_positions(token, chat_id, cfg)
     except Exception as e: log("ARB", "positions check error:", e)
     traps = traps_mod.load_traps(TRAP_FILE, lim["trap_days"]); maps, offline = {}, []
-    for ex in EXCHANGES:
+    for ex in arb_exchanges:
         maps[ex] = fetch_exchange(ex); log(ex, f"{len(maps[ex])} pairs")
         if not maps[ex]: offline.append(ex)
     counts = {}
@@ -159,7 +170,7 @@ def run_arb(token, chat_id):
         try: store_mod.spread_log(r["coin"], r["spread"], r["net"], r["low_ex"], r["high_ex"], r["low"], r["high"], r["median"])
         except Exception as e: log("ARB", "spread_log error:", e)
     if not new_alerts: log("[ARB] no new alerts"); return False
-    lines = [f"📊 <b>ARB SCAN</b> · {now_s()}", f"🌐 {len(universe)} coins · {len(EXCHANGES)} exchanges · {len(EXCHANGES)-len(offline)}/{len(EXCHANGES)} feeds", "", f"🚨 <b>NEW ALERTS ({len(new_alerts)})</b>"]
+    lines = [f"📊 <b>ARB SCAN</b> · {now_s()}", f"🌐 {len(universe)} coins · {len(arb_exchanges)} exchanges · {len(arb_exchanges)-len(offline)}/{len(arb_exchanges)} feeds", "", f"🚨 <b>NEW ALERTS ({len(new_alerts)})</b>"]
     for i, r in enumerate(new_alerts, 1): lines.extend(_alert_block(r, i, len(new_alerts), r["net"]))
     if offline: lines.extend(["", f"⚠️ offline feeds: {', '.join(offline)}"])
     telegram_msg(token, chat_id, "\n".join(lines)); return True
