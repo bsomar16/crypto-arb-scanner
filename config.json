@@ -9,10 +9,24 @@
   "daily_news_top": 8,
   "buy_scan_top_n": 100,
   "buy_min_vol": 2000000,
-  "buy_intervals": ["5m", "15m", "1h", "4h", "1d", "1w"],
-  "buy_interval_schedule_minutes": {"5m": 15, "15m": 15, "1h": 30, "4h": 60, "1d": 240, "1w": 720},
+  "buy_intervals": [
+    "5m",
+    "15m",
+    "1h",
+    "4h",
+    "1d",
+    "1w"
+  ],
+  "buy_interval_schedule_minutes": {
+    "5m": 15,
+    "15m": 15,
+    "1h": 30,
+    "4h": 60,
+    "1d": 240,
+    "1w": 720
+  },
   "buy_scan_every_minutes": 15,
-  "buy_min_vol_x": 1.0,
+  "buy_min_vol_x": 1,
   "buy_fast_top_n": 150,
   "buy_fast_top_n_shown": 15,
   "buy_fast_min_hour_vol": 75000,
@@ -58,7 +72,10 @@
   "backtest_intervals": [
     "5m",
     "15m",
-    "1h"
+    "1h",
+    "4h",
+    "1d",
+    "1w"
   ],
   "backtest_bars": 3000,
   "min_exchanges": 4,
@@ -151,7 +168,7 @@
   "adaptive_thresholds_enabled": true,
   "adaptive_min_samples": 20,
   "adaptive_min_score_floor": 50,
-  "adaptive_min_vol_x_floor": 1.0,
+  "adaptive_min_vol_x_floor": 1,
   "adaptive_min_rr_floor": 1.5,
   "walk_forward_enabled": true,
   "walk_forward_train_bars": 2000,
@@ -162,5 +179,8 @@
   "walk_forward_stats_path": "state/walk_forward_stats.json",
   "validation_target_precision_pct": 80,
   "validation_min_closed_samples": 20,
-  "validation_stats_path": "state/profile_validation.json"
+  "validation_stats_path": "state/profile_validation.json",
+  "validation_train_bars": 1500,
+  "validation_validation_bars": 750,
+  "target_optimization_enabled": true
 }
