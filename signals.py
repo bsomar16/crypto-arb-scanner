@@ -133,7 +133,7 @@ def _audit_reject(audit, stage):
     return None
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=300.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None, historical_data=None, historical_trend_data=None):
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=300.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None, historical_data=None, historical_trend_data=None, record_history=True):
     """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
     profile = strategy_profile(interval)
     if not profile:
@@ -398,7 +398,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         if stats["win_pct"] is not None:
             scope = "exact setup" if stats["scope"] == "exact" else "setup/timeframe"
             reasons.append(f"historical {stats['win_pct']:.0f}% ({stats['sample']} {scope} results)")
-        signal_history.record_signal(result)
+        if record_history:
+            signal_history.record_signal(result)
         if audit is not None:
             audit.accept("qualified")
         return result
