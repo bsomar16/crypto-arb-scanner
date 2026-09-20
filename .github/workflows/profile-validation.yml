@@ -12,12 +12,13 @@ on:
       - 'validation.py'
       - 'config.json'
       - 'tests/test_profile_validation.py'
+      - 'tests/test_live_replay.py'
       - '.github/workflows/profile-validation.yml'
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
