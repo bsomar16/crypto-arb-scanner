@@ -88,4 +88,6 @@ def summarize(rows):
         "avg_rr":mean(float(r["rr"]) for r in rows) if rows else None,
         "avg_mfe_pct":mean(float(r.get("mfe_pct",0)) for r in rows) if rows else None,
         "avg_mae_pct":mean(float(r.get("mae_pct",0)) for r in rows) if rows else None,
-        "avg_hold_hours":mean(float(r.get("estimated_hold_hours",0)) for r in rows) if rows else None}
+        "avg_hold_hours":mean(float(r.get("estimated_hold_hours",0)) for r in rows) if rows else None,
+        **{f"milestone_{p}_pct": (sum(bool((r.get("milestones") or {}).get(str(p))) for r in rows)/signals*100 if signals else None) for p in MILESTONES}
+    }
