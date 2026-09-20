@@ -108,9 +108,9 @@ def _fetch_klines(coin, interval, limit):
     return data if len(data)>=70 else None
 
 
-def _trend_filter(coin, interval="15m"):
+def _trend_filter(coin, interval="15m", historical_data=None):
     trend_interval = "4h" if interval in ("5m", "15m", "1h") else "1d"
-    data=_fetch_klines(coin,trend_interval,100)
+    data = historical_data if historical_data is not None else _fetch_klines(coin,trend_interval,100)
     if not data: return None
     closes=[float(k[4]) for k in data]; e20=ind.ema(closes,20)[-1]; e50=ind.ema(closes,50)[-1]; m,sig,_=ind.macd(closes)
     if closes[-1]>e20>e50 and m[-1]>=sig[-1]: return {"state":"BULLISH","score":12,"interval":trend_interval}
@@ -133,7 +133,7 @@ def _audit_reject(audit, stage):
     return None
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=300.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None):
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=300.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None, historical_data=None, historical_trend_data=None):
     """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
     profile = strategy_profile(interval)
     if not profile:
@@ -142,12 +142,13 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         effective_min_vol_x = profile["min_vol_x"] if min_vol_x is None else max(float(min_vol_x), profile["min_vol_x"])
         effective_min_score = profile["min_score"] if min_score is None else max(float(min_score), profile["min_score"])
         effective_min_rr = profile["min_rr"] if min_rr is None else max(float(min_rr), profile["min_rr"])
-        data = _fetch_klines(coin, interval, limit)
+        data = historical_data if historical_data is not None else _fetch_klines(coin, interval, limit)
         if not data:
             return _audit_reject(audit, "data_fetch")
         # Binance REST includes the currently forming candle. Never score an
         # unclosed candle; realtime_bars are already filtered to closed candles.
-        data = data[:-1]
+        if historical_data is None:
+            data = data[:-1]
         if realtime_bars:
             # Replace only overlapping closed candles; keep REST history for warm-up.
             merged = {int(k[0]): k for k in data}
@@ -184,7 +185,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         range_high = max(highs[-12:-1])
         macd_rising = hist[-1] > hist[-2]
         ema_bull = e9[-1] > e21[-1] and price > e20[-1]
-        trend = _trend_filter(coin, interval)
+        trend = _trend_filter(coin, interval, historical_data=historical_trend_data)
         if not trend:
             return _audit_reject(audit, "trend_data")
 
