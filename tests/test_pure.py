@@ -167,4 +167,10 @@ class TestNamesDiverge(unittest.TestCase):
         self.assertFalse(markets.names_diverge("", "Ethereum")); self.assertFalse(markets.names_diverge(None, None))
 
 
+class TestArbExchangeSafety(unittest.TestCase):
+    def test_poloniex_is_not_an_arb_exchange(self):
+        import markets
+        self.assertNotIn("POLONIEX", markets.EXCHANGES)
+
+
 if __name__ == "__main__": unittest.main()
