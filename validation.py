@@ -23,7 +23,7 @@ def run(cfg=None):
             # Replay every split with identical live-engine rules. We report OOS
             # separately; training/validation are context, never mixed into OOS metrics.
             split_rows=[]
-            for name,start,end in (("train",100,end_train if False else train_end),("validation",train_end,val_end),("oos",val_end,oos_end)):
+            for name,start,end in (("train",70,train_end),("validation",train_end,val_end),("oos",val_end,oos_end)):
                 if end-start<50: continue
                 trades=replay_symbol(symbol,interval,rows,trend_rows,start,end,cfg)
                 s=summarize(trades); split_rows.append({"split":name,**s})
