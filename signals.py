@@ -122,7 +122,7 @@ def _audit_reject(audit, stage):
     return None
 
 
-def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=80.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None):
+def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vol=0, chg24=None, min_potential_pct=5.0, max_potential_pct=200.0, min_score=None, min_rr=None, realtime_bars=None, cfg=None, audit=None):
     """Generate a strategy-specific scalp/small-trade setup with structure and liquidity confirmation."""
     profile = strategy_profile(interval)
     if not profile:
