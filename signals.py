@@ -9,6 +9,7 @@ from entry_engine import evaluate_entry
 from expansion import classify_expansion
 from adaptive import adaptive_thresholds
 from target_quality import optimize_targets
+from signal_context import build_signal_context
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h", "1d", "1w"}
@@ -279,6 +280,24 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             return _audit_reject(audit, "bearish_trend")
 
         expansion = classify_expansion(closes, highs, lows, vols, a)
+        context = build_signal_context(closes, highs, lows, vols, a, price)
+        # Quality layers only: do not make them hard gates, preserving BUY recall.
+        if context["zero_inverse"]["bullish_reversal"]:
+            score += 7.0
+            reasons.append("zero-inverse bullish reversal")
+        elif context["zero_inverse"]["bullish_reclaim"]:
+            score += 4.0
+            reasons.append("zero-inverse zero-line reclaim")
+        if context["order_block"]["bullish"]:
+            score += 6.0
+            reasons.append("bullish order block")
+        if context["volatility"]["state"] == "EXPANDING":
+            score += 4.0
+            reasons.append("volatility expanding")
+        elif context["volatility"]["state"] == "CONTRACTING":
+            score -= 2.0
+            reasons.append("volatility contracting")
+        score = max(0.0, min(100.0, score))
         entry_quality = float(entry["entry_quality"])
         if entry["extension_pct"] > 4.0:
             score -= min(10.0, entry["extension_pct"] * 1.5)
@@ -358,6 +377,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             "resistance": resistance, "support": support, "setup_type": setup, "trend_4h": trend["state"], "trend_interval": trend["interval"],
             "e9_e21": e9[-1] > e21[-1], "macd_rising": macd_rising, "reasons": reasons,
             "entry_quality": round(entry_quality, 1), "expansion_score": round(expansion_score, 1),
+            "zero_inverse": context["zero_inverse"], "order_block": context["order_block"],
+            "volatility": context["volatility"],
             "target_quality_mode": target_plan["mode"],
             "target_quality_adjustment_pct": target_plan["adjustment_pct"],
             "target_quality_evidence_scope": target_plan["evidence_scope"],
