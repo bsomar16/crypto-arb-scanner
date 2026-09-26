@@ -260,7 +260,8 @@ def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = r.get("trade_horizon", "Scalp" if r["interval"] in ("5m", "15m") else "Medium"); reasons = ", ".join(r.get("reasons", [])[:5])
     return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · {r.get('trend_interval', '4h')}: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
-def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None, audit=None):
+def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02,
+                        cooldown_minutes=240, rearm_score_delta=10.0, limit=None, audit=None):
     """Return one BUY notification per coin.
 
     A coin is silent while it has an open tracked position. After that signal
@@ -301,9 +302,13 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
         else:
             entry_changed = abs(float(r["entry"]) - old_entry) / old_entry >= entry_change_pct
             setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
-            interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
-            score_strengthened = float(r.get("score", 0) or 0) - old_score >= 5.0
-            is_new_signal = entry_changed or setup_changed or interval_changed or (candle_changed and score_strengthened)
+            score_strengthened = float(r.get("score", 0) or 0) - old_score >= rearm_score_delta
+            elapsed_min = max(0.0, (float(now_ts) - float(old.get("ts", 0) or 0)) / 60.0)
+            cooldown_elapsed = elapsed_min >= max(0.0, float(cooldown_minutes))
+            # A new candle or timeframe change alone is not a new signal.
+            # Re-arm only after a cooldown plus a materially changed setup.
+            material_rearm = entry_changed or (setup_changed and score_strengthened)
+            is_new_signal = bool(cooldown_elapsed and material_rearm)
 
         if old and not is_new_signal:
             if audit is not None:
@@ -401,6 +406,8 @@ def run_buy(token, chat_id, realtime_cache=None):
         now_ts,
         active_coins=active_coins,
         entry_change_pct=float(cfg.get("buy_signal_entry_change_pct", 0.02)),
+        cooldown_minutes=float(cfg.get("buy_signal_cooldown_minutes", 240)),
+        rearm_score_delta=float(cfg.get("buy_signal_rearm_score_delta", 10.0)),
         limit=None,
         audit=audit,
     )
