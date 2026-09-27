@@ -226,7 +226,10 @@ def _rank_trade_candidates(hits, cfg):
         row["market_regime_volatility"] = regime.get("volatility", "UNKNOWN")
         row["market_regime_breadth_pct"] = regime.get("breadth_pct", 0.0)
         row["market_regime_modifier"] = float(regime.get("score_modifier", 0.0) or 0.0)
-        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier + row["market_regime_modifier"])), 1)
+        bullish = row.get("bullish_potential", {}) or {}
+        # Small ranking preference only; this never creates a BUY or bypasses gates.
+        row["bullish_potential_modifier"] = round((float(bullish.get("score", 50.0)) - 50.0) * 0.08, 1)
+        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier + row["market_regime_modifier"] + row["bullish_potential_modifier"])), 1)
         scored.append(row)
     scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     return scored
@@ -258,7 +261,10 @@ def _format_hold_window(r):
 
 def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM"); kind = r.get("trade_horizon", "Scalp" if r["interval"] in ("5m", "15m") else "Medium"); reasons = ", ".join(r.get("reasons", [])[:5])
-    return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · {r.get('trend_interval', '4h')}: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
+    bp = r.get("bullish_potential", {}) or {}
+    tier = bp.get("tier", "STANDARD")
+    band = bp.get("move_band", "strategy target range")
+    return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · {r.get('trend_interval', '4h')}: {r.get('trend_4h', '?')}", f"🔥 Bullish potential: <b>{esc(tier)}</b> · {esc(band)}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Modelled potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
 
 def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02,
                         cooldown_minutes=240, rearm_score_delta=10.0, limit=None, audit=None):
