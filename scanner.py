@@ -260,11 +260,30 @@ def _format_hold_window(r):
     return f"{fmt(float(lo))}–{fmt(float(hi))}"
 
 def _signal_message(r):
-    setup = r.get("setup_type", "MOMENTUM"); kind = r.get("trade_horizon", "Scalp" if r["interval"] in ("5m", "15m") else "Medium"); reasons = ", ".join(r.get("reasons", [])[:5])
+    """Format every BUY alert with the same compact hierarchy."""
+    setup = r.get("setup_type", "MOMENTUM")
+    kind = r.get("trade_horizon", "Scalp" if r["interval"] in ("5m", "15m") else "Medium")
+    reasons = ", ".join(r.get("reasons", [])[:5])
     bp = r.get("bullish_potential", {}) or {}
     tier = bp.get("tier", "STANDARD")
+    bp_score = float(bp.get("score", 0) or 0)
     band = bp.get("move_band", "strategy target range")
-    return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · {r.get('trend_interval', '4h')}: {r.get('trend_4h', '?')}", f"🔥 Bullish potential: <b>{esc(tier)}</b> · {esc(band)}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Modelled potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
+    drivers = ", ".join(bp.get("drivers", [])[:2])
+
+    return [
+        "🟢 <b>CONFIRMED BUY SIGNAL</b>",
+        f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}",
+        f"📌 Setup: <b>{setup}</b> · {r.get('trend_interval', '4h')}: {r.get('trend_4h', '?')}",
+        "🎯 <b>Action: BUY</b>",
+        f"💰 Entry: <b>{fmt_price(r['entry'])}</b> · 🛑 Stop: {fmt_price(r['stop'])}",
+        f"🎯 Targets: {fmt_price(r['t1'])} · {fmt_price(r['t2'])} · {fmt_price(r['t3'])}",
+        f"📈 Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
+        f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100",
+        f"📊 Move scenario: <b>{esc(band)}</b>" + (f" · {esc(drivers)}" if drivers else ""),
+        f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>",
+        f"📊 Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%",
+        f"🧠 Why: {esc(reasons)}" if reasons else "🧠 Why: structure + momentum confirmation",
+    ]
 
 def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02,
                         cooldown_minutes=240, rearm_score_delta=10.0, limit=None, audit=None):
