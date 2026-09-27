@@ -10,6 +10,7 @@ from expansion import classify_expansion
 from adaptive import adaptive_thresholds
 from target_quality import optimize_targets
 from signal_context import build_signal_context
+from bullish_potential import classify_bullish_potential
 
 BN = "https://data-api.binance.vision"
 VALID_INTERVALS = {"5m", "15m", "1h", "4h", "1d", "1w"}
@@ -281,6 +282,16 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
 
         expansion = classify_expansion(closes, highs, lows, vols, a)
         context = build_signal_context(closes, highs, lows, vols, a, price)
+        bullish_potential = classify_bullish_potential(
+            interval=interval,
+            trend=trend,
+            structure=structure,
+            expansion=expansion,
+            context=context,
+            entry=entry,
+            score=score,
+            potential_pct=potential,
+        )
         # Quality layers only: do not make them hard gates, preserving BUY recall.
         if context["zero_inverse"]["bullish_reversal"]:
             score += 7.0
@@ -378,6 +389,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             "e9_e21": e9[-1] > e21[-1], "macd_rising": macd_rising, "reasons": reasons,
             "entry_quality": round(entry_quality, 1), "expansion_score": round(expansion_score, 1),
             "zero_inverse": context["zero_inverse"], "order_block": context["order_block"],
+            "bullish_potential": bullish_potential,
             "volatility": context["volatility"],
             "target_quality_mode": target_plan["mode"],
             "target_quality_adjustment_pct": target_plan["adjustment_pct"],
