@@ -267,9 +267,6 @@ def _signal_message(r):
     bp = r.get("bullish_potential", {}) or {}
     tier = bp.get("tier", "STANDARD")
     bp_score = float(bp.get("score", 0) or 0)
-    band = bp.get("move_band", "strategy target range")
-    drivers = ", ".join(bp.get("drivers", [])[:2])
-
     return [
         "🟢 <b>CONFIRMED BUY SIGNAL</b>",
         f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}",
@@ -280,9 +277,9 @@ def _signal_message(r):
         f"⏳ <b>TP1:</b> {fmt_price(r['t1'])}",
         f"⏳ <b>TP2:</b> {fmt_price(r['t2'])}",
         f"⏳ <b>TP3:</b> {fmt_price(r['t3'])}",
-        f"📈 Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
+        f"📈 <b>Modelled potential:</b> +{float(r.get('potential_pct', 0.0)):.1f}% · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
         f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100",
-        f"📊 Move scenario: <b>{esc(band)}</b>" + (f" · {esc(drivers)}" if drivers else ""),
+
         f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>",
         f"📊 Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%",
         f"🧠 Why: {esc(reasons)}" if reasons else "🧠 Why: structure + momentum confirmation",
@@ -509,7 +506,7 @@ def run_buy(token, chat_id, realtime_cache=None):
     lines.extend([
         "",
         "━━━━━━━━━━━━━━━━━━━━",
-        "Potential = model target, not guaranteed profit.",
+        "Modelled potential = calculated strategy target, not guaranteed profit.",
         "24h volume is a liquidity filter only; BUY requires multi-factor confirmation.",
         "Signals are quality-gated; there is no daily BUY quota.",
     ])
