@@ -21,7 +21,7 @@ class BuySignalDedupeTests(unittest.TestCase):
             self._signal(interval="15m", score=82),
             self._signal(interval="1h", score=75),
         ]
-        fresh, updates = scanner._dedupe_buy_signals(hits, {}, 1000, active_coins=set())
+        fresh, updates = scanner._dedupe_buy_signals(hits, {}, 16000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertEqual(fresh[0]["interval"], "15m")
         self.assertIn("GALA", updates)
@@ -36,7 +36,7 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(fresh, [])
         self.assertEqual(updates, {})
 
@@ -50,7 +50,7 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertIn("GALA", updates)
 
@@ -64,7 +64,7 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, _ = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, _ = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(len(fresh), 1)
 
     def test_active_coin_never_repeats_even_if_setup_changes(self):
@@ -91,7 +91,7 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertIn("GALA", updates)
 
