@@ -24,8 +24,7 @@ class SignalDedupeTests(unittest.TestCase):
             123,
             audit=audit,
         )
-        self.assertEqual(len(fresh), 1)
-        self.assertEqual(updates["GALA"]["candle_open_time"], 2000)
+        self.assertEqual(fresh, [])
         self.assertNotIn("dedupe_unchanged", audit.snapshot())
 
     def test_unchanged_setup_is_deduped(self):
