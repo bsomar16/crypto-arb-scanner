@@ -523,11 +523,6 @@ def run_buy(token, chat_id, realtime_cache=None):
         "Signals are quality-gated; there is no daily BUY quota.",
     ])
     log(f"[BUY] {len(selected)} quality signals / {len(fresh)} qualified signals / {len(tasks)} deep scans")
-    audit_snapshot = _persist_buy_audit(
-        audit,
-        scans=len(tasks), hits=len(hits), fresh=len(fresh), selected=len(selected),
-        candidates=len(cands), discovery=len(discovery_rows),
-    )
     log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
 
     # Telegram delivery is the notification commit point. Do not persist a
