@@ -5,7 +5,7 @@ import indicators as ind
 from botutil import http_json
 import signal_history
 from discovery import structure_snapshot
-from entry_engine import evaluate_entry
+from entry_engine import evaluate_entry, entry_diagnostics
 from expansion import classify_expansion
 from adaptive import adaptive_thresholds
 from target_quality import optimize_targets
@@ -193,13 +193,20 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             return _audit_reject(audit, "trend_data", coin=coin, interval=interval)
 
         structure = structure_snapshot(closes, highs, lows)
+        entry_opens = [float(k[1]) for k in data]
+        entry_diagnostic = entry_diagnostics(
+            closes, highs, lows, entry_opens, interval, atr=a, allow_early_retest=True
+        )
         entry = evaluate_entry(
-            closes, highs, lows, [float(k[1]) for k in data], interval, atr=a,
+            closes, highs, lows, entry_opens, interval, atr=a,
             require_retest=True,
             require_sweep=False,
         )
         if not entry:
-            return _audit_reject(audit, "entry_confirmation", coin=coin, interval=interval, details={"near_miss_score": 40.0})
+            return _audit_reject(
+                audit, "entry_confirmation", coin=coin, interval=interval,
+                details=entry_diagnostic,
+            )
         near_support = abs(price / support - 1) <= 0.012 if support else False
         setup = _setup_type(price, resistance, support, e20[-1], vol_ratio, macd_rising, r)
         if structure["choch"] and setup != "BREAKOUT":
