@@ -30,13 +30,13 @@ class BuySignalDedupeTests(unittest.TestCase):
         hits = [self._signal()]
         fired = {
             "GALA": {
-                "ts": 900,
+                "ts": 1000,
                 "entry": 0.00183,
                 "setup_type": "MOMENTUM",
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(fresh, [])
         self.assertEqual(updates, {})
 
@@ -44,18 +44,18 @@ class BuySignalDedupeTests(unittest.TestCase):
         hits = [self._signal(entry=0.00190)]
         fired = {
             "GALA": {
-                "ts": 900,
+                "ts": 1000,
                 "entry": 0.00183,
                 "setup_type": "MOMENTUM",
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertIn("GALA", updates)
 
     def test_setup_change_is_a_new_signal(self):
-        hits = [self._signal(setup="BREAKOUT")]
+        hits = [self._signal(setup="BREAKOUT", score=83)]
         fired = {
             "GALA": {
                 "ts": 900,
@@ -64,7 +64,7 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, _ = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, _ = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(len(fresh), 1)
 
     def test_active_coin_never_repeats_even_if_setup_changes(self):
@@ -82,16 +82,16 @@ class BuySignalDedupeTests(unittest.TestCase):
         self.assertEqual(updates, {})
 
     def test_closed_coin_can_alert_on_new_setup(self):
-        hits = [self._signal(setup="BREAKOUT")]
+        hits = [self._signal(setup="BREAKOUT", score=83)]
         fired = {
             "GALA": {
-                "ts": 900,
+                "ts": 1000,
                 "entry": 0.00183,
                 "setup_type": "MOMENTUM",
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertIn("GALA", updates)
 

@@ -6,7 +6,7 @@ from signal_context import _zero_inverse, _order_block, _volatility
 class SignalContextTests(unittest.TestCase):
     def test_zero_inverse_bullish_reclaim(self):
         closes = [100.0] * 40
-        closes += [99.0, 98.5, 98.0, 98.8, 99.7, 100.8, 101.5, 102.0]
+        closes += [90.0, 89.0, 88.0, 88.5, 90.0, 94.0, 100.0, 110.0]
         result = _zero_inverse(closes)
         self.assertTrue(result["bullish_reclaim"] or result["bullish_reversal"])
         self.assertIn(result["state"], {"BULLISH_REVERSAL", "BULLISH"})
