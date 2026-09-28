@@ -98,3 +98,86 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
         "confirmation_body": round(confirm["body_strength"], 3),
         "trigger_index": confirm["index"],
     }
+
+
+def entry_diagnostics(closes, highs, lows, opens, interval, atr=None, allow_early_retest=True):
+    """Return measurable entry-stage progress for a rejected long setup.
+
+    This is diagnostics only: it never changes the live entry gate. The score is
+    derived from observed BOS/retest/confirmation progress and confirmation-body
+    distance, not a hard-coded rejection value.
+    """
+    n = len(closes)
+    if n < 45 or len(opens) != n or len(highs) != n or len(lows) != n:
+        return {"near_miss_score": 0.0, "bos_confirmed": False, "retest_confirmed": False,
+                "confirmation_candle": False, "reason": "insufficient_bars"}
+    atr = float(atr or 0) or max(closes[-1] * 0.01, 1e-12)
+    price = closes[-1]
+    tol = max(atr * 0.18, price * 0.0015)
+    sweep = None
+    for i in range(n - 3, max(20, n - 10), -1):
+        prior_low = min(lows[max(0, i - 18):i])
+        if lows[i] < prior_low - tol * 0.15 and closes[i] > prior_low:
+            sweep = {"index": i, "level": prior_low}
+            break
+    bos = None
+    if sweep:
+        pre_high = max(highs[max(0, sweep["index"] - 18):sweep["index"]])
+        for i in range(sweep["index"] + 1, min(n - 1, sweep["index"] + 9) + 1):
+            if closes[i] > pre_high + tol * 0.10:
+                bos = {"index": i, "level": pre_high}
+                break
+    if bos is None:
+        lookback_high = max(highs[-18:-3])
+        for i in range(n - 3, n):
+            if closes[i] > lookback_high + tol * 0.10:
+                bos = {"index": i, "level": lookback_high}
+                break
+    if bos is None:
+        return {"near_miss_score": 0.0, "bos_confirmed": False, "retest_confirmed": False,
+                "confirmation_candle": False, "sweep_confirmed": bool(sweep), "reason": "no_bos"}
+
+    broken_level = bos["level"]
+    retest = None
+    for i in range(bos["index"] + 1, n):
+        if lows[i] <= broken_level + tol and closes[i] >= broken_level - tol * 0.10:
+            retest = {"index": i, "level": broken_level, "close": closes[i]}
+            break
+    if retest is None:
+        progress = 35.0
+        distance = max(0.0, _pct(price, broken_level))
+        return {"near_miss_score": round(progress, 1), "bos_confirmed": True, "retest_confirmed": False,
+                "confirmation_candle": False, "sweep_confirmed": bool(sweep),
+                "bos_level": broken_level, "price_vs_bos_pct": round(distance, 3),
+                "reason": "awaiting_retest"}
+
+    i = retest["index"]
+    candidates = []
+    if i + 1 < n:
+        o, h, l, c = opens[i + 1], highs[i + 1], lows[i + 1], closes[i + 1]
+        candidates.append(("next_candle", o, h, l, c, _body_strength(o, h, l, c), 0.35))
+    if allow_early_retest:
+        o, h, l, c = opens[i], highs[i], lows[i], closes[i]
+        candidates.append(("retest_candle", o, h, l, c, _body_strength(o, h, l, c), 0.45))
+    best = None
+    for name, o, h, l, c, body, threshold in candidates:
+        bullish = c > o and c >= broken_level
+        if best is None or body > best["body_strength"]:
+            best = {"name": name, "body_strength": body, "threshold": threshold,
+                    "bullish": bullish, "close": c}
+    body = float(best["body_strength"]) if best else 0.0
+    threshold = float(best["threshold"]) if best else 0.45
+    body_ratio = min(1.0, body / max(threshold, 1e-9))
+    direction_bonus = 1.0 if best and best["bullish"] else 0.0
+    # 70 points means BOS + retest; the remaining 30 points measure actual
+    # confirmation-body progress and direction. This is a ranking diagnostic,
+    # not a BUY threshold and not a probability estimate.
+    score = 70.0 + 30.0 * body_ratio * direction_bonus
+    return {"near_miss_score": round(min(100.0, score), 1), "bos_confirmed": True,
+            "retest_confirmed": True, "confirmation_candle": bool(best and best["bullish"] and body >= threshold),
+            "sweep_confirmed": bool(sweep), "bos_level": broken_level,
+            "retest_distance_pct": round(abs(_pct(retest["close"], broken_level)), 3),
+            "confirmation_body": round(body, 3), "confirmation_body_required": round(threshold, 3),
+            "confirmation_body_gap": round(max(0.0, threshold - body), 3),
+            "confirmation_direction_bullish": bool(best and best["bullish"]),
+            "reason": "confirmation_missing" if not (best and best["bullish"] and body >= threshold) else "confirmed"}
