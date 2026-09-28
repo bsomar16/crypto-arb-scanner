@@ -61,12 +61,17 @@ def evaluate_near_miss_outcome(rows, i, diagnostic, horizon, max_index=None):
 
 
 def _new_near_miss(before, after):
-    if len(after) <= len(before):
-        return None
-    old = {repr(x) for x in before}
-    for item in after:
-        if repr(item) not in old:
+    """Return a newly recorded diagnostic even when the capped list is full."""
+    before_ids = {x.get("event_id") for x in before if x.get("event_id") is not None}
+    for item in reversed(after):
+        event_id = item.get("event_id")
+        if event_id is not None and event_id not in before_ids:
             return item
+    if len(after) > len(before):
+        old = {repr(x) for x in before}
+        for item in after:
+            if repr(item) not in old:
+                return item
     return None
 
 
