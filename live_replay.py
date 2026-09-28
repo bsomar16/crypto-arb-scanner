@@ -111,7 +111,7 @@ def replay_symbol(symbol,interval,rows,trend_rows,start_i,end_i,cfg=None,require
                     shadow_horizon = max(1, horizon)
                     shadow = evaluate_near_miss_outcome(rows, i, diagnostic, shadow_horizon, max_index=end_i)
                     if not shadow["censored"] or not require_complete_outcome:
-                        audit.reject("near_miss_shadow_evaluated", interval=interval, details=shadow)
+                        audit.record_near_miss_shadow(shadow)
             i+=1
     return trades
 
