@@ -91,7 +91,7 @@ class BuySignalDedupeTests(unittest.TestCase):
                 "interval": "15m",
             }
         }
-        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 1000, active_coins=set())
+        fresh, updates = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
         self.assertEqual(len(fresh), 1)
         self.assertIn("GALA", updates)
 
