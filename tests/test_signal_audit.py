@@ -33,6 +33,13 @@ class SignalAuditTests(unittest.TestCase):
         self.assertEqual(summary["rejected"], 2)
         self.assertAlmostEqual(summary["qualification_rate_pct"], 33.33, places=2)
 
+    def test_near_miss_details_are_ranked_and_bounded(self):
+        audit = SignalAudit(near_miss_limit=2)
+        audit.reject("liquidity", interval="5m", details={"coin": "A", "near_miss_score": 70})
+        audit.reject("volume", interval="15m", details={"coin": "B", "near_miss_score": 90})
+        audit.reject("liquidity", interval="1h", details={"coin": "C", "near_miss_score": 80})
+        self.assertEqual([x["coin"] for x in audit.near_miss_snapshot()], ["B", "C"])
+
     def test_total_rejections_excludes_qualified(self):
         audit = SignalAudit()
         audit.reject("trend")
