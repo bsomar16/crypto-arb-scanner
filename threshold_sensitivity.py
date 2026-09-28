@@ -88,7 +88,8 @@ def run_sensitivity(cfg=None, symbols=None, intervals=None, variants=None):
     symbols = [str(x).upper() for x in (symbols or base.get("backtest_symbols") or
         ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE"])]
     intervals = [x for x in (intervals or base.get("backtest_intervals") or
-        [p["interval"] for p in STRATEGY_PROFILES.values()]) if x in STRATEGY_PROFILES.values() or x in {p["interval"] for p in STRATEGY_PROFILES.values()}]
+        [p["interval"] for p in STRATEGY_PROFILES.values()])
+        if x in {p["interval"] for p in STRATEGY_PROFILES.values()}]
     intervals = [x for x in intervals if x in {p["interval"] for p in STRATEGY_PROFILES.values()}]
 
     current_liquidity = float(base.get("buy_fast_min_hour_vol", 75000))
