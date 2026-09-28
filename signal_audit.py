@@ -1,29 +1,88 @@
 #!/usr/bin/env python3
-"""Thread-safe BUY-signal rejection accounting for diagnostics."""
+"""Thread-safe BUY-signal rejection accounting and diagnostic breakdowns."""
 from __future__ import annotations
-from collections import Counter
+
+from collections import Counter, defaultdict
 from threading import Lock
 
+
 class SignalAudit:
+    """Collect stage, interval, and optional setup diagnostics for one scan run."""
+
     def __init__(self):
         self._counts = Counter()
+        self._by_interval = defaultdict(Counter)
+        self._by_setup = defaultdict(Counter)
         self._lock = Lock()
 
-    def reject(self, stage):
+    def _record(self, stage, interval=None, setup=None):
+        stage = str(stage)
         with self._lock:
-            self._counts[str(stage)] += 1
+            self._counts[stage] += 1
+            if interval:
+                self._by_interval[str(interval)][stage] += 1
+            if setup:
+                self._by_setup[str(setup)][stage] += 1
 
-    def accept(self, stage="qualified"):
-        with self._lock:
-            self._counts[str(stage)] += 1
+    def reject(self, stage, interval=None, setup=None):
+        self._record(stage, interval=interval, setup=setup)
+
+    def accept(self, stage="qualified", interval=None, setup=None):
+        self._record(stage, interval=interval, setup=setup)
 
     def snapshot(self):
         with self._lock:
             return dict(sorted(self._counts.items()))
 
+    def interval_snapshot(self):
+        with self._lock:
+            return {
+                interval: dict(sorted(counts.items()))
+                for interval, counts in sorted(self._by_interval.items())
+            }
+
+    def setup_snapshot(self):
+        with self._lock:
+            return {
+                setup: dict(sorted(counts.items()))
+                for setup, counts in sorted(self._by_setup.items())
+            }
+
     def total_rejections(self):
         with self._lock:
             return sum(self._counts.values()) - self._counts.get("qualified", 0)
+
+    def total_attempts(self):
+        with self._lock:
+            return sum(self._counts.values())
+
+    def summary(self, scans=0, hits=0, fresh=0, selected=0):
+        with self._lock:
+            counts = dict(sorted(self._counts.items()))
+            intervals = {
+                k: dict(sorted(v.items()))
+                for k, v in sorted(self._by_interval.items())
+            }
+            setups = {
+                k: dict(sorted(v.items()))
+                for k, v in sorted(self._by_setup.items())
+            }
+        rejected = sum(counts.values()) - counts.get("qualified", 0)
+        qualified = counts.get("qualified", 0)
+        attempts = rejected + qualified
+        return {
+            "scans": int(scans),
+            "hits": int(hits),
+            "fresh": int(fresh),
+            "selected": int(selected),
+            "attempts": attempts,
+            "qualified": qualified,
+            "rejected": rejected,
+            "qualification_rate_pct": round(qualified / attempts * 100.0, 2) if attempts else 0.0,
+            "stages": counts,
+            "by_interval": intervals,
+            "by_setup": setups,
+        }
 
     def format_line(self):
         parts = [f"{k}={v}" for k, v in self.snapshot().items()]

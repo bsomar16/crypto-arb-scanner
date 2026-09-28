@@ -5,6 +5,7 @@ Modes: arb | daily | buy | price | backtest | portfolio | check | report | all
 """
 
 import concurrent.futures
+import json
 import os
 import sys
 import time
@@ -251,6 +252,23 @@ def _interval_due(interval, now=None):
     return False
 
 
+def _persist_buy_audit(audit, scans=0, hits=0, fresh=0, selected=0, candidates=0, discovery=0):
+    """Persist one diagnostic snapshot and a bounded append-only scan history."""
+    summary = audit.summary(scans=scans, hits=hits, fresh=fresh, selected=selected)
+    summary.update({
+        "deep_candidates": int(candidates),
+        "discovery_candidates": int(discovery),
+        "generated_at": now_s(),
+    })
+    save_json("state/buy_audit_latest.json", summary)
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open("state/buy_audit_history.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(summary, ensure_ascii=False) + "\\n")
+    except OSError as e:
+        log("BUY", "audit history write error:", e)
+    return summary
+
 def _format_hold_window(r):
     lo, hi = r.get("estimated_hold_min_hours"), r.get("estimated_hold_max_hours")
     if lo is None or hi is None:
@@ -471,17 +489,11 @@ def run_buy(token, chat_id, realtime_cache=None):
         r["star"] = r["coin"] in star
 
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
-    audit_snapshot = audit.snapshot()
-    audit_snapshot.update({
-        "scans": len(tasks),
-        "hits": len(hits),
-        "fresh": len(fresh),
-        "selected": len(selected),
-        "deep_candidates": len(cands),
-        "mtf_scans": len(tasks),
-        "generated_at": now_s(),
-    })
-    save_json("state/buy_audit_latest.json", audit_snapshot)
+    audit_snapshot = _persist_buy_audit(
+        audit,
+        scans=len(tasks), hits=len(hits), fresh=len(fresh), selected=len(selected),
+        candidates=len(cands), discovery=len(discovery_rows),
+    )
     if not selected and not fired_alerts:
         log("[BUY] no new signals")
         log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
@@ -511,17 +523,6 @@ def run_buy(token, chat_id, realtime_cache=None):
         "Signals are quality-gated; there is no daily BUY quota.",
     ])
     log(f"[BUY] {len(selected)} quality signals / {len(fresh)} qualified signals / {len(tasks)} deep scans")
-    audit_snapshot = audit.snapshot()
-    audit_snapshot.update({
-        "scans": len(tasks),
-        "hits": len(hits),
-        "fresh": len(fresh),
-        "selected": len(selected),
-        "deep_candidates": len(cands),
-        "mtf_scans": len(tasks),
-        "generated_at": now_s(),
-    })
-    save_json("state/buy_audit_latest.json", audit_snapshot)
     log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
 
     # Telegram delivery is the notification commit point. Do not persist a
