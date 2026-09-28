@@ -40,6 +40,20 @@ There is **no artificial daily BUY signal quota**. Every candidate that passes t
 
 The project treats an 80% precision objective as a **validation target only**, never as a guaranteed live win rate.
 
+## BUY signal observability
+
+Each BUY scan now records structured rejection-stage diagnostics without changing the signal thresholds or creating a daily BUY quota. The latest snapshot is written to `state/buy_audit_latest.json`; append-only scan history is written to `state/buy_audit_history.jsonl`.
+
+Diagnostics include:
+
+- total scans, qualified hits, fresh signals, and selected signals;
+- rejection counts by stage (liquidity, volume, trend, entry confirmation, target quality, adaptive thresholds, dedupe, etc.);
+- rejection breakdown by timeframe;
+- rejection breakdown by setup where setup context is available;
+- qualification rate for the current scan.
+
+This makes threshold changes measurable: a future recall optimization can identify exactly which gate is suppressing candidates and compare its historical OOS outcomes before changing it.
+
 ## Position and TP management
 
 Signals carry their technical SL/TP1/TP2/TP3 levels into paper position tracking.
