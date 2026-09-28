@@ -27,7 +27,7 @@ def _precision(rows):
     return wins / closed * 100.0 if closed else None
 
 
-def _run_variant(symbols, intervals, cfg, liquidity_floor, volume_floor, entry_policy):
+def _run_variant(symbols, intervals, cfg, liquidity_floor, volume_factor, entry_policy):
     results = []
     base = dict(cfg)
     for symbol in symbols:
@@ -46,6 +46,8 @@ def _run_variant(symbols, intervals, cfg, liquidity_floor, volume_floor, entry_p
             audit = SignalAudit()
             variant_cfg = deepcopy(base)
             variant_cfg["sensitivity_mode"] = True
+            profile_floor = next(p["min_vol_x"] for p in STRATEGY_PROFILES.values() if p["interval"] == interval)
+            volume_floor = profile_floor * float(volume_factor)
             trades = replay_symbol(
                 symbol, interval, rows, trend_rows, start, end, variant_cfg,
                 audit=audit, min_hour_vol=liquidity_floor,
@@ -91,20 +93,18 @@ def run_sensitivity(cfg=None, symbols=None, intervals=None, variants=None):
 
     current_liquidity = float(base.get("buy_fast_min_hour_vol", 75000))
     variants = variants or [
-        {"name": "baseline", "liquidity_floor": current_liquidity, "volume_floor": None, "entry_policy": "current"},
+        {"name": "baseline", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "current"},
         {"name": "liquidity_-20pct", "liquidity_floor": current_liquidity * 0.80, "volume_floor": None, "entry_policy": "current"},
         {"name": "liquidity_-40pct", "liquidity_floor": current_liquidity * 0.60, "volume_floor": None, "entry_policy": "current"},
-        {"name": "volume_-5pct", "liquidity_floor": current_liquidity, "volume_floor": 0.0, "entry_policy": "current"},
-        {"name": "no_early_retest", "liquidity_floor": current_liquidity, "volume_floor": None, "entry_policy": "no_early_retest"},
-        {"name": "sweep_required", "liquidity_floor": current_liquidity, "volume_floor": None, "entry_policy": "sweep_required"},
+        {"name": "volume_-5pct", "liquidity_floor": current_liquidity, "volume_factor": 0.95, "entry_policy": "current"},
+        {"name": "no_early_retest", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "no_early_retest"},
+        {"name": "sweep_required", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "sweep_required"},
     ]
     reports = []
     for variant in variants:
-        volume_floor = variant.get("volume_floor")
-        if volume_floor is None:
-            volume_floor = min(float(STRATEGY_PROFILES[k]["min_vol_x"]) for k in STRATEGY_PROFILES)
+        volume_factor = variant.get("volume_factor", 1.0)
         policy = ENTRY_POLICIES[str(variant.get("entry_policy", "current"))]
-        rows = _run_variant(symbols, intervals, base, float(variant["liquidity_floor"]), float(volume_floor), policy)
+        rows = _run_variant(symbols, intervals, base, float(variant["liquidity_floor"]), float(volume_factor), policy)
         reports.append(compare_variant(variant["name"], rows))
     baseline = reports[0] if reports else {}
     for report in reports:
