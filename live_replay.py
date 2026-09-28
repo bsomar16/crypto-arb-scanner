@@ -85,16 +85,24 @@ def evaluate_outcome(rows,i,signal,horizon,max_index=None):
     last=float(rows[end-1][4]); complete=end>=min(len(rows),i+1+horizon)
     return {"outcome":"EXPIRED","exit_i":end-1,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":end-1-i,"ret_pct":(last/entry-1)*100,"window_complete":complete,"censored":not complete}
 
-def replay_symbol(symbol,interval,rows,trend_rows,start_i,end_i,cfg=None,require_complete_outcome=True,audit=None):
+def replay_symbol(symbol,interval,rows,trend_rows,start_i,end_i,cfg=None,require_complete_outcome=True,audit=None,min_hour_vol=None,min_vol_x=None,entry_policy=None):
     cfg=dict(cfg or {}); profile=next(p for p in STRATEGY_PROFILES.values() if p["interval"]==interval)
     horizon=_bars_for_hold(interval,int(profile.get("hold_max_hours",24)))
     trades=[]; i=max(70,start_i); boundary=min(end_i,len(rows)-1)
     while i<boundary:
         window=rows[:i+1]; trend_window=[x for x in trend_rows if int(x[0])<=int(rows[i][0])]
         audit_before = audit.near_miss_snapshot() if audit is not None else []
-        signal=intraday_signal(symbol,interval=interval,limit=min(180,len(window)),min_vol_x=None,min_hour_vol=0,chg24=0,
+        policy = dict(entry_policy or {})
+        replay_cfg = {**cfg, "adaptive_thresholds_enabled": False, "target_optimization_enabled": False}
+        if policy:
+            replay_cfg["signal_require_retest"] = policy.get("require_retest", True)
+            replay_cfg["signal_require_sweep"] = policy.get("require_sweep", False)
+            replay_cfg["signal_allow_early_retest"] = policy.get("allow_early_retest", True)
+        signal=intraday_signal(symbol,interval=interval,limit=min(180,len(window)),
+            min_vol_x=min_vol_x,
+            min_hour_vol=float(cfg.get("buy_fast_min_hour_vol",75000) if min_hour_vol is None else min_hour_vol),chg24=0,
             min_potential_pct=float(cfg.get("signal_min_potential_pct",5)),max_potential_pct=float(cfg.get("signal_max_potential_pct",300)),
-            min_score=None,min_rr=None,cfg={**cfg,"adaptive_thresholds_enabled":False,"target_optimization_enabled":False},
+            min_score=None,min_rr=None,cfg=replay_cfg,
             historical_data=window,historical_trend_data=trend_window,record_history=False,audit=audit)
         if signal:
             result=evaluate_outcome(rows,i,signal,horizon,max_index=end_i)
