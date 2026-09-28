@@ -15,6 +15,7 @@ class SignalAudit:
         self._by_setup = defaultdict(Counter)
         self._near_misses = []
         self._near_miss_shadows = []
+        self._next_event_id = 0
         self._near_miss_limit = max(1, int(near_miss_limit))
         self._lock = Lock()
 
@@ -31,7 +32,9 @@ class SignalAudit:
         self._record(stage, interval=interval, setup=setup)
         if details:
             with self._lock:
+                self._next_event_id += 1
                 self._near_misses.append({
+                    "event_id": self._next_event_id,
                     "stage": str(stage),
                     "interval": str(interval) if interval else None,
                     "setup": str(setup) if setup else None,
