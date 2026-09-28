@@ -129,9 +129,10 @@ def _setup_type(price,resistance,support,e20,vol_ratio,macd_rising,rsi):
     return "MOMENTUM"
 
 
-def _audit_reject(audit, stage, coin=None, interval=None, setup=None):
+def _audit_reject(audit, stage, coin=None, interval=None, setup=None, details=None):
     if audit is not None:
-        audit.reject(stage, interval=interval, setup=setup)
+        payload = {"coin": coin, **(details or {})}
+        audit.reject(stage, interval=interval, setup=setup, details=payload)
     return None
 
 
@@ -166,7 +167,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         vols = [float(k[5]) for k in data]
         qvols = [float(k[7]) for k in data]
         if len(closes) < 70 or (min_hour_vol and sum(qvols[-4:]) < min_hour_vol):
-            return _audit_reject(audit, "liquidity", coin=coin, interval=interval)
+            return _audit_reject(audit, "liquidity", coin=coin, interval=interval, details={"hour_quote_volume": round(sum(qvols[-4:]), 2), "required_hour_quote_volume": float(min_hour_vol), "near_miss_score": min(100.0, 100.0 * sum(qvols[-4:]) / max(float(min_hour_vol), 1.0))})
 
         e9 = ind.ema(closes, 9)
         e20 = ind.ema(closes, 20)
@@ -180,7 +181,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         vol_ratio = recent_vol / base_vol if base_vol > 0 else 0
         strategy_min_vol_x = profile["min_vol_x"]
         if vol_ratio < strategy_min_vol_x:
-            return _audit_reject(audit, "volume", coin=coin, interval=interval)
+            return _audit_reject(audit, "volume", coin=coin, interval=interval, details={"volume_ratio": round(vol_ratio, 3), "required_volume_ratio": float(strategy_min_vol_x), "near_miss_score": min(100.0, 100.0 * vol_ratio / max(strategy_min_vol_x, 0.01))})
 
         resistance = max(highs[-21:-1])
         support = min(lows[-21:-1])
@@ -198,7 +199,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             require_sweep=False,
         )
         if not entry:
-            return _audit_reject(audit, "entry_confirmation", coin=coin, interval=interval)
+            return _audit_reject(audit, "entry_confirmation", coin=coin, interval=interval, details={"near_miss_score": 40.0})
         near_support = abs(price / support - 1) <= 0.012 if support else False
         setup = _setup_type(price, resistance, support, e20[-1], vol_ratio, macd_rising, r)
         if structure["choch"] and setup != "BREAKOUT":
