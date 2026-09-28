@@ -95,7 +95,7 @@ def run_sensitivity(cfg=None, symbols=None, intervals=None, variants=None):
     current_liquidity = float(base.get("buy_fast_min_hour_vol", 75000))
     variants = variants or [
         {"name": "baseline", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "current"},
-        {"name": "liquidity_-20pct", "liquidity_floor": current_liquidity * 0.80, "volume_floor": None, "entry_policy": "current"},
+        {"name": "liquidity_-20pct", "liquidity_floor": current_liquidity * 0.80, "entry_policy": "current"},
         {"name": "liquidity_-40pct", "liquidity_floor": current_liquidity * 0.60, "volume_floor": None, "entry_policy": "current"},
         {"name": "volume_-5pct", "liquidity_floor": current_liquidity, "volume_factor": 0.95, "entry_policy": "current"},
         {"name": "no_early_retest", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "no_early_retest"},
