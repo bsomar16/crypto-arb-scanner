@@ -14,6 +14,7 @@ class SignalAudit:
         self._by_interval = defaultdict(Counter)
         self._by_setup = defaultdict(Counter)
         self._near_misses = []
+        self._near_miss_shadows = []
         self._near_miss_limit = max(1, int(near_miss_limit))
         self._lock = Lock()
 
@@ -38,6 +39,14 @@ class SignalAudit:
                 })
                 self._near_misses.sort(key=lambda x: float(x.get("near_miss_score", 0.0)), reverse=True)
                 del self._near_misses[self._near_miss_limit:]
+
+    def record_near_miss_shadow(self, details):
+        with self._lock:
+            self._near_miss_shadows.append(dict(details))
+
+    def near_miss_shadow_snapshot(self):
+        with self._lock:
+            return [dict(item) for item in self._near_miss_shadows]
 
     def accept(self, stage="qualified", interval=None, setup=None):
         self._record(stage, interval=interval, setup=setup)
@@ -99,6 +108,7 @@ class SignalAudit:
             "by_interval": intervals,
             "by_setup": setups,
             "near_misses": [dict(item) for item in self._near_misses],
+            "near_miss_shadows": [dict(item) for item in self._near_miss_shadows],
         }
 
     def format_line(self):
