@@ -20,8 +20,8 @@ class EntryDiagnosticsTests(unittest.TestCase):
         lows[60] = 98.0
         closes[60] = 101.0
         highs[60] = 101.0
-        closes[61] = 102.0
-        highs[61] = 102.0
+        closes[67] = 102.0
+        highs[67] = 102.0
         out = entry_diagnostics(closes, highs, lows, opens, "5m", atr=1.0)
         self.assertTrue(out["bos_confirmed"])
         self.assertFalse(out["retest_confirmed"])
@@ -40,14 +40,14 @@ class EntryDiagnosticsTests(unittest.TestCase):
         closes[61] = 102.0
         highs[61] = 102.0
         # Retest of the BOS level, followed by a weak bearish candle.
-        lows[62] = 99.9
-        closes[62] = 101.0
-        opens[62] = 101.1
-        highs[62] = 101.2
-        opens[63] = 101.1
-        closes[63] = 100.8
-        highs[63] = 101.2
-        lows[63] = 100.7
+        lows[68] = 99.9
+        closes[68] = 101.0
+        opens[68] = 101.1
+        highs[68] = 101.2
+        opens[69] = 101.1
+        closes[69] = 100.8
+        highs[69] = 101.2
+        lows[69] = 100.7
         out = entry_diagnostics(closes, highs, lows, opens, "5m", atr=1.0)
         self.assertTrue(out["bos_confirmed"])
         self.assertTrue(out["retest_confirmed"])
