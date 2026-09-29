@@ -53,7 +53,8 @@ class EntryDiagnosticsTests(unittest.TestCase):
         self.assertTrue(out["retest_confirmed"])
         self.assertFalse(out["confirmation_candle"])
         self.assertGreaterEqual(out["near_miss_score"], 70.0)
-        self.assertGreater(out["confirmation_body_gap"], 0.0)
+        self.assertFalse(out["confirmation_direction_bullish"])
+        self.assertEqual(out["confirmation_body_gap"], 0.0)
         self.assertEqual(out["reason"], "confirmation_missing")
 
 
