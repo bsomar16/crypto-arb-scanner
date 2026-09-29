@@ -1,0 +1,44 @@
+name: oos-threshold-sensitivity
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'threshold_sensitivity.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'signal_audit.py'
+      - 'config.json'
+      - '.github/workflows/oos-threshold-sensitivity.yml'
+
+jobs:
+  sensitivity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run controlled OOS threshold sensitivity
+        run: |
+          python - <<'PY'
+          import json
+          from threshold_sensitivity import run_sensitivity, format_report
+
+          with open("config.json", encoding="utf-8") as fh:
+              cfg = json.load(fh)
+
+          report = run_sensitivity(cfg=cfg)
+          print(format_report(report))
+          with open("state/oos_threshold_sensitivity.json", "w", encoding="utf-8") as fh:
+              json.dump(report, fh, ensure_ascii=False, indent=2)
+          PY
+      - name: Upload OOS sensitivity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-threshold-sensitivity
+          path: state/oos_threshold_sensitivity.json
+          if-no-files-found: error
