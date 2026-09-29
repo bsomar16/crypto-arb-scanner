@@ -1,6 +1,17 @@
 name: oos-threshold-sensitivity
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'threshold_sensitivity.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'signal_audit.py'
+      - 'config.json'
+      - '.github/workflows/oos-threshold-sensitivity.yml'
   push:
     branches:
       - main
@@ -15,6 +26,7 @@ on:
 
 jobs:
   sensitivity:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'run/oos-threshold-study'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
