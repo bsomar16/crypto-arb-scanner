@@ -37,8 +37,8 @@ class EntryDiagnosticsTests(unittest.TestCase):
         lows[60] = 98.0
         closes[60] = 101.0
         highs[60] = 101.0
-        closes[61] = 102.0
-        highs[61] = 102.0
+        closes[67] = 102.0
+        highs[67] = 102.0
         # Retest of the BOS level, followed by a weak bearish candle.
         lows[68] = 99.9
         closes[68] = 101.0
