@@ -144,8 +144,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
     try:
         sensitivity_mode = bool((cfg or {}).get("sensitivity_mode", False))
         effective_min_vol_x = profile["min_vol_x"] if min_vol_x is None else (float(min_vol_x) if sensitivity_mode else max(float(min_vol_x), profile["min_vol_x"]))
-        effective_min_score = profile["min_score"] if min_score is None else max(float(min_score), profile["min_score"])
-        effective_min_rr = profile["min_rr"] if min_rr is None else max(float(min_rr), profile["min_rr"])
+        effective_min_score = profile["min_score"] if min_score is None else (float(min_score) if sensitivity_mode else max(float(min_score), profile["min_score"]))
+        effective_min_rr = profile["min_rr"] if min_rr is None else (float(min_rr) if sensitivity_mode else max(float(min_rr), profile["min_rr"]))
         data = historical_data if historical_data is not None else _fetch_klines(coin, interval, limit)
         if not data:
             return _audit_reject(audit, "data_fetch", coin=coin, interval=interval)
