@@ -90,7 +90,7 @@ def evaluate_outcome(rows,i,signal,horizon,max_index=None):
     last=float(rows[end-1][4]); complete=end>=min(len(rows),i+1+horizon)
     return {"outcome":"EXPIRED","exit_i":end-1,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":end-1-i,"ret_pct":(last/entry-1)*100,"window_complete":complete,"censored":not complete}
 
-def replay_symbol(symbol,interval,rows,trend_rows,start_i,end_i,cfg=None,require_complete_outcome=True,audit=None,min_hour_vol=None,min_vol_x=None,entry_policy=None):
+def replay_symbol(symbol,interval,rows,trend_rows,start_i,end_i,cfg=None,require_complete_outcome=True,audit=None,min_hour_vol=None,min_vol_x=None,min_score=None,min_rr=None,entry_policy=None):
     cfg=dict(cfg or {}); profile=next(p for p in STRATEGY_PROFILES.values() if p["interval"]==interval)
     horizon=_bars_for_hold(interval,int(profile.get("hold_max_hours",24)))
     trades=[]; i=max(70,start_i); boundary=min(end_i,len(rows)-1)
@@ -107,7 +107,7 @@ def replay_symbol(symbol,interval,rows,trend_rows,start_i,end_i,cfg=None,require
             min_vol_x=min_vol_x,
             min_hour_vol=float(cfg.get("buy_fast_min_hour_vol",75000) if min_hour_vol is None else min_hour_vol),chg24=0,
             min_potential_pct=float(cfg.get("signal_min_potential_pct",5)),max_potential_pct=float(cfg.get("signal_max_potential_pct",300)),
-            min_score=None,min_rr=None,cfg=replay_cfg,
+            min_score=min_score,min_rr=min_rr,cfg=replay_cfg,
             historical_data=window,historical_trend_data=trend_window,record_history=False,audit=audit)
         if signal:
             result=evaluate_outcome(rows,i,signal,horizon,max_index=end_i)
