@@ -51,7 +51,7 @@ def _run_variant(symbols, intervals, cfg, liquidity_floor, volume_factor, score_
             trades = replay_symbol(
                 symbol, interval, rows, trend_rows, start, end, variant_cfg,
                 audit=audit, min_hour_vol=liquidity_floor,
-                min_vol_x=volume_floor, min_score=score_floor, min_rr=rr_floor,
+                min_vol_x=volume_floor, min_score=score_floor.get(interval), min_rr=rr_floor.get(interval),
                 entry_policy=entry_policy,
             )
             summary = summarize(trades)
