@@ -27,7 +27,7 @@ def _precision(rows):
     return wins / closed * 100.0 if closed else None
 
 
-def _run_variant(symbols, intervals, cfg, liquidity_floor, volume_factor, entry_policy):
+def _run_variant(symbols, intervals, cfg, liquidity_floor, volume_factor, score_floor, rr_floor, entry_policy):
     results = []
     base = dict(cfg)
     for symbol in symbols:
@@ -51,7 +51,8 @@ def _run_variant(symbols, intervals, cfg, liquidity_floor, volume_factor, entry_
             trades = replay_symbol(
                 symbol, interval, rows, trend_rows, start, end, variant_cfg,
                 audit=audit, min_hour_vol=liquidity_floor,
-                min_vol_x=volume_floor, entry_policy=entry_policy,
+                min_vol_x=volume_floor, min_score=score_floor, min_rr=rr_floor,
+                entry_policy=entry_policy,
             )
             summary = summarize(trades)
             shadow = audit.near_miss_shadow_snapshot()
@@ -93,19 +94,27 @@ def run_sensitivity(cfg=None, symbols=None, intervals=None, variants=None):
     intervals = [x for x in intervals if x in {p["interval"] for p in STRATEGY_PROFILES.values()}]
 
     current_liquidity = float(base.get("buy_fast_min_hour_vol", 75000))
+    current_score = {p["interval"]: float(p["min_score"]) for p in STRATEGY_PROFILES.values()}
+    current_rr = {p["interval"]: float(p["min_rr"]) for p in STRATEGY_PROFILES.values()}
     variants = variants or [
-        {"name": "baseline", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "current"},
-        {"name": "liquidity_-20pct", "liquidity_floor": current_liquidity * 0.80, "entry_policy": "current"},
-        {"name": "liquidity_-40pct", "liquidity_floor": current_liquidity * 0.60, "volume_factor": 1.0, "entry_policy": "current"},
-        {"name": "volume_-5pct", "liquidity_floor": current_liquidity, "volume_factor": 0.95, "entry_policy": "current"},
-        {"name": "no_early_retest", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "no_early_retest"},
-        {"name": "sweep_required", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "sweep_required"},
+        {"name": "baseline", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": 0.0, "entry_policy": "current"},
+        {"name": "liquidity_-20pct", "liquidity_floor": current_liquidity * 0.80, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": 0.0, "entry_policy": "current"},
+        {"name": "liquidity_-40pct", "liquidity_floor": current_liquidity * 0.60, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": 0.0, "entry_policy": "current"},
+        {"name": "volume_-5pct", "liquidity_floor": current_liquidity, "volume_factor": 0.95, "score_delta": 0.0, "rr_delta": 0.0, "entry_policy": "current"},
+        {"name": "no_early_retest", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": 0.0, "entry_policy": "no_early_retest"},
+        {"name": "sweep_required", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": 0.0, "entry_policy": "sweep_required"},
+        {"name": "score_-2", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": -2.0, "rr_delta": 0.0, "entry_policy": "current"},
+        {"name": "score_-4", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": -4.0, "rr_delta": 0.0, "entry_policy": "current"},
+        {"name": "rr_-0.10", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": -0.10, "entry_policy": "current"},
+        {"name": "rr_-0.20", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": -0.20, "entry_policy": "current"},
     ]
     reports = []
     for variant in variants:
         volume_factor = variant.get("volume_factor", 1.0)
+        score_delta = float(variant.get("score_delta", 0.0))
+        rr_delta = float(variant.get("rr_delta", 0.0))
         policy = ENTRY_POLICIES[str(variant.get("entry_policy", "current"))]
-        rows = _run_variant(symbols, intervals, base, float(variant["liquidity_floor"]), float(volume_factor), policy)
+        rows = _run_variant(symbols, intervals, base, float(variant["liquidity_floor"]), float(volume_factor), {k: max(0.0, v + score_delta) for k, v in current_score.items()}, {k: max(0.0, v + rr_delta) for k, v in current_rr.items()}, policy)
         reports.append(compare_variant(variant["name"], rows))
     baseline = reports[0] if reports else {}
     for report in reports:
