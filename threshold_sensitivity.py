@@ -14,7 +14,7 @@ from signals import STRATEGY_PROFILES
 
 
 ENTRY_POLICIES = {
-    "current": {"require_retest": True, "require_sweep": False, "allow_early_retest": True},
+    "current": {"require_retest": True, "require_sweep": False, "allow_early_retest": False},
     "no_early_retest": {"require_retest": True, "require_sweep": False, "allow_early_retest": False},
     "sweep_required": {"require_retest": True, "require_sweep": True, "allow_early_retest": True},
     "retest_optional": {"require_retest": False, "require_sweep": False, "allow_early_retest": True},
@@ -96,7 +96,7 @@ def run_sensitivity(cfg=None, symbols=None, intervals=None, variants=None):
     variants = variants or [
         {"name": "baseline", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "current"},
         {"name": "liquidity_-20pct", "liquidity_floor": current_liquidity * 0.80, "entry_policy": "current"},
-        {"name": "liquidity_-40pct", "liquidity_floor": current_liquidity * 0.60, "volume_floor": None, "entry_policy": "current"},
+        {"name": "liquidity_-40pct", "liquidity_floor": current_liquidity * 0.60, "volume_factor": 1.0, "entry_policy": "current"},
         {"name": "volume_-5pct", "liquidity_floor": current_liquidity, "volume_factor": 0.95, "entry_policy": "current"},
         {"name": "no_early_retest", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "no_early_retest"},
         {"name": "sweep_required", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "entry_policy": "sweep_required"},
