@@ -68,6 +68,18 @@ def compare_variant(label, results):
     wins = sum(r["summary"]["wins"] for r in results)
     detected = sum(r["summary"]["signals"] for r in results)
     rejected = sum(sum(v for k, v in r["audit"].items() if k != "qualified") for r in results)
+    by_interval = {}
+    for row in results:
+        interval = str(row.get("interval") or "unknown")
+        s = row["summary"]
+        bucket = by_interval.setdefault(interval, {"detected_signals": 0, "closed": 0, "wins": 0, "rejected": 0})
+        bucket["detected_signals"] += int(s.get("signals", 0))
+        bucket["closed"] += int(s.get("closed", 0))
+        bucket["wins"] += int(s.get("wins", 0))
+        bucket["rejected"] += sum(v for k, v in row["audit"].items() if k != "qualified")
+    for bucket in by_interval.values():
+        bucket["losses"] = max(0, bucket["closed"] - bucket["wins"])
+        bucket["precision_pct"] = round(bucket["wins"] / bucket["closed"] * 100.0, 2) if bucket["closed"] else None
     return {
         "variant": label,
         "detected_signals": detected,
@@ -76,6 +88,7 @@ def compare_variant(label, results):
         "losses": max(0, closed - wins),
         "precision_pct": round(wins / closed * 100.0, 2) if closed else None,
         "rejected": rejected,
+        "by_interval": by_interval,
     }
 
 
