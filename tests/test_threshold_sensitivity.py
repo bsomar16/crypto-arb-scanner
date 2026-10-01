@@ -21,6 +21,8 @@ class ThresholdSensitivityTests(unittest.TestCase):
         self.assertEqual(out["wins"], 8)
         self.assertEqual(out["precision_pct"], 80.0)
         self.assertEqual(out["rejected"], 2)
+        self.assertIn("unknown", out["by_interval"])
+        self.assertEqual(out["by_interval"]["unknown"]["precision_pct"], 80.0)
 
 
 if __name__ == "__main__":
