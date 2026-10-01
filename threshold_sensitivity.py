@@ -18,6 +18,7 @@ ENTRY_POLICIES = {
     "no_early_retest": {"require_retest": True, "require_sweep": False, "allow_early_retest": False},
     "sweep_required": {"require_retest": True, "require_sweep": True, "allow_early_retest": True},
     "retest_optional": {"require_retest": False, "require_sweep": False, "allow_early_retest": True},
+    "retest_optional_no_early": {"require_retest": False, "require_sweep": False, "allow_early_retest": False},
 }
 
 
@@ -107,6 +108,8 @@ def run_sensitivity(cfg=None, symbols=None, intervals=None, variants=None):
         {"name": "score_-4", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": -4.0, "rr_delta": 0.0, "entry_policy": "current"},
         {"name": "rr_-0.10", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": -0.10, "entry_policy": "current"},
         {"name": "rr_-0.20", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": -0.20, "entry_policy": "current"},
+        {"name": "retest_optional", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": 0.0, "entry_policy": "retest_optional"},
+        {"name": "retest_optional_no_early", "liquidity_floor": current_liquidity, "volume_factor": 1.0, "score_delta": 0.0, "rr_delta": 0.0, "entry_policy": "retest_optional_no_early"},
     ]
     reports = []
     for variant in variants:
