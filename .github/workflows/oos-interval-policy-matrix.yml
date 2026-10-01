@@ -1,0 +1,61 @@
+name: oos-interval-policy-matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'threshold_sensitivity.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
+      - '.github/workflows/oos-interval-policy-matrix.yml'
+
+jobs:
+  interval:
+    name: OOS ${{ matrix.interval }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        interval: [5m, 15m, 1h, 4h, 1d, 1w]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run interval-specific OOS policy study
+        env:
+          INTERVAL: ${{ matrix.interval }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from threshold_sensitivity import run_sensitivity
+          interval = os.environ["INTERVAL"]
+          with open("config.json", encoding="utf-8") as fh:
+              cfg = json.load(fh)
+          floor = float(cfg.get("buy_fast_min_hour_vol", 75000))
+          variants = [
+              {"name":"baseline","liquidity_floor":floor,"volume_factor":1.0,"score_delta":0.0,"rr_delta":0.0,"entry_policy":"current"},
+              {"name":"retest_optional","liquidity_floor":floor,"volume_factor":1.0,"score_delta":0.0,"rr_delta":0.0,"entry_policy":"retest_optional"},
+              {"name":"score_-2","liquidity_floor":floor,"volume_factor":1.0,"score_delta":-2.0,"rr_delta":0.0,"entry_policy":"current"},
+              {"name":"rr_-0.10","liquidity_floor":floor,"volume_factor":1.0,"score_delta":0.0,"rr_delta":-0.10,"entry_policy":"current"},
+          ]
+          report = run_sensitivity(cfg=cfg, intervals=[interval], variants=variants)
+          report["study_interval"] = interval
+          os.makedirs("state", exist_ok=True)
+          path=f"state/oos_interval_{interval}.json"
+          with open(path,"w",encoding="utf-8") as fh:
+              json.dump(report, fh, ensure_ascii=False, indent=2)
+          for r in report["variants"]:
+              print(interval, r["variant"], "signals=",r["detected_signals"],"closed=",r["closed"],"wins=",r["wins"],"losses=",r["losses"],"precision=",r["precision_pct"],"delta_signals=",r.get("delta_signals_vs_baseline"),"delta_precision_pp=",r.get("delta_precision_pp_vs_baseline"))
+          PY
+      - name: Upload interval OOS report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-interval-${{ matrix.interval }}
+          path: state/oos_interval_${{ matrix.interval }}.json
+          if-no-files-found: error
