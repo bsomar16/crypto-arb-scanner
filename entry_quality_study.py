@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Research-only OOS study of 4h entry-quality components.
+"""Research-only OOS study of 4h entry-quality components and interactions.
 
 This never changes production BUY rules. It replays the current 4h live engine,
 then applies selective post-signal filters to the same OOS trades so feature
@@ -25,10 +25,22 @@ VARIANTS = {
     "entry_quality_ge_85": lambda r: float(r.get("entry_quality", 0)) >= 85,
     "confirmation_body_ge_055": lambda r: float(r.get("confirmation_body", 0)) >= 0.55,
     "extension_le_2pct": lambda r: float(r.get("entry_extension_pct", 999)) <= 2.0,
+    "extension_le_3pct": lambda r: float(r.get("entry_extension_pct", 999)) <= 3.0,
+    "extension_le_4pct": lambda r: float(r.get("entry_extension_pct", 999)) <= 4.0,
     "order_block_bullish": lambda r: bool((r.get("order_block") or {}).get("bullish")),
     "zero_inverse_bullish": lambda r: bool((r.get("zero_inverse") or {}).get("bullish_reversal"))
         or bool((r.get("zero_inverse") or {}).get("bullish_reclaim")),
     "volatility_expanding": lambda r: (r.get("volatility") or {}).get("state") == "EXPANDING",
+    "extension_2_order_block": lambda r: float(r.get("entry_extension_pct", 999)) <= 2.0
+        and bool((r.get("order_block") or {}).get("bullish")),
+    "extension_3_order_block": lambda r: float(r.get("entry_extension_pct", 999)) <= 3.0
+        and bool((r.get("order_block") or {}).get("bullish")),
+    "extension_4_order_block": lambda r: float(r.get("entry_extension_pct", 999)) <= 4.0
+        and bool((r.get("order_block") or {}).get("bullish")),
+    "score_55_extension_2": lambda r: float(r.get("score", 0)) >= 55
+        and float(r.get("entry_extension_pct", 999)) <= 2.0,
+    "score_55_extension_3": lambda r: float(r.get("score", 0)) >= 55
+        and float(r.get("entry_extension_pct", 999)) <= 3.0,
     "entry_quality_80_order_block": lambda r: float(r.get("entry_quality", 0)) >= 80
         and bool((r.get("order_block") or {}).get("bullish")),
     "entry_quality_80_expanding": lambda r: float(r.get("entry_quality", 0)) >= 80
@@ -96,7 +108,7 @@ def main():
 
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "method": "current live-engine 4h replay, same OOS window, post-signal component filters",
+        "method": "current live-engine 4h replay, same OOS window, post-signal component filters and interactions",
         "historical_only": True,
         "warning": "Descriptive OOS evidence only; no future-performance guarantee. Filters are research candidates, not production rules.",
         "baseline": baseline,
