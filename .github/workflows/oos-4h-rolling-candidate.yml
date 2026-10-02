@@ -1,0 +1,31 @@
+name: oos-4h-rolling-candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'oos_4h_rolling_candidate.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
+      - '.github/workflows/oos-4h-rolling-candidate.yml'
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run rolling 4h OOS candidate study
+        run: python oos_4h_rolling_candidate.py
+      - name: Upload rolling 4h OOS report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-rolling-candidate
+          path: state/oos_4h_rolling_candidate.json
+          if-no-files-found: error
