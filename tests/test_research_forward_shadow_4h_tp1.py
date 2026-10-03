@@ -1,5 +1,5 @@
 import unittest
-from research_forward_shadow_4h_tp1 import CANDIDATES, HOLD_MAX_HOURS, candidate_matches
+from research_forward_shadow_4h_tp1 import CANDIDATES, HOLD_MAX_HOURS, candidate_matches, research_readiness
 
 class TP1ShadowTests(unittest.TestCase):
     def test_frozen_candidates(self):
@@ -19,3 +19,16 @@ class TP1ShadowTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+
+class TP1ReadinessTests(unittest.TestCase):
+    def test_research_readiness_requires_sample_and_matches_baseline(self):
+        summaries={
+            "baseline":{"closed_decisive":20,"sample_ready":True,"precision_pct":60.0},
+            "structure_ge_50":{"closed_decisive":20,"sample_ready":True,"precision_pct":65.0},
+            "base_and_structure_ge_50":{"closed_decisive":19,"sample_ready":False,"precision_pct":70.0},
+        }
+        readiness=research_readiness(summaries)
+        self.assertTrue(readiness["structure_ge_50"]["forward_review_ready"])
+        self.assertFalse(readiness["base_and_structure_ge_50"]["forward_review_ready"])
+        self.assertEqual(readiness["structure_ge_50"]["delta_vs_baseline_pp"],5.0)

@@ -46,9 +46,41 @@ def save(s:dict[str,Any]):
     os.replace(tmp,STATE_PATH)
 
 def summary(rows:list[dict[str,Any]],candidate:str)->dict[str,Any]:
-    rs=[p for p in rows if p.get("candidate")==candidate]; closed=[p for p in rs if p.get("status")=="CLOSED" and p.get("outcome") in {"WIN","LOSS"}]
+    rs=[p for p in rows if p.get("candidate")==candidate]
+    closed=[p for p in rs if p.get("status")=="CLOSED" and p.get("outcome") in {"WIN","LOSS"}]
     wins=sum(p.get("outcome")=="WIN" for p in closed)
-    return {"tracked":len(rs),"open":sum(p.get("status")=="OPEN" for p in rs),"closed_decisive":len(closed),"wins":wins,"losses":len(closed)-wins,"expired":sum(p.get("outcome")=="EXPIRED" for p in rs),"precision_pct":round(100*wins/len(closed),2) if closed else None}
+    return {
+        "tracked":len(rs),
+        "open":sum(p.get("status")=="OPEN" for p in rs),
+        "closed_decisive":len(closed),
+        "wins":wins,
+        "losses":len(closed)-wins,
+        "expired":sum(p.get("outcome")=="EXPIRED" for p in rs),
+        "precision_pct":round(100*wins/len(closed),2) if closed else None,
+        "sample_ready":len(closed)>=20,
+    }
+
+def research_readiness(summaries:dict[str,dict[str,Any]])->dict[str,dict[str,Any]]:
+    baseline=summaries.get("baseline",{})
+    baseline_precision=baseline.get("precision_pct")
+    out={}
+    for candidate, metrics in summaries.items():
+        precision=metrics.get("precision_pct")
+        out[candidate]={
+            "sample_ready":bool(metrics.get("sample_ready")),
+            "decisive_outcomes":int(metrics.get("closed_decisive",0) or 0),
+            "delta_vs_baseline_pp":(
+                round(float(precision)-float(baseline_precision),2)
+                if precision is not None and baseline_precision is not None else None
+            ),
+            "forward_review_ready":bool(
+                metrics.get("sample_ready")
+                and precision is not None
+                and baseline_precision is not None
+                and float(precision) >= float(baseline_precision)
+            ),
+        }
+    return out
 
 def run_once(cfg:dict[str,Any],state:dict[str,Any])->dict[str,Any]:
     positions=list(state.get("positions") or []); cache={}
@@ -72,7 +104,8 @@ def run_once(cfg:dict[str,Any],state:dict[str,Any])->dict[str,Any]:
             positions.append({"position_id":pid,"candidate":candidate,"status":"OPEN","outcome_source":"forward_shadow_tp1","exit_policy":"TP1","opened_at":datetime.now(timezone.utc).isoformat(timespec="seconds"),"coin":symbol,"interval":INTERVAL,"candle_open_time":ct,"entry":float(sig["entry"]),"stop":float(sig["stop"]),"t1":float(sig["t1"]),"score":float(sig["score"]),"structure_score":float(sig.get("structure_score",0) or 0),"expansion_state":sig.get("expansion_state"),"mfe_pct":0.0,"mae_pct":0.0})
             new+=1
     state.update({"positions":positions,"last_run_at":datetime.now(timezone.utc).isoformat(timespec="seconds"),"runs":int(state.get("runs",0) or 0)+1,"summaries":{c:summary(positions,c) for c in CANDIDATES}})
-    return {"new_positions":new,"summaries":state["summaries"]}
+    state["research_readiness"]=research_readiness(state["summaries"])
+    return {"new_positions":new,"summaries":state["summaries"],"research_readiness":state["research_readiness"]}
 
 def main():
     with open("config.json",encoding="utf-8") as f: cfg=json.load(f)
