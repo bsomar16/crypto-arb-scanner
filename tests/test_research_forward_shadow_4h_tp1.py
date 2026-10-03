@@ -17,10 +17,6 @@ class TP1ShadowTests(unittest.TestCase):
         self.assertTrue(candidate_matches(signal,"base_and_structure_ge_50"))
         self.assertTrue(candidate_matches(signal,"non_expansion_and_structure_ge_50"))
 
-if __name__=="__main__":
-    unittest.main()
-
-
 class TP1ReadinessTests(unittest.TestCase):
     def test_research_readiness_requires_sample_and_matches_baseline(self):
         summaries={
@@ -32,3 +28,6 @@ class TP1ReadinessTests(unittest.TestCase):
         self.assertTrue(readiness["structure_ge_50"]["forward_review_ready"])
         self.assertFalse(readiness["base_and_structure_ge_50"]["forward_review_ready"])
         self.assertEqual(readiness["structure_ge_50"]["delta_vs_baseline_pp"],5.0)
+
+if __name__=="__main__":
+    unittest.main()
