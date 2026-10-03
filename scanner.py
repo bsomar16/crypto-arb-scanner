@@ -236,11 +236,33 @@ def _rank_trade_candidates(hits, cfg):
     return scored
 
 
-def _interval_due(interval, now=None):
+def _interval_due(interval, now=None, last_scan_ts=None, schedule_minutes=None):
+    """Return whether an interval is due without depending on an exact wall-clock slot.
+
+    GitHub Actions scheduled runs can be delayed, so slot-only logic can silently
+    skip 1h/4h/1d/1w scans. Persisted last-scan timestamps make the configured
+    cadence tolerant of delayed or queued workflow runs.
+    """
     from datetime import datetime, timezone
     now = now or datetime.now(timezone.utc)
     if interval in ("5m", "15m"):
         return True
+    default_minutes = {
+        "1h": 30,
+        "4h": 60,
+        "1d": 240,
+        "1w": 720,
+    }
+    period = float((schedule_minutes or {}).get(interval, default_minutes.get(interval, 0)) or 0)
+    if period <= 0:
+        return False
+    if last_scan_ts is not None:
+        try:
+            return (now.timestamp() - float(last_scan_ts)) >= period * 60.0
+        except (TypeError, ValueError):
+            pass
+    # First run preserves the old slot behavior so startup does not launch every
+    # long-horizon scan at once.
     if interval == "1h":
         return now.minute < 15
     if interval == "4h":
@@ -250,6 +272,14 @@ def _interval_due(interval, now=None):
     if interval == "1w":
         return now.minute < 15 and now.hour == 0 and now.weekday() == 0
     return False
+
+
+def _load_buy_interval_state():
+    return load_json("state/buy_interval_state.json", {}) or {}
+
+
+def _save_buy_interval_state(state):
+    save_json("state/buy_interval_state.json", state)
 
 
 def _persist_buy_audit(audit, scans=0, hits=0, fresh=0, selected=0, candidates=0, discovery=0):
@@ -398,7 +428,20 @@ def run_buy(token, chat_id, realtime_cache=None):
         cands = cands[:max(1, int(cfg.get("realtime_monitor_candidates", 25)))]
     else:
         cands = cands[:max(deep_n, len(star))]
-    tasks = [(sym, interval) for interval in intervals if _interval_due(interval) for sym in cands]
+    interval_state = _load_buy_interval_state()
+    schedule_minutes = cfg.get("buy_interval_schedule_minutes", {}) or {}
+    now_dt = datetime.now(timezone.utc)
+    due_intervals = [
+        interval
+        for interval in intervals
+        if _interval_due(
+            interval,
+            now=now_dt,
+            last_scan_ts=interval_state.get(interval),
+            schedule_minutes=schedule_minutes,
+        )
+    ]
+    tasks = [(sym, interval) for interval in due_intervals for sym in cands]
 
     audit = SignalAudit()
 
@@ -489,6 +532,14 @@ def run_buy(token, chat_id, realtime_cache=None):
         r["star"] = r["coin"] in star
 
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
+    # Record completed interval scans independently of signal qualification.
+    # A delayed Actions run must not cause the next run to rescan the same
+    # interval repeatedly, but an interval skipped by a failed run remains due.
+    completed_at = now_dt.timestamp()
+    for interval in due_intervals:
+        interval_state[interval] = completed_at
+    if due_intervals:
+        _save_buy_interval_state(interval_state)
     audit_snapshot = _persist_buy_audit(
         audit,
         scans=len(tasks), hits=len(hits), fresh=len(fresh), selected=len(selected),
