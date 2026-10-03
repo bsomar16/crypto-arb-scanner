@@ -5,6 +5,9 @@ The production 4h signal engine is frozen. This study evaluates the
 predeclared entry candidates under a single frozen TP1 exit policy across
 five sequential OOS windows and the same 20-symbol SPOT universe.
 No production rule is changed and no threshold search is performed.
+
+This run marker intentionally changes only research metadata so the frozen
+study executes against the current main branch for a fresh reproducibility check.
 """
 from __future__ import annotations
 
