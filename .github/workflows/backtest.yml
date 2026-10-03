@@ -38,7 +38,17 @@ jobs:
             echo "No backtest-stat changes."
           else
             git commit -m "chore: refresh historical backtest stats [skip ci]"
-            git push
+            for attempt in 1 2 3; do
+              if git push origin HEAD:main; then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "Unable to publish backtest stats after 3 attempts."
+                exit 1
+              fi
+              git fetch origin main
+              git rebase origin/main
+            done
           fi
       - name: Upload backtest report
         uses: actions/upload-artifact@v4
