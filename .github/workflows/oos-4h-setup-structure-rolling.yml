@@ -1,0 +1,40 @@
+name: Research: rolling 4h setup-structure validation
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "oos_4h_setup_structure_rolling.py"
+      - ".github/workflows/oos-4h-setup-structure-rolling.yml"
+      - "signals.py"
+      - "entry_engine.py"
+      - "live_replay.py"
+      - "signal_audit.py"
+      - "config.json"
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run frozen rolling OOS study
+        run: python oos_4h_setup_structure_rolling.py > oos_4h_setup_structure_rolling.out
+      - name: Validate report
+        run: python - <<'PY'
+import json
+with open("state/oos_4h_setup_structure_rolling.json", encoding="utf-8") as f:
+    x=json.load(f)
+assert x["historical_only"] is True
+assert x["hypothesis_policy"].startswith("frozen")
+assert "baseline" in x["candidates"]
+assert len(x["windows"]) == 3
+print("validated rolling setup/structure report")
+PY
+      - name: Package report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-setup-structure-rolling
+          path: state/oos_4h_setup_structure_rolling.json
