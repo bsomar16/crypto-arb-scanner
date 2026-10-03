@@ -100,6 +100,8 @@ DEFAULTS = {
     "shadow_trading_enabled": False,
     "shadow_notional_usdt": 300.0,
     "shadow_state_path": "state/shadow_trades.jsonl",
+    "shadow_4h_structure_candidate_enabled": False,
+    "shadow_4h_structure_state_path": "state/shadow_4h_structure.jsonl",
 }
 
 def load_cfg():
@@ -409,12 +411,16 @@ def run_buy(token, chat_id, realtime_cache=None):
 
     t24 = fetch_binance_24h()
     q = crypto_quote(t24)
+    current_prices = {}
     chg = {}
     for x in t24:
         s = x.get("symbol", "")
         if s.endswith("USDT") and s != "USDTUSDT":
             try:
-                chg[s[:-4]] = float(x.get("priceChangePercent", 0))
+                symbol = s[:-4]
+            chg[symbol] = float(x.get("priceChangePercent", 0))
+            if x.get("lastPrice") is not None:
+                current_prices[symbol] = float(x.get("lastPrice"))
             except (ValueError, TypeError):
                 pass
 
@@ -545,6 +551,32 @@ def run_buy(token, chat_id, realtime_cache=None):
         scans=len(tasks), hits=len(hits), fresh=len(fresh), selected=len(selected),
         candidates=len(cands), discovery=len(discovery_rows),
     )
+    # Research-only forward shadow: test the OOS-promising 4h structure>=50
+    # candidate without changing production qualification, ranking, Telegram,
+    # positions, or execution.
+    if bool(cfg.get("shadow_4h_structure_candidate_enabled", False)):
+        candidate_signals = [
+            r for r in selected
+            if str(r.get("interval", "")) == "4h"
+            and float(r.get("structure_score", 0) or 0) >= 50.0
+        ]
+        try:
+            shadow_candidate = shadow_trading.run_once(
+                candidate_signals,
+                lambda coin: current_prices.get(str(coin).upper()),
+                cfg,
+                path=str(cfg.get("shadow_4h_structure_state_path", "state/shadow_4h_structure.jsonl")),
+                variant="structure_ge_50",
+            )
+            log(
+                "SHADOW-4H",
+                f"candidate={len(candidate_signals)} "
+                f"opened={shadow_candidate.get('opened', 0)} "
+                f"closed={shadow_candidate.get('closed', 0)}",
+            )
+        except Exception as e:
+            log("SHADOW-4H", "candidate shadow error:", e)
+
     if not selected and not fired_alerts:
         log("[BUY] no new signals")
         log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
