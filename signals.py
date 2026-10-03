@@ -180,7 +180,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         recent_vol = sum(vols[-2:]) / 2
         base_vol = sum(vols[-22:-2]) / 20
         vol_ratio = recent_vol / base_vol if base_vol > 0 else 0
-        strategy_min_vol_x = profile["min_vol_x"]
+        strategy_min_vol_x = effective_min_vol_x
         if vol_ratio < strategy_min_vol_x:
             return _audit_reject(audit, "volume", coin=coin, interval=interval, details={"volume_ratio": round(vol_ratio, 3), "required_volume_ratio": float(strategy_min_vol_x), "near_miss_score": min(100.0, 100.0 * vol_ratio / max(strategy_min_vol_x, 0.01))})
 
