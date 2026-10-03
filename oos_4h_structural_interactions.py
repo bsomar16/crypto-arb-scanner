@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Research-only rolling OOS validation of predefined 4h structural/setup/regime interactions."""
+# Trigger a fresh post-merge Actions run for the five-window study.
 from __future__ import annotations
 import json
 from copy import deepcopy
