@@ -1,0 +1,29 @@
+name: oos-4h-shadow-promotion-report
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'research_4h_shadow_promotion.py'
+      - 'research_forward_shadow_4h.py'
+      - 'state/forward_shadow_4h.json'
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build research promotion report
+        run: python research_4h_shadow_promotion.py
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-shadow-promotion-report
+          path: state/forward_shadow_4h_promotion_report.json
+          if-no-files-found: error
+          retention-days: 30
