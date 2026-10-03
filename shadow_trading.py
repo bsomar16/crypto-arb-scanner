@@ -106,10 +106,22 @@ def run_once(signals: list[dict[str, Any]], price_fn: Callable[[str], float | No
     cfg = cfg or {}
     notional = float(cfg.get("shadow_notional_usdt", 300.0))
     opened = []
+    active_positions = active(path)
+    active_keys = {
+        (str(pos.get("coin", "")).upper(), str(pos.get("shadow_variant", "baseline")))
+        for pos in active_positions.values()
+    }
     for signal in signals or []:
         if str(signal.get("rating", "")).upper() not in {"BUY", "CONFIRMED BUY", "CONFIRMED_BUY"}:
             continue
-        opened.append(open_trade(signal, price_fn(str(signal.get("coin", ""))), notional, path, variant=variant))
+        key = (str(signal.get("coin", "")).upper(), str(variant))
+        if key in active_keys:
+            continue
+        price = price_fn(str(signal.get("coin", "")))
+        if price is None or float(price) <= 0:
+            continue
+        opened.append(open_trade(signal, price, notional, path, variant=variant))
+        active_keys.add(key)
 
     closed = []
     for pid, pos in active(path).items():
