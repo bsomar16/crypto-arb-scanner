@@ -42,7 +42,8 @@ def read(path: str = PATH) -> list[dict[str, Any]]:
 
 
 def open_trade(signal: dict[str, Any], price: float | None = None,
-               notional_usdt: float = 300.0, path: str = PATH) -> dict[str, Any]:
+               notional_usdt: float = 300.0, path: str = PATH,
+               variant: str = "baseline") -> dict[str, Any]:
     """Record a simulated entry; no exchange action occurs."""
     entry = float(price if price is not None else signal.get("entry", signal.get("price", 0)))
     if entry <= 0:
@@ -50,6 +51,7 @@ def open_trade(signal: dict[str, Any], price: float | None = None,
     row = {
         "event": "OPEN",
         "outcome_source": "shadow",
+        "shadow_variant": str(variant),
         "position_id": f"shadow-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
         "ts": _now(),
         "coin": str(signal.get("coin", "")).upper(),
@@ -98,7 +100,8 @@ def active(path: str = PATH) -> dict[str, dict[str, Any]]:
 
 
 def run_once(signals: list[dict[str, Any]], price_fn: Callable[[str], float | None],
-             cfg: dict[str, Any] | None = None, path: str = PATH) -> dict[str, Any]:
+             cfg: dict[str, Any] | None = None, path: str = PATH,
+             variant: str = "baseline") -> dict[str, Any]:
     """Open qualified signals and update existing shadow positions from prices."""
     cfg = cfg or {}
     notional = float(cfg.get("shadow_notional_usdt", 300.0))
@@ -106,7 +109,7 @@ def run_once(signals: list[dict[str, Any]], price_fn: Callable[[str], float | No
     for signal in signals or []:
         if str(signal.get("rating", "")).upper() not in {"BUY", "CONFIRMED BUY", "CONFIRMED_BUY"}:
             continue
-        opened.append(open_trade(signal, price_fn(str(signal.get("coin", ""))), notional, path))
+        opened.append(open_trade(signal, price_fn(str(signal.get("coin", ""))), notional, path, variant=variant))
 
     closed = []
     for pid, pos in active(path).items():
