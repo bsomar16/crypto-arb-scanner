@@ -26,7 +26,9 @@ def structure(r):
     return float(r.get("structure_score", 0))
 
 def setup(r):
-    return str(r.get("setup") or "").upper()
+    # Canonical live-engine field is setup_type; keep setup as a legacy fallback
+    # so historical rows produced by older replay code remain analyzable.
+    return str(r.get("setup_type") or r.get("setup") or "").upper()
 
 def expansion(r):
     return str(r.get("expansion_state") or "").upper()
