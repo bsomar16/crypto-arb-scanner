@@ -34,7 +34,7 @@ def main():
  for name,start,end in WINDOWS:
   trades=[]
   for symbol in SYMBOLS:
-   rows=fetch_history(symbol,INTERVAL,int(cfg.get("backtest_bars",4500)))
+   rows=fetch_history(symbol,INTERVAL,max(4500,int(cfg.get("backtest_bars",4500))))
    trend=fetch_history(symbol,"1d",max(500,int(cfg.get("backtest_bars",3000))//8))
    if len(rows)<end: continue
    audit=SignalAudit()
