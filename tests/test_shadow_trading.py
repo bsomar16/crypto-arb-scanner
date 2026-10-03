@@ -14,6 +14,7 @@ class ShadowTradingTests(unittest.TestCase):
             row = shadow_trading.open_trade(self.signal(), price=100, path=f.name)
             self.assertEqual(row["outcome_source"], "shadow")
             self.assertEqual(row["status"], "OPEN")
+            self.assertEqual(row["shadow_variant"], "baseline")
 
     def test_shadow_closes_at_stop(self):
         with tempfile.NamedTemporaryFile() as f:
@@ -30,6 +31,12 @@ class ShadowTradingTests(unittest.TestCase):
             result = shadow_trading.run_once([], lambda coin: 107, path=f.name)
             self.assertEqual(result["closed"], 1)
             self.assertEqual(shadow_trading.statistics(f.name)["wins"], 1)
+
+    def test_variant_is_recorded(self):
+        with tempfile.NamedTemporaryFile() as f:
+            row = shadow_trading.open_trade(self.signal(), price=100, path=f.name, variant="structure_ge_50")
+            self.assertEqual(row["shadow_variant"], "structure_ge_50")
+            self.assertEqual(shadow_trading.read(f.name)[0]["shadow_variant"], "structure_ge_50")
 
     def test_non_buy_is_ignored(self):
         s = self.signal()
