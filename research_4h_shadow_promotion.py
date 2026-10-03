@@ -102,8 +102,24 @@ def build_report(state: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> None:
     if not STATE_PATH.exists():
-        raise SystemExit(f"Missing research state: {STATE_PATH}")
-    state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        # The shadow workflow and this report run independently on the same
+        # push. The report must remain non-blocking during the first bootstrap
+        # run, before the research ledger has been persisted.
+        state = {
+            "candidates": [
+                "baseline",
+                "pullback",
+                "pullback_and_structure_ge_50",
+                "pullback_and_base",
+                "pullback_structure_and_base",
+                "non_expansion_and_structure_ge_50",
+            ],
+            "summaries": {},
+            "runs": 0,
+            "last_run_at": None,
+        }
+    else:
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     report = build_report(state)
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
