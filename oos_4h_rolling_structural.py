@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 from live_replay import fetch_history, replay_symbol, summarize
 from signal_audit import SignalAudit
 
-SYMBOLS=["BTC","ETH","SOL","BNB","XRP","ADA","DOGE"]
+# Liquid spot symbols only; research universe is deliberately broader than production routing.
+SYMBOLS=[
+    "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","LINK","DOT",
+    "LTC","BCH","UNI","NEAR","ATOM","APT","ARB","OP","SUI","INJ",
+]
 INTERVAL="4h"
 WINDOWS=[("oos_1",750,1500),("oos_2",1500,2250),("oos_3",2250,3000)]
 CANDIDATES={
@@ -47,13 +51,13 @@ def main():
    item["candidates"][cname]=z
   report.append(item)
  pooled_out={}
- overall=s([r for rows in pooled.values() for r in []]) if False else None
  for cname,rows in pooled.items():
   pooled_out[cname]=s(rows)
   pooled_out[cname]["sample_met_20_closed"]=pooled_out[cname]["closed"]>=20
  out={"generated_at":datetime.now(timezone.utc).isoformat(timespec="seconds"),
  "historical_only":True,
  "method":"current live-engine 4h replay across three rolling 750-bar OOS windows",
+ "research_universe":SYMBOLS,
  "candidates":list(CANDIDATES.keys()),
  "windows":report,"pooled":pooled_out,
  "warning":"Research-only. No production rule is changed from these results.",
