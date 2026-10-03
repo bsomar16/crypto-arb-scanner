@@ -418,9 +418,9 @@ def run_buy(token, chat_id, realtime_cache=None):
         if s.endswith("USDT") and s != "USDTUSDT":
             try:
                 symbol = s[:-4]
-            chg[symbol] = float(x.get("priceChangePercent", 0))
-            if x.get("lastPrice") is not None:
-                current_prices[symbol] = float(x.get("lastPrice"))
+                chg[symbol] = float(x.get("priceChangePercent", 0))
+                if x.get("lastPrice") is not None:
+                    current_prices[symbol] = float(x.get("lastPrice"))
             except (ValueError, TypeError):
                 pass
 
