@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Research-only corrected 4h volume-floor sensitivity study.
+"""RERUN MARKER: 2026-10-03 current-main volume sensitivity refresh.\n\nResearch-only corrected 4h volume-floor sensitivity study.
 
 The earlier sensitivity study passed min_vol_x overrides, but the production
 signal engine still applied the hard-coded timeframe profile inside its volume
