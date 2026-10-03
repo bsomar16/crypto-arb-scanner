@@ -23,7 +23,8 @@ jobs:
       - name: Run frozen rolling OOS study
         run: python oos_4h_setup_structure_rolling.py > oos_4h_setup_structure_rolling.out
       - name: Validate report
-        run: python - <<'PY'
+        run: |
+          python - <<'PY'
 import json
 with open("state/oos_4h_setup_structure_rolling.json", encoding="utf-8") as f:
     x=json.load(f)
