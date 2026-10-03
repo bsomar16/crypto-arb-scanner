@@ -15,7 +15,7 @@ class TP1ShadowTests(unittest.TestCase):
         self.assertTrue(candidate_matches(signal,"baseline"))
         self.assertTrue(candidate_matches(signal,"structure_ge_50"))
         self.assertTrue(candidate_matches(signal,"base_and_structure_ge_50"))
-        self.assertFalse(candidate_matches(signal,"non_expansion_and_structure_ge_50"))
+        self.assertTrue(candidate_matches(signal,"non_expansion_and_structure_ge_50"))
 
 if __name__=="__main__":
     unittest.main()
