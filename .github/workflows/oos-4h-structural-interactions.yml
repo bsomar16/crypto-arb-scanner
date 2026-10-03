@@ -1,0 +1,30 @@
+name: oos-4h-structural-interactions
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'oos_4h_structural_interactions.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run rolling structural interaction OOS study
+        run: python oos_4h_structural_interactions.py
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-structural-interactions
+          path: state/oos_4h_structural_interactions.json
+          if-no-files-found: error
