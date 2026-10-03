@@ -32,7 +32,7 @@ def resolve_exit(rows, signal_index, signal, target_key, max_index):
     """Resolve one frozen signal against one frozen target policy."""
     entry = float(signal["entry"])
     stop = float(signal["stop"])
-    target = float(signal[target_key.lower()])
+    target = float(signal["t" + target_key[2:].lower()])
     horizon = _bars_for_hold(INTERVAL, HOLD_MAX_HOURS)
     boundary = min(len(rows), int(max_index))
     end = min(boundary, signal_index + 1 + horizon)
