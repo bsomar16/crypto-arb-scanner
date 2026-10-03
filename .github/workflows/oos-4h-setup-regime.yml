@@ -1,0 +1,31 @@
+name: oos-4h-setup-regime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'oos_4h_setup_regime.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
+      - '.github/workflows/oos-4h-setup-regime.yml'
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run 4h setup and regime decomposition
+        run: python oos_4h_setup_regime.py
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-setup-regime
+          path: state/oos_4h_setup_regime.json
+          if-no-files-found: error
