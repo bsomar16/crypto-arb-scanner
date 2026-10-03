@@ -2,6 +2,13 @@ name: oos-4h-robustness-concentration
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'oos_4h_robustness_concentration.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
   push:
     branches: [main]
     paths:
