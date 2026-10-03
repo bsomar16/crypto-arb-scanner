@@ -72,4 +72,6 @@ def main():
  print(json.dumps(out,ensure_ascii=False,indent=2))
  with open("state/oos_4h_setup_structure_rolling.json","w",encoding="utf-8") as f: json.dump(out,f,ensure_ascii=False,indent=2)
 
-if __name__=="__main__": main()
+if __name__=="__main__":
+ main()
+# Rerun marker: keep hypotheses frozen; this commit exists only to execute the research workflow on a fresh PR head.
