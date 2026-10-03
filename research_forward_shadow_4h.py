@@ -287,3 +287,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Bootstrap trigger: this file remains research-only; production BUY logic is untouched.
