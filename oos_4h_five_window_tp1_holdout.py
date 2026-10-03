@@ -38,7 +38,7 @@ CANDIDATES = {
         str(r.get("expansion_state") or "") != "EXPANSION"
         and float(r.get("structure_score", 0) or 0) >= 50.0
     ),
-)
+}
 POLICY = "TP1"
 
 
