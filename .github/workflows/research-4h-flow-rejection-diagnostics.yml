@@ -1,0 +1,31 @@
+name: research-4h-flow-rejection-diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'research_4h_flow_rejection_diagnostics.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'signal_audit.py'
+      - 'config.json'
+      - 'live_replay.py'
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run 4h rejection diagnostics
+        run: python research_4h_flow_rejection_diagnostics.py
+      - name: Upload diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-4h-flow-rejection-diagnostics
+          path: state/oos_4h_flow_rejection_diagnostics.json
+          if-no-files-found: error
