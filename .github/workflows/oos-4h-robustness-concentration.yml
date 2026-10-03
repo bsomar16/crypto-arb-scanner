@@ -1,0 +1,30 @@
+name: oos-4h-robustness-concentration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'oos_4h_robustness_concentration.py'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run 4h robustness concentration study
+        run: python oos_4h_robustness_concentration.py
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-robustness-concentration
+          path: state/oos_4h_robustness_concentration.json
+          if-no-files-found: error
