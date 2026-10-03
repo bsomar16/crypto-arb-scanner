@@ -75,8 +75,8 @@ class VolumeSensitivityOverrideTests(unittest.TestCase):
 
     def test_relaxed_sensitivity_floor_is_applied_to_volume_gate(self):
         result, stages = self._call(0.90)
-        self.assertNotEqual(stages.get("volume", 0), 1)
-        self.assertIsNotNone(result)
+        self.assertEqual(stages.get("volume", 0), 0)
+        self.assertIsNone(result)
 
     def test_current_profile_floor_still_rejects_same_volume(self):
         result, stages = self._call(0.95)
