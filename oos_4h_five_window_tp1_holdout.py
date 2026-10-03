@@ -56,7 +56,7 @@ def main() -> None:
         for symbol in SYMBOLS:
             rows = fetch_history(symbol, INTERVAL, int(cfg.get("backtest_bars", 3000)))
             trend = fetch_history(
-                symbol, "1d", max(500, int(cfg.get("backtest_bars", 3000)) // 8)
+                symbol, "1d", max(500, int(cfg.get("backtest_bars", 3000)) // 8),
             )
             if len(rows) < end:
                 continue
@@ -116,8 +116,6 @@ def main() -> None:
     ]
     for candidate in CANDIDATES:
         candidate_rows = [w["candidates"][candidate] for w in informative_windows]
-        baseline_rows = [w["candidates"]["baseline"] for w in informative_windows]
-        candidate["x"] if False else None
         # A candidate is stable only if it does not fall below the same-window
         # baseline in any informative window and has >=20 pooled decisive outcomes.
         stable = bool(candidate_rows) and all(
