@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Research-only rolling OOS validation of predefined 4h structural/setup/regime interactions."""
-# Trigger the next fresh main-branch Actions run for the five-window study.
+# CI trigger: run the dedicated five-window workflow on the next main push.
 from __future__ import annotations
 import json
 from copy import deepcopy
