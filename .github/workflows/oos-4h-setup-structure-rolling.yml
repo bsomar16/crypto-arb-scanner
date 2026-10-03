@@ -1,0 +1,32 @@
+name: "Research: rolling 4h setup-structure validation"
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    paths:
+      - "oos_4h_setup_structure_rolling.py"
+      - ".github/workflows/oos-4h-setup-structure-rolling.yml"
+      - "signals.py"
+      - "entry_engine.py"
+      - "live_replay.py"
+      - "signal_audit.py"
+      - "config.json"
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run frozen rolling OOS study
+        run: python oos_4h_setup_structure_rolling.py
+      - name: Package report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-setup-structure-rolling
+          path: state/oos_4h_setup_structure_rolling.json
