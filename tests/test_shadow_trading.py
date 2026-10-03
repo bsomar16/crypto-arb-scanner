@@ -38,6 +38,13 @@ class ShadowTradingTests(unittest.TestCase):
             self.assertEqual(row["shadow_variant"], "structure_ge_50")
             self.assertEqual(shadow_trading.read(f.name)[0]["shadow_variant"], "structure_ge_50")
 
+    def test_shadow_duplicate_is_suppressed(self):
+        with tempfile.NamedTemporaryFile() as f:
+            shadow_trading.run_once([self.signal()], lambda coin: 100, path=f.name, variant="structure_ge_50")
+            result = shadow_trading.run_once([self.signal()], lambda coin: 100, path=f.name, variant="structure_ge_50")
+            self.assertEqual(result["opened"], 0)
+            self.assertEqual(shadow_trading.statistics(f.name)["tracked"], 1)
+
     def test_non_buy_is_ignored(self):
         s = self.signal()
         s["rating"] = "WATCH"
