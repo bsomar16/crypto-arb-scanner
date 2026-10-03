@@ -17,17 +17,17 @@ WINDOWS = [("oos_1", 750, 1500), ("oos_2", 1500, 2250), ("oos_3", 2250, 3000)]
 # Frozen before evaluation. No threshold search is performed.
 CANDIDATES = {
     "baseline": lambda r: True,
-    "pullback": lambda r: str(r.get("setup") or "") == "PULLBACK",
+    "pullback": lambda r: str(r.get("setup_type") or "") == "PULLBACK",
     "pullback_and_structure_ge_50": lambda r: (
-        str(r.get("setup") or "") == "PULLBACK"
+        str(r.get("setup_type") or "") == "PULLBACK"
         and float(r.get("structure_score", 0)) >= 50
     ),
     "pullback_and_base": lambda r: (
-        str(r.get("setup") or "") == "PULLBACK"
+        str(r.get("setup_type") or "") == "PULLBACK"
         and str(r.get("expansion_state") or "") == "BASE"
     ),
     "pullback_structure_and_base": lambda r: (
-        str(r.get("setup") or "") == "PULLBACK"
+        str(r.get("setup_type") or "") == "PULLBACK"
         and float(r.get("structure_score", 0)) >= 50
         and str(r.get("expansion_state") or "") == "BASE"
     ),
