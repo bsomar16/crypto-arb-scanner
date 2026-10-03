@@ -1,0 +1,56 @@
+name: Research: five-window 4h structural validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "oos_4h_rolling_structural.py"
+      - "live_replay.py"
+      - "signals.py"
+      - "entry_engine.py"
+      - "config.json"
+      - ".github/workflows/oos-4h-five-window-structural.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run five-window OOS study
+        run: python oos_4h_rolling_structural.py > state/oos_4h_rolling_structural.log
+
+      - name: Validate report shape
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("state/oos_4h_rolling_structural.json")
+          report = json.loads(p.read_text())
+          assert report["historical_only"] is True
+          assert len(report["windows"]) == 5, report.get("windows")
+          assert report["method"].startswith("current live-engine 4h replay across five")
+          assert report["pooled"]["baseline"]["sample_met_20_closed"] is True
+          print("five-window structural study report validated")
+          PY
+
+      - name: Upload OOS report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-five-window-structural
+          path: |
+            state/oos_4h_rolling_structural.json
+            state/oos_4h_rolling_structural.log
