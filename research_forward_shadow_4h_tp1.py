@@ -38,7 +38,8 @@ def resolve_position(p:dict[str,Any], bars:list[list[Any]])->dict[str,Any]|None:
 def load()->dict[str,Any]:
     try:
         with open(STATE_PATH,encoding="utf-8") as f: return json.load(f)
-    except (FileNotFoundError,json.JSONDecodeError): return {"version":1,"research_only":True,"exit_policy":"TP1","candidates":list(CANDIDATES),"positions":[],"runs":0}
+    except (FileNotFoundError,json.JSONDecodeError):
+        return {"version":1,"research_only":True,"exit_policy":"TP1","candidates":list(CANDIDATES),"positions":[],"runs":0}
 
 def save(s:dict[str,Any]):
     os.makedirs("state",exist_ok=True); tmp=STATE_PATH+".tmp"
@@ -85,27 +86,83 @@ def research_readiness(summaries:dict[str,dict[str,Any]])->dict[str,dict[str,Any
 def run_once(cfg:dict[str,Any],state:dict[str,Any])->dict[str,Any]:
     positions=list(state.get("positions") or []); cache={}
     for p in positions:
-        if p.get("status")=="OPEN": cache.setdefault(str(p["coin"]).upper(),fetch_history(str(p["coin"]).upper(),INTERVAL,180))
+        if p.get("status")=="OPEN":
+            cache.setdefault(str(p["coin"]).upper(),fetch_history(str(p["coin"]).upper(),INTERVAL,180))
     for i,p in enumerate(positions):
         if p.get("status")=="OPEN":
             x=resolve_position(p,cache[str(p["coin"]).upper()])
             if x: positions[i]=x
+
+    flow=state.get("flow_observability") or {
+        "runs":0,
+        "symbols_scanned":0,
+        "signals_seen":0,
+        "candidate_matches":{c:0 for c in CANDIDATES},
+        "last_signal":None,
+    }
+    flow["runs"]=int(flow.get("runs",0) or 0)+1
+    flow["symbols_scanned"]=0
+    flow["signals_seen"]=0
+    flow["candidate_matches"]={c:0 for c in CANDIDATES}
+    flow["last_signal"]=None
+
     new=0
     for symbol in SYMBOLS:
-        bars=cache.get(symbol) or fetch_history(symbol,INTERVAL,180); cache[symbol]=bars; trend=fetch_history(symbol,"1d",200)
+        bars=cache.get(symbol) or fetch_history(symbol,INTERVAL,180); cache[symbol]=bars
+        trend=fetch_history(symbol,"1d",200)
         if len(bars)<70 or not trend: continue
-        sig=intraday_signal(symbol,interval=INTERVAL,limit=180,min_vol_x=None,min_hour_vol=float(cfg.get("buy_fast_min_hour_vol",75000)),chg24=0,min_potential_pct=float(cfg.get("signal_min_potential_pct",5)),max_potential_pct=float(cfg.get("signal_max_potential_pct",300)),min_score=None,min_rr=None,cfg=deepcopy(cfg),historical_data=bars,historical_trend_data=trend,record_history=False)
+        flow["symbols_scanned"] += 1
+        sig=intraday_signal(
+            symbol,interval=INTERVAL,limit=180,min_vol_x=None,
+            min_hour_vol=float(cfg.get("buy_fast_min_hour_vol",75000)),
+            chg24=0,min_potential_pct=float(cfg.get("signal_min_potential_pct",5)),
+            max_potential_pct=float(cfg.get("signal_max_potential_pct",300)),
+            min_score=None,min_rr=None,cfg=deepcopy(cfg),
+            historical_data=bars,historical_trend_data=trend,record_history=False,
+        )
         if not sig: continue
+        flow["signals_seen"] += 1
+        flow["last_signal"]={
+            "coin":symbol,
+            "candle_open_time":int(sig.get("candle_open_time",0) or 0),
+            "score":float(sig.get("score",0) or 0),
+            "structure_score":float(sig.get("structure_score",0) or 0),
+            "expansion_state":sig.get("expansion_state"),
+            "setup_type":sig.get("setup_type"),
+        }
         ct=int(sig.get("candle_open_time",0) or 0)
         for candidate in CANDIDATES:
             if ct<=0 or not candidate_matches(sig,candidate): continue
+            flow["candidate_matches"][candidate] += 1
             pid=f"{symbol}-{ct}-{candidate}-TP1"
             if any(str(p.get("position_id"))==pid for p in positions): continue
-            positions.append({"position_id":pid,"candidate":candidate,"status":"OPEN","outcome_source":"forward_shadow_tp1","exit_policy":"TP1","opened_at":datetime.now(timezone.utc).isoformat(timespec="seconds"),"coin":symbol,"interval":INTERVAL,"candle_open_time":ct,"entry":float(sig["entry"]),"stop":float(sig["stop"]),"t1":float(sig["t1"]),"score":float(sig["score"]),"structure_score":float(sig.get("structure_score",0) or 0),"expansion_state":sig.get("expansion_state"),"mfe_pct":0.0,"mae_pct":0.0})
+            positions.append({
+                "position_id":pid,"candidate":candidate,"status":"OPEN",
+                "outcome_source":"forward_shadow_tp1","exit_policy":"TP1",
+                "opened_at":datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "coin":symbol,"interval":INTERVAL,"candle_open_time":ct,
+                "entry":float(sig["entry"]),"stop":float(sig["stop"]),"t1":float(sig["t1"]),
+                "score":float(sig["score"]),
+                "structure_score":float(sig.get("structure_score",0) or 0),
+                "expansion_state":sig.get("expansion_state"),
+                "mfe_pct":0.0,"mae_pct":0.0,
+            })
             new+=1
-    state.update({"positions":positions,"last_run_at":datetime.now(timezone.utc).isoformat(timespec="seconds"),"runs":int(state.get("runs",0) or 0)+1,"summaries":{c:summary(positions,c) for c in CANDIDATES}})
+
+    state.update({
+        "positions":positions,
+        "last_run_at":datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "runs":int(state.get("runs",0) or 0)+1,
+        "summaries":{c:summary(positions,c) for c in CANDIDATES},
+        "flow_observability":flow,
+    })
     state["research_readiness"]=research_readiness(state["summaries"])
-    return {"new_positions":new,"summaries":state["summaries"],"research_readiness":state["research_readiness"]}
+    return {
+        "new_positions":new,
+        "flow_observability":flow,
+        "summaries":state["summaries"],
+        "research_readiness":state["research_readiness"],
+    }
 
 def main():
     with open("config.json",encoding="utf-8") as f: cfg=json.load(f)
