@@ -13,7 +13,7 @@ SYMBOLS=[
     "LTC","BCH","UNI","NEAR","ATOM","APT","ARB","OP","SUI","INJ",
 ]
 INTERVAL="4h"
-WINDOWS=[("oos_1",750,1500),("oos_2",1500,2250),("oos_3",2250,3000)]
+WINDOWS=[("oos_1",500,1000),("oos_2",1000,1500),("oos_3",1500,2000),("oos_4",2000,2500),("oos_5",2500,3000)]
 CANDIDATES={
  "baseline":lambda r:True,
  "structure_ge_50":lambda r:float(r.get("structure_score",0))>=50,
@@ -56,7 +56,7 @@ def main():
   pooled_out[cname]["sample_met_20_closed"]=pooled_out[cname]["closed"]>=20
  out={"generated_at":datetime.now(timezone.utc).isoformat(timespec="seconds"),
  "historical_only":True,
- "method":"current live-engine 4h replay across three rolling 750-bar OOS windows",
+ "method":"current live-engine 4h replay across five sequential 500-bar OOS windows",
  "research_universe":SYMBOLS,
  "candidates":list(CANDIDATES.keys()),
  "windows":report,"pooled":pooled_out,
