@@ -4,6 +4,8 @@
 This does not alter production thresholds or signal behavior. It replays the
 current production 4h engine on the frozen 20-symbol SPOT universe and records
 where candidates are rejected, plus the strongest causal near-misses.
+
+RERUN MARKER: 2026-10-03 current-main diagnostic refresh.
 """
 from __future__ import annotations
 
