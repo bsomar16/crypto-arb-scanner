@@ -2,6 +2,16 @@ name: oos-4h-structural-interactions
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'oos_4h_structural_interactions.py'
+      - '.github/workflows/oos-4h-structural-interactions.yml'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
   push:
     branches:
       - main
@@ -24,6 +34,19 @@ jobs:
           python-version: '3.12'
       - name: Run rolling structural interaction OOS study
         run: python oos_4h_structural_interactions.py
+      - name: Validate five-window output
+        run: python - <<'PY'
+import json
+from pathlib import Path
+
+report = json.loads(Path("state/oos_4h_structural_interactions.json").read_text())
+windows = report.get("windows", [])
+assert len(windows) == 5, f"expected 5 OOS windows, got {len(windows)}"
+expected = ["oos_1", "oos_2", "oos_3", "oos_4", "oos_5"]
+assert [w.get("window") for w in windows] == expected, [w.get("window") for w in windows]
+assert "five sequential 500-bar" in report.get("method", ""), report.get("method")
+print("validated five-window structural OOS report")
+PY
       - name: Upload report
         uses: actions/upload-artifact@v4
         with:
