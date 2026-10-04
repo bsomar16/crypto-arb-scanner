@@ -74,4 +74,4 @@ def main():
 
 if __name__=="__main__":
  main()
-# Rerun marker: keep hypotheses frozen; this commit exists only to execute the research workflow on a fresh PR head.
+# Rerun marker: hypotheses remain frozen; refreshed 2026-10-04 for an independent CI OOS run.
