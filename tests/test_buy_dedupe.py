@@ -3,11 +3,12 @@ import unittest
 from scanner import _dedupe_buy_signals
 
 
-def signal(coin="TOMO", entry=1.0, score=60.0, setup="BREAKOUT", interval="5m", candle=100):
+def signal(coin="TOMO", entry=1.0, score=60.0, setup="BREAKOUT", interval="5m",
+           candle=100, entry_trigger="BOS_RETEST_CONFIRM"):
     return {
         "coin": coin, "entry": entry, "score": score, "rr": 2.0,
         "potential_pct": 20.0, "setup_type": setup, "interval": interval,
-        "candle_open_time": candle,
+        "entry_trigger": entry_trigger, "candle_open_time": candle,
     }
 
 
@@ -34,11 +35,30 @@ class BuyDedupeTests(unittest.TestCase):
         old = {"TOMO": {"ts": 1000, "entry": 1.0, "score": 60, "setup_type": "BREAKOUT",
                         "interval": "5m", "candle_open_time": 100}}
         fresh, updates = _dedupe_buy_signals(
-            [signal(entry=1.03, candle=400)], old, 1000 + 241 * 60,
+            [signal(entry=1.03, score=71, candle=400)], old, 1000 + 241 * 60,
             cooldown_minutes=240, rearm_score_delta=10,
         )
         self.assertEqual(len(fresh), 1)
         self.assertIn("TOMO", updates)
+
+    def test_price_drift_alone_after_cooldown_is_suppressed(self):
+        old = {"TOMO": {"ts": 1000, "entry": 1.0, "score": 60, "setup_type": "BREAKOUT",
+                        "interval": "5m", "entry_trigger": "BOS_RETEST_CONFIRM", "candle_open_time": 100}}
+        fresh, _ = _dedupe_buy_signals(
+            [signal(entry=1.03, score=61, candle=400)], old, 1000 + 241 * 60,
+            cooldown_minutes=240, rearm_score_delta=10,
+        )
+        self.assertEqual(fresh, [])
+
+    def test_new_entry_trigger_after_cooldown_rearms(self):
+        old = {"TOMO": {"ts": 1000, "entry": 1.0, "score": 60, "setup_type": "BREAKOUT",
+                        "interval": "5m", "entry_trigger": "BOS_RETEST_CONFIRM", "candle_open_time": 100}}
+        fresh, _ = _dedupe_buy_signals(
+            [signal(entry=1.005, score=61, candle=400,
+                    entry_trigger="SWEEP_RECLAIM_BOS_RETEST_CONFIRM")],
+            old, 1000 + 241 * 60, cooldown_minutes=240, rearm_score_delta=10,
+        )
+        self.assertEqual(len(fresh), 1)
 
     def test_material_setup_change_after_cooldown_rearms(self):
         old = {"TOMO": {"ts": 1000, "entry": 1.0, "score": 60, "setup_type": "BREAKOUT",
