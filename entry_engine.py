@@ -8,7 +8,7 @@ def _pct(a, b):
 def _body_strength(o, h, l, c):
     return abs(c - o) / max(h - l, 1e-12)
 
-def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retest=True, require_sweep=True, allow_early_retest=True):
+def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retest=True, require_sweep=True, allow_early_retest=True, confirmation_body_min=0.35):
     """Return a causal long-entry confirmation or None using only closed candles."""
     n = len(closes)
     if n < 45 or len(opens) != n or len(highs) != n or len(lows) != n:
@@ -46,7 +46,7 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
             if i + 1 < n:
                 o, h, l, c = opens[i + 1], highs[i + 1], lows[i + 1], closes[i + 1]
                 body = _body_strength(o, h, l, c)
-                if c > o and c >= broken_level and body >= 0.35:
+                if c > o and c >= broken_level and body >= float(confirmation_body_min):
                     confirm = {"index": i + 1, "open": o, "high": h, "low": l, "close": c, "body_strength": body, "early": False}
             if confirm is None and allow_early_retest:
                 o, h, l, c = opens[i], highs[i], lows[i], closes[i]
