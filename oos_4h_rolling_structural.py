@@ -13,7 +13,8 @@ SYMBOLS=[
     "LTC","BCH","UNI","NEAR","ATOM","APT","ARB","OP","SUI","INJ",
 ]
 INTERVAL="4h"
-WINDOWS=[("oos_1",500,1000),("oos_2",1000,1500),("oos_3",1500,2000),("oos_4",2000,2500),("oos_5",2500,3000)]\nassert len(WINDOWS) == 5 and all(end - start == 500 for _, start, end in WINDOWS)
+WINDOWS=[("oos_1",500,1000),("oos_2",1000,1500),("oos_3",1500,2000),("oos_4",2000,2500),("oos_5",2500,3000)]
+assert len(WINDOWS) == 5 and all(end - start == 500 for _, start, end in WINDOWS)
 CANDIDATES={
  "baseline":lambda r:True,
  "structure_ge_50":lambda r:float(r.get("structure_score",0))>=50,
