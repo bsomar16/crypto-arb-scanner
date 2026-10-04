@@ -371,6 +371,7 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
         old_interval = str(old.get("interval", "") or "")
         old_candle = int(old.get("candle_open_time", 0) or 0)
         old_score = float(old.get("score", 0) or 0)
+        old_trigger = str(old.get("entry_trigger", "") or "")
         candle_changed = int(r.get("candle_open_time", 0) or 0) > old_candle if old_candle else False
         if old_entry <= 0:
             is_new_signal = True
@@ -378,11 +379,13 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             entry_changed = abs(float(r["entry"]) - old_entry) / old_entry >= entry_change_pct
             setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
             score_strengthened = float(r.get("score", 0) or 0) - old_score >= rearm_score_delta
+            trigger_changed = bool(old_trigger and old_trigger != r.get("entry_trigger", ""))
             elapsed_min = max(0.0, (float(now_ts) - float(old.get("ts", 0) or 0)) / 60.0)
             cooldown_elapsed = elapsed_min >= max(0.0, float(cooldown_minutes))
-            # A new candle or timeframe change alone is not a new signal.
-            # Re-arm only after a cooldown plus a materially changed setup.
-            material_rearm = entry_changed or (setup_changed and score_strengthened)
+            # A new candle, timeframe change, or ordinary price drift is NOT a
+            # new signal. Re-arm only after the cooldown plus a structural/setup
+            # change, or a material entry move accompanied by a stronger score.
+            material_rearm = setup_changed or trigger_changed or (entry_changed and score_strengthened)
             is_new_signal = bool(cooldown_elapsed and material_rearm)
 
         if old and not is_new_signal:
@@ -396,6 +399,7 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             "score": r["score"],
             "setup_type": r.get("setup_type", ""),
             "interval": r.get("interval", ""),
+            "entry_trigger": r.get("entry_trigger", ""),
             "candle_open_time": int(r.get("candle_open_time", 0) or 0),
         }
         fresh.append(r)
