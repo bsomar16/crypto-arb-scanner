@@ -150,4 +150,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Research rerun marker: execute frozen 20-symbol robustness study on a fresh PR head.
+# Research rerun marker: refresh the frozen 20-symbol robustness study on this PR head.
