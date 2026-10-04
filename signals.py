@@ -203,6 +203,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             require_retest=bool((cfg or {}).get("signal_require_retest", True)),
             require_sweep=bool((cfg or {}).get("signal_require_sweep", False)),
             allow_early_retest=bool((cfg or {}).get("signal_allow_early_retest", True)),
+            confirmation_body_min=float((cfg or {}).get("signal_confirmation_body_min", 0.35)),
         )
         if not entry:
             return _audit_reject(
