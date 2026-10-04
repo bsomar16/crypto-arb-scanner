@@ -580,6 +580,32 @@ def run_buy(token, chat_id, realtime_cache=None):
             )
         except Exception as e:
             log("SHADOW-4H", "candidate shadow error:", e)
+    # Research-only forward shadow for the frozen OOS candidate:
+    # structure >= 50 AND expansion state != EXPANSION. This is isolated from
+    # production qualification/ranking and uses a separate ledger.
+    if bool(cfg.get("shadow_4h_nonexpansion_structure_candidate_enabled", False)):
+        candidate_signals = [
+            r for r in selected
+            if str(r.get("interval", "")) == "4h"
+            and float(r.get("structure_score", 0) or 0) >= 50.0
+            and str(r.get("expansion_state") or "") != "EXPANSION"
+        ]
+        try:
+            shadow_candidate = shadow_trading.run_once(
+                candidate_signals,
+                lambda coin: current_prices.get(str(coin).upper()),
+                cfg,
+                path=str(cfg.get("shadow_4h_nonexpansion_structure_state_path", "state/shadow_4h_nonexpansion_structure.jsonl")),
+                variant="non_expansion_and_structure_ge_50",
+            )
+            log(
+                "SHADOW-4H-NONEXP",
+                f"candidate={len(candidate_signals)} "
+                f"opened={shadow_candidate.get('opened', 0)} "
+                f"closed={shadow_candidate.get('closed', 0)}",
+            )
+        except Exception as e:
+            log("SHADOW-4H-NONEXP", "candidate shadow error:", e)
 
     if not selected and not fired_alerts:
         log("[BUY] no new signals")
