@@ -78,6 +78,35 @@ class ABTToolkitTests(unittest.TestCase):
         self.assertTrue(result["abt"]["absorption_confirmed"])
         self.assertEqual(result["abt"]["shakeout_index"], 77)
 
+    def test_abt_mtf_context_exposes_all_supported_timeframes(self):
+        closes = [100.0 + i * 0.2 for i in range(100)]
+        states = abt_strategy._mtf_alignment(
+            "15m",
+            closes,
+            {tf: closes for tf in ("5m", "1h", "4h", "1d", "1w")},
+        )
+        self.assertEqual(set(states["states"]), {"5m", "15m", "1h", "4h", "1d", "1w"})
+        self.assertEqual(states["states"]["15m"], "BULLISH")
+        self.assertEqual(states["states"]["1d"], "BULLISH")
+        self.assertEqual(states["alignment"], "BULLISH")
+
+    def test_abt_closed_lifecycle_starts_new_opportunity(self):
+        import tempfile
+        import signal_lifecycle
+
+        original = signal_lifecycle.PATH
+        with tempfile.TemporaryDirectory() as td:
+            signal_lifecycle.PATH = f"{td}/signal_lifecycle.json"
+            base = {"coin": "TEST", "interval": "15m", "strategy": "ABT",
+                    "strategy_family": "ABT", "setup_type": "TRENDLINE_BREAKOUT",
+                    "entry": 100.0, "t3": 110.0, "candle_open_time": 1000}
+            key1 = signal_lifecycle.register(base)
+            signal_lifecycle.transition(key1, "CLOSED", event="tp3")
+            key2 = signal_lifecycle.register(dict(base, candle_open_time=2000, entry=105.0))
+            self.assertNotEqual(key1, key2)
+            self.assertTrue(key2.endswith("|2000"))
+        signal_lifecycle.PATH = original
+
     def test_abt_lifecycle_stages_share_one_opportunity(self):
         import tempfile
         import signal_lifecycle
