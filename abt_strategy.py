@@ -161,28 +161,63 @@ def _confirmed_resistance_levels(price, highs, left=2, right=2, lookback=120):
     })
 
 
-def _target_confluence(price, target, highs, atr=0.0, left=2, right=2):
-    """Score structural target quality from confirmed resistance confluence.
+def _target_confluence(price, target, highs, atr=0.0, left=2, right=2,
+                       order_block=None, mtf=None):
+    """Score target quality from causal structure, OB and market regime.
 
-    This is descriptive only: it never manufactures or moves a target. A target
-    gets stronger when multiple confirmed pivots cluster near it and weaker when
-    it is an isolated level. All evidence is historical and causal.
+    Descriptive only: this function never manufactures, moves, or removes a
+    target. Pivot evidence is confirmed historical resistance; order-block
+    evidence is a bullish causal zone; MTF evidence is the already-computed
+    closed-candle regime. The score is safe for ranking and diagnostics.
     """
     levels = _confirmed_resistance_levels(price, highs, left=left, right=right)
     if not levels or target <= price:
-        return {"score": 0.0, "pivot_count": 0, "cluster_count": 0, "levels": []}
+        return {
+            "score": 0.0, "pivot_score": 0.0, "order_block_score": 0.0,
+            "market_structure_score": 0.0, "pivot_count": 0,
+            "cluster_count": 0, "levels": [], "order_block_support": False,
+            "market_structure": "UNKNOWN",
+        }
     tolerance = max(float(target) * 0.005, float(atr or 0.0) * 0.35)
     cluster = [level for level in levels if abs(level - float(target)) <= tolerance]
     pivot_count = len(cluster)
-    score = min(100.0, 55.0 + max(0, pivot_count - 1) * 20.0)
-    if pivot_count == 1:
-        score = 55.0
+    pivot_score = min(55.0, 35.0 + max(0, pivot_count - 1) * 10.0)
+
+    ob = order_block or {}
+    ob_quality = float(ob.get("quality_score", 0.0) or 0.0)
+    ob_mid = float(ob.get("midpoint", 0.0) or 0.0)
+    ob_support = bool(
+        ob.get("bullish")
+        and ob.get("status") != "INVALIDATED"
+        and ob_quality >= 50.0
+        and ob_mid > 0.0
+        and ob_mid < target
+    )
+    order_block_score = 25.0 if ob_support else 0.0
+
+    states = (mtf or {}).get("states", {})
+    bullish_4h = states.get("4h") == "BULLISH"
+    bullish_1h = states.get("1h") == "BULLISH"
+    bullish_1d = states.get("1d") == "BULLISH"
+    bearish_1d = states.get("1d") == "BEARISH"
+    market_structure_score = 20.0 if bullish_4h and bullish_1h and not bearish_1d else (
+        12.0 if bullish_4h and not bearish_1d else 6.0 if not bearish_1d else 0.0
+    )
+    score = min(100.0, pivot_score + order_block_score + market_structure_score)
     return {
         "score": round(score, 1),
+        "pivot_score": round(pivot_score, 1),
+        "order_block_score": round(order_block_score, 1),
+        "market_structure_score": round(market_structure_score, 1),
         "pivot_count": pivot_count,
         "cluster_count": pivot_count,
         "levels": cluster,
         "tolerance": round(tolerance, 8),
+        "order_block_support": ob_support,
+        "market_structure": (
+            "BULLISH" if bullish_4h and bullish_1h and not bearish_1d
+            else "SUPPORTIVE" if not bearish_1d else "BEARISH"
+        ),
     }
 
 
@@ -394,7 +429,8 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     )
     t1, t2, t3 = target_plan["t1"], target_plan["t2"], target_plan["t3"]
     target_confluence = _target_confluence(
-        price, t3, highs, atr=a, left=2, right=2
+        price, t3, highs, atr=a, left=2, right=2,
+        order_block=order_block, mtf=mtf
     )
     potential = (t3 / price - 1.0) * 100 if price else 0.0
     risk_dist = max(a * float(cfg.get("abt_stop_atr", 1.5)), price * 0.006)
