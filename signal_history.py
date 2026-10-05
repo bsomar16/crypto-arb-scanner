@@ -40,12 +40,16 @@ def _write(row):
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def record_signal(signal):
-    """Record a live signal once; return its stable signal id."""
+def record_signal(signal, source="live"):
+    """Record one qualified BUY signal with entry-time features only."""
     sid = signal_id(signal)
     existing = {r.get("id") for r in _read() if r.get("kind") == "signal"}
     if sid not in existing:
+        ob = signal.get("order_block") or {}
+        zero = signal.get("zero_inverse") or {}
+        vol = signal.get("volatility") or {}
         _write({"kind": "signal", "id": sid, "ts": _ts(),
+                "source": str(source or "live"),
                 "coin": signal.get("coin"), "interval": signal.get("interval"),
                 "setup_type": signal.get("setup_type"),
                 "score": float(signal.get("score", 0)),
@@ -60,6 +64,18 @@ def record_signal(signal):
                 "t2": float(signal.get("t2", 0) or 0),
                 "t3": float(signal.get("t3", signal.get("target", 0)) or 0),
                 "expansion_state": signal.get("expansion_state"),
+                "expansion_volume_ratio": signal.get("expansion_volume_ratio"),
+                "expansion_extension_pct": signal.get("expansion_extension_pct"),
+                "entry_extension_pct": signal.get("entry_extension_pct"),
+                "entry_quality": signal.get("entry_quality"),
+                "structure_score": signal.get("structure_score"),
+                "vol_x": signal.get("vol_x"),
+                "volatility_state": vol.get("state") if isinstance(vol, dict) else signal.get("volatility_state"),
+                "order_block_bullish": bool(ob.get("bullish")) if isinstance(ob, dict) else bool(signal.get("order_block_bullish")),
+                "zero_inverse_bullish": bool(
+                    zero.get("bullish_reversal") or zero.get("bullish_reclaim")
+                ) if isinstance(zero, dict) else bool(signal.get("zero_inverse_bullish")),
+                "bos_level": signal.get("bos_level"),
                 "entry_trigger": signal.get("entry_trigger"),
                 "component_flags": signal.get("component_flags", {})})
     return sid

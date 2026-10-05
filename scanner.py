@@ -612,6 +612,14 @@ def run_buy(token, chat_id, realtime_cache=None):
         r["trade_quality"] = round(max(0.0, min(100.0, float(r.get("trade_quality", 0.0)) + r["multi_exchange_modifier"])), 1)
     ranked.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     selected = ranked
+    # Research-only forward capture: persist every newly qualified BUY signal
+    # with entry-time features. This does not create, suppress, rank, or execute
+    # signals and is intentionally independent of Telegram notification claims.
+    for r in fresh:
+        try:
+            signal_history.record_signal(r, source="forward_research")
+        except Exception as e:
+            log("BUY", "forward research signal capture error:", e)
     for r in selected:
         r["star"] = r["coin"] in star
 
