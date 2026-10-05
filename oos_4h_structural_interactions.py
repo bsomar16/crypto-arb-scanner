@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Research-only rolling OOS validation of predefined 4h structural/setup/regime interactions."""
-# CI trigger: run the dedicated five-window workflow on the next main push.
+# Research rerun: refresh five-window structural/setup/regime evidence before any production decision.
 from __future__ import annotations
 import json
 from copy import deepcopy
