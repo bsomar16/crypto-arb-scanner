@@ -1,6 +1,6 @@
 # crypto-arb-scanner
 
-Crypto-only **SPOT** signal scanner, cross-exchange SPOT arbitrage intelligence, Telegram notifications, paper/shadow tracking, backtesting, and controlled execution infrastructure.
+Crypto-only **SPOT** signal scanner, Telegram notifications, paper/shadow tracking, backtesting, and controlled execution infrastructure.
 
 ## Core safety policy
 
