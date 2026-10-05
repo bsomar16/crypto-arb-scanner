@@ -50,7 +50,7 @@ class ABTToolkitTests(unittest.TestCase):
         # Bearish high-volume climax two candles before the decision candle.
         closes[77] = 100.4
         opens[77] = 103.0
-        highs[77] = 103.2
+        highs[77] = 108.0
         lows[77] = 99.8
         volumes[77] = 250.0
 
