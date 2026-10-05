@@ -89,6 +89,16 @@ class ABTToolkitTests(unittest.TestCase):
         )
         self.assertGreaterEqual(target, 107.5)
 
+    def test_structural_target_returns_zero_when_no_resistance_meets_floor(self):
+        target = abt_strategy._base_targets(
+            100.0,
+            [100.5, 101.0, 102.0, 103.5, 104.0],
+            atr=1.0,
+            max_potential=80.0,
+            min_potential=5.0,
+        )
+        self.assertEqual(target, 0.0)
+
     def test_abt_mtf_context_exposes_all_supported_timeframes(self):
         closes = [100.0 + i * 0.2 for i in range(100)]
         states = abt_strategy._mtf_alignment(
