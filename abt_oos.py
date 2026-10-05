@@ -190,7 +190,7 @@ def _stats(records):
     losses = [r for r in records if r["outcome"] == "LOSS"]
     closed = wins + losses
     returns = [float(r["ret_pct"]) for r in records]
-    durations = [r["exit_i"] - 0 for r in records]
+    durations = [int(r.get("duration_bars", 0)) for r in records]
     gross_win = sum(max(0.0, x) for x in returns)
     gross_loss = -sum(min(0.0, x) for x in returns)
     milestones = {}
