@@ -568,7 +568,7 @@ def run_buy(token, chat_id, realtime_cache=None):
         if standard:
             results.append(standard)
         if bool(cfg.get("abt_enabled", False)):
-            abt = abt_strategy.evaluate_abt_coin(sym, interval=interval, cfg=cfg)
+            abt = abt_strategy.evaluate_abt_coin(sym, interval=interval, cfg=cfg, chg24=chg.get(sym, 0.0))
             if abt:
                 results.append(abt)
         return results
