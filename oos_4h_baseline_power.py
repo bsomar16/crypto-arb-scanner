@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Research-only 4h baseline power study.
+"""Research-only 4h baseline power study. Main baseline is frozen; no candidate filter search.
 
 Uses a wider coin universe and longer pre-holdout history. Baseline only:
 no new filter, no threshold search, no candidate selection.
