@@ -4,6 +4,7 @@
 Modes: daily | buy | realtime | price | backtest | validate | portfolio | check | report | all
 """
 
+import base64
 import concurrent.futures
 import json
 import os
@@ -277,6 +278,112 @@ def _buy_signal_identity(r):
     return "|".join((coin, setup, trigger, bos))
 
 
+def _claim_buy_notification_keys(signals, now_ts, ttl_days=30):
+    """Atomically claim BUY notification identities across workflow runners.
+
+    Local fired-signal state is not sufficient when two runners have different
+    checkouts. The GitHub Contents API uses the current blob SHA for updates;
+    concurrent writers therefore conflict instead of silently overwriting one
+    another. In Actions, failure to acquire the claim store fails closed so a
+    transient GitHub race cannot turn into a duplicate Telegram alert.
+    """
+    keys = []
+    for signal in signals:
+        key = _buy_signal_identity(signal)
+        if key and key not in keys:
+            keys.append(key)
+    if not keys:
+        return set()
+
+    token = os.environ.get("GITHUB_TOKEN", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "bsomar16/crypto-arb-scanner")
+    if not token:
+        if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+            log("BUY", "notification claim store unavailable: GITHUB_TOKEN missing; failing closed")
+            return set()
+        return set(keys)
+
+    import urllib.error
+    import urllib.request
+
+    path = "state/telegram_buy_claims.json"
+    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref=main"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2026-03-10",
+        "User-Agent": "crypto-arb-scanner-buy-dedupe",
+    }
+    cutoff = float(now_ts) - max(1, int(ttl_days)) * 86400.0
+
+    for _ in range(5):
+        sha = None
+        claims = {}
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            sha = payload.get("sha")
+            raw = base64.b64decode(payload.get("content", "")).decode("utf-8")
+            document = json.loads(raw) if raw.strip() else {}
+            claims = document.get("claims", {}) if isinstance(document, dict) else {}
+            if not isinstance(claims, dict):
+                claims = {}
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                log("BUY", f"notification claim read failed HTTP {exc.code}; failing closed")
+                return set()
+        except (OSError, ValueError, json.JSONDecodeError, UnicodeError) as exc:
+            log("BUY", "notification claim read failed; failing closed:", exc)
+            return set()
+
+        claims = {
+            str(key): value for key, value in claims.items()
+            if isinstance(value, (int, float)) and float(value) >= cutoff
+        }
+        claimable = [key for key in keys if key not in claims]
+        if not claimable:
+            return set()
+        for key in claimable:
+            claims[key] = float(now_ts)
+
+        document = {"version": 1, "claims": claims}
+        encoded = base64.b64encode(
+            json.dumps(document, ensure_ascii=False, sort_keys=True, indent=1).encode("utf-8")
+        ).decode("ascii")
+        body = {
+            "message": "Claim BUY notification identities",
+            "content": encoded,
+            "branch": "main",
+            "committer": {
+                "name": "github-actions[bot]",
+                "email": "41898282+github-actions[bot]@users.noreply.github.com",
+            },
+        }
+        if sha:
+            body["sha"] = sha
+        try:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{repo}/contents/{path}",
+                data=json.dumps(body).encode("utf-8"),
+                headers={**headers, "Content-Type": "application/json"},
+                method="PUT",
+            )
+            with urllib.request.urlopen(req, timeout=15):
+                return set(claimable)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 409:
+                continue
+            log("BUY", f"notification claim write failed HTTP {exc.code}; failing closed")
+            return set()
+        except OSError as exc:
+            log("BUY", "notification claim write failed; failing closed:", exc)
+            return set()
+
+    log("BUY", "notification claim contention did not settle; failing closed")
+    return set()
+
+
 def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02,
                         cooldown_minutes=240, rearm_score_delta=10.0, limit=None, audit=None):
     """Return only materially new BUY setups.
@@ -492,6 +599,19 @@ def run_buy(token, chat_id, realtime_cache=None):
     for r in selected:
         r["star"] = r["coin"] in star
 
+    # Local fired_signals.json suppresses normal repeats, while the remote
+    # claim store closes the cross-run race where Telegram could be sent before
+    # the previous runner committed its local state.
+    claimed_keys = _claim_buy_notification_keys(selected, now_ts)
+    before_claim = len(selected)
+    selected = [r for r in selected if _buy_signal_identity(r) in claimed_keys]
+    allowed_coins = {str(r.get("coin", "")).upper() for r in selected}
+    updates = {coin: value for coin, value in updates.items() if coin in allowed_coins}
+    if before_claim != len(selected):
+        log("BUY", f"notification dedupe suppressed {before_claim - len(selected)} cross-run duplicate(s)")
+        for _ in range(before_claim - len(selected)):
+            audit.reject("dedupe_notification_claim")
+
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
     # Record completed interval scans independently of signal qualification.
     # A delayed Actions run must not cause the next run to rescan the same
@@ -589,8 +709,9 @@ def run_buy(token, chat_id, realtime_cache=None):
     log(f"[BUY] {len(selected)} quality signals / {len(fresh)} qualified signals / {len(tasks)} deep scans")
     log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
 
-    # Telegram delivery is the notification commit point. Do not persist a
-    # signal as fired or open paper/shadow positions until notification succeeds.
+    # The remote notification claim was committed before this send, so a second
+    # workflow cannot claim the same logical BUY while this Telegram call runs.
+    # fired_signals.json remains the local cooldown/re-arm state.
     telegram_msg(token, chat_id, "\n".join(lines))
 
     if updates:
