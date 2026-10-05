@@ -17,6 +17,26 @@ from target_quality import optimize_targets
 
 
 ABT_STAGES = ("ABT~", "ABT*", "ABT")
+ABT_NON_CRYPTO_ASSETS = {"EUR", "GBP", "AUD", "CAD", "CHF", "TRY", "BRL", "PLN", "UAH", "ZAR", "RUB"}
+
+
+def _confidence_components(stage, mtf, vol_ratio, rsi, order_block, volatility, potential, rr):
+    """Transparent ABT confidence model."""
+    states = mtf.get("states", {})
+    structure = {"ABT~": 20.0, "ABT*": 23.0, "ABT": 25.0}[stage]
+    mtf_score = 0.0
+    if states.get("4h") == "BULLISH": mtf_score += 15.0
+    elif states.get("4h") == "MIXED": mtf_score += 7.0
+    if states.get("1h") == "BULLISH": mtf_score += 6.0
+    if states.get("1d") == "BULLISH": mtf_score += 4.0
+    volume_score = min(15.0, max(0.0, float(vol_ratio)) * 7.5)
+    momentum_score = 10.0 if 48.0 <= float(rsi) <= 68.0 else 7.0 if 40.0 <= float(rsi) <= 75.0 else 3.0
+    ob_score = min(10.0, max(0.0, float((order_block or {}).get("quality_score", 0.0))) * 0.10)
+    volatility_score = 5.0 if (volatility or {}).get("state") == "EXPANDING" else 3.0 if (volatility or {}).get("state") == "NORMAL" else 1.0
+    liquidity_score = 5.0 if float(vol_ratio) >= 1.2 else 3.0 if float(vol_ratio) >= 0.8 else 1.0
+    regime_score = 5.0 if states.get("1d") == "BULLISH" else 3.0 if states.get("1d") == "MIXED" else 1.0
+    total = structure + mtf_score + volume_score + momentum_score + ob_score + volatility_score + liquidity_score + regime_score
+    return {"structure": round(structure,1), "mtf": round(mtf_score,1), "volume": round(volume_score,1), "momentum": round(momentum_score,1), "order_block": round(ob_score,1), "volatility": round(volatility_score,1), "liquidity": round(liquidity_score,1), "regime": round(regime_score,1), "total": round(min(100.0,total),1), "potential_pct": round(float(potential),2), "rr": round(float(rr),2)}
 
 
 def _pivot_highs(highs, left=5, right=5, upto=None):
@@ -131,9 +151,8 @@ def _mtf_alignment(interval, local_closes, mtf_closes=None):
 def _base_targets(price, highs, atr, max_potential=80.0):
     future_res = [h for h in highs[-80:-1] if h > price]
     structural = min(future_res) if future_res else price + 3.0 * atr
-    target = max(structural, price + 3.0 * atr)
-    potential = (target / price - 1.0) * 100 if price else 0.0
-    potential = max(5.0, min(float(max_potential), potential))
+    potential = (structural / price - 1.0) * 100 if price else 0.0
+    potential = max(0.0, min(float(max_potential), potential))
     target = price * (1.0 + potential / 100.0)
     return target
 
@@ -261,9 +280,20 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     if score < min_score:
         return None
 
-    # Hard bearish MTF protection is deliberately limited to confirmed
-    # breakouts; early stages remain researchable but are still clearly tagged.
-    if stage == "ABT" and mtf["alignment"] == "BEARISH":
+    # Higher-timeframe regime is a hard gate for actionable ABT signals.
+    states = mtf["states"]
+    if states.get("4h") == "BEARISH":
+        return None
+    if stage == "ABT" and not (states.get("4h") == "BULLISH" and states.get("1h") == "BULLISH"):
+        return None
+    if stage == "ABT*" and states.get("4h") == "MIXED" and states.get("1h") != "BULLISH":
+        return None
+
+    if stage == "ABT*" and vol_ratio < float(cfg.get("abt_reversal_min_vol_x", 0.80)):
+        strong_rejection = bool(rng > 0 and lower_wick >= rng * 0.65 and candle_bull)
+        if not strong_rejection:
+            return None
+    if stage == "ABT" and vol_ratio < float(cfg.get("abt_breakout_min_vol_x", 1.20)):
         return None
 
     max_potential = min(80.0, float(cfg.get("signal_max_potential_pct", 80.0)))
@@ -297,6 +327,7 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     if potential < float(cfg.get("signal_min_potential_pct", 5.0)) or rr < float(cfg.get("signal_min_rr", 1.5)):
         return None
 
+    confidence = _confidence_components(stage, mtf, vol_ratio, rsi, order_block, volatility, potential, rr)
     reasons = {
         "ABT~": ["shakeout + absorption", "demand-zone hold"],
         "ABT*": ["demand-zone reversal", "lower-wick rejection"],
@@ -328,8 +359,11 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         "chg24": round(float(chg24 or 0.0), 2),
         "risk_pct": round(risk_pct, 2),
         "rr": round(rr, 2),
-        "score": score,
-        "st": score,
+        "score": confidence["total"],
+        "st": confidence["total"],
+        "confidence_score": confidence["total"],
+        "confidence_components": confidence,
+        "signal_action": "WATCH" if stage == "ABT~" else "BUY",
         "atr": a,
         "candle_open_time": int(cfg.get("_candle_open_time", 0) or 0),
         "trend_4h": mtf["states"].get("4h", "UNKNOWN"),
@@ -370,6 +404,9 @@ def evaluate_abt_coin(coin, interval="15m", limit=180, cfg=None, chg24=0.0):
     """Fetch closed spot candles and evaluate the latest ABT setup."""
     from botutil import http_json
     cfg = dict(cfg or {})
+    coin = str(coin or "").upper()
+    if coin in ABT_NON_CRYPTO_ASSETS:
+        return None
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={coin}USDT&interval={interval}&limit={int(limit)}"
     data = http_json(url, timeout=15)
     if not data or len(data) < 71:
