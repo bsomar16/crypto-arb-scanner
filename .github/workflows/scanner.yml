@@ -48,6 +48,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ACTIONS: "true"
         run: python scanner.py --mode buy
       - name: Commit bot state
         run: |
@@ -56,11 +59,11 @@ jobs:
           for i in 1 2 3; do
             if [ -n "$(git status --porcelain)" ]; then
               git add -A
-              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
+              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" || true
             else
-              echo "No changes"
-              break
+              echo "No local state changes"
             fi
+            git pull --rebase origin main && git push && break
             sleep 8
           done
 
