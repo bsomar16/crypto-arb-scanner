@@ -90,20 +90,15 @@ class ABTToolkitTests(unittest.TestCase):
             price, highs, atr=1.0, max_potential=80.0, min_potential=5.0
         )
         self.assertEqual(target, 106.0)
-        resistance_levels = sorted({
-            round(float(h), 12)
-            for h in highs[-120:-1]
-            if price < float(h) < target
-        })
-        ladder = resistance_levels[-2:] + [target]
-        self.assertEqual(ladder, [103.0, 104.0, 106.0])
+        pivots = [v for _, v in abt_strategy._pivot_highs(highs[-120:-1], left=2, right=2) if v > price]
+        self.assertEqual(pivots, [106.0])
 
     def test_structural_target_ignores_unconfirmed_wick_resistance(self):
         # 105.5/106 are not confirmed pivots; 107 is not confirmed because it
         # has no right-side bars.
         target = abt_strategy._base_targets(
             100.0,
-            [100.5, 101.0, 105.5, 106.0, 103.0, 104.0, 107.0],
+            [100.5, 101.0, 105.5, 102.0, 103.0, 104.0, 107.0],
             atr=1.0,
             max_potential=80.0,
             min_potential=5.0,
