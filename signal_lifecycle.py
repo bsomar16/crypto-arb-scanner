@@ -40,8 +40,23 @@ def signal_key(signal):
     return "|".join(str(signal.get(k, "")) for k in ("coin", "interval", "setup_type", "entry"))
 
 
+def opportunity_key(signal):
+    """Stable lifecycle key for one logical opportunity.
+
+    ABT~ -> ABT* -> ABT are stages of the same opportunity, not three
+    independent trades. Legacy BUY lifecycle identity remains unchanged.
+    """
+    if str(signal.get("strategy", "")).upper() == "ABT":
+        return "|".join((
+            str(signal.get("coin", "")).upper(),
+            str(signal.get("interval", "")),
+            "ABT",
+        ))
+    return signal_key(signal)
+
+
 def register(signal):
-    key = signal_key(signal)
+    key = opportunity_key(signal)
     if not key or key.endswith("||"):
         return key
     data = _read()
@@ -52,6 +67,9 @@ def register(signal):
             "coin": signal.get("coin"),
             "interval": signal.get("interval"),
             "setup_type": signal.get("setup_type"),
+            "strategy": signal.get("strategy"),
+            "strategy_family": signal.get("strategy_family"),
+            "stage": signal.get("strategy_family"),
             "entry": signal.get("entry"),
             "target": signal.get("t3", signal.get("target")),
             "t1": signal.get("t1"),
@@ -62,6 +80,17 @@ def register(signal):
             "events": [],
         }
         data[key] = row
+    if isinstance(row, dict) and str(signal.get("strategy", "")).upper() == "ABT":
+        stage = str(signal.get("strategy_family", "") or "")
+        previous = str(row.get("stage", "") or "")
+        if stage:
+            row["stage"] = stage
+            row["strategy_family"] = stage
+            row.setdefault("stage_history", [])
+            if stage != previous:
+                row["stage_history"].append({"stage": stage, "entry": signal.get("entry"), "ts": _now()})
+            row["updated_at"] = _now()
+        data[key] = row
     _write(data)
     return key
 
@@ -70,7 +99,7 @@ def transition(signal_or_key, state, event=None, price=None):
     state = str(state or "").upper()
     if state not in STATES:
         raise ValueError(f"unsupported lifecycle state: {state}")
-    key = signal_or_key if isinstance(signal_or_key, str) else signal_key(signal_or_key)
+    key = signal_or_key if isinstance(signal_or_key, str) else opportunity_key(signal_or_key)
     data = _read()
     row = data.get(key)
     if not isinstance(row, dict):
