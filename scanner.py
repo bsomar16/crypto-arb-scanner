@@ -259,11 +259,15 @@ def _signal_message(r):
     bp = r.get("bullish_potential", {}) or {}
     tier = bp.get("tier", "STANDARD")
     bp_score = float(bp.get("score", 0) or 0)
+    action = str(r.get("signal_action", "BUY") or "BUY").upper()
+    header = "🟡 <b>EARLY ABT SETUP</b>" if action == "WATCH" else "🟢 <b>CONFIRMED BUY SIGNAL</b>"
+    action_line = "👀 <b>Action: WATCH</b> · Await ABT* / ABT confirmation" if action == "WATCH" else "🎯 <b>Action: BUY</b>"
+    cc = r.get("confidence_components", {}) or {}
     return [
-        "🟢 <b>CONFIRMED BUY SIGNAL</b>",
+        header,
         f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}{family_label}",
         f"📌 Setup: <b>{setup}</b> · {r.get('trend_interval', '4h')}: {r.get('trend_4h', '?')}",
-        "🎯 <b>Action: BUY</b>",
+        action_line,
         f"💰 Entry: <b>{fmt_price(r['entry'])}</b> · 🛑 Stop: {fmt_price(r['stop'])}",
         "🎯 <b>Targets:</b>",
         f"⏳ <b>TP1:</b> {fmt_price(r['t1'])}",
