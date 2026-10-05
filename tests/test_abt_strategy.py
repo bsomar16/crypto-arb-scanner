@@ -80,6 +80,15 @@ class ABTToolkitTests(unittest.TestCase):
         self.assertTrue(result["abt"]["absorption_confirmed"])
         self.assertEqual(result["abt"]["shakeout_index"], 77)
 
+    def test_structural_target_avoids_artificial_five_percent_floor(self):
+        target = abt_strategy._base_targets(
+            100.0,
+            [101.0, 102.0, 103.0, 107.5, 108.0, 109.0],
+            atr=1.0,
+            max_potential=80.0,
+        )
+        self.assertGreaterEqual(target, 107.5)
+
     def test_abt_mtf_context_exposes_all_supported_timeframes(self):
         closes = [100.0 + i * 0.2 for i in range(100)]
         states = abt_strategy._mtf_alignment(
