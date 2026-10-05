@@ -290,7 +290,7 @@ def _signal_message(r):
     return [
         header,
         f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}{family_label}",
-        f"📌 Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')} · 1h: {r.get('mtf_1h', '?')}",
+        f"📌 Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')} · 1h: {r.get('mtf_1h', '?')} · 1d: {r.get('mtf_1d', '?')} · 1w: {r.get('mtf_1w', '?')}",
         action_line,
         f"💰 Entry: <b>{fmt_price(r['entry'])}</b> · 🛑 Stop: {fmt_price(r['stop'])}",
         "🎯 <b>Targets:</b>",
@@ -298,7 +298,7 @@ def _signal_message(r):
         f"⏳ <b>TP2:</b> {fmt_price(r['t2'])}",
         f"⏳ <b>TP3:</b> {fmt_price(r['t3'])}",
         f"📈 <b>Modelled potential:</b> +{float(r.get('potential_pct', 0.0)):.1f}% · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
-        (f"🧠 ABT confidence: <b>{bp_score:.0f}/100</b> · Structure {float(cc.get('structure', 0)):.0f} · MTF {float(cc.get('mtf', 0)):.0f} · Vol {float(cc.get('volume', 0)):.0f} · Momentum {float(cc.get('momentum', 0)):.0f}"
+        (f"🧠 ABT confidence: <b>{bp_score:.0f}/100</b> · Structure {float(cc.get('structure', 0)):.0f} · MTF {float(cc.get('mtf', 0)):.0f} · Vol {float(cc.get('volume', 0)):.0f} · Momentum {float(cc.get('momentum', 0)):.0f} · OB {float(cc.get('order_block', 0)):.0f} · Regime {float(cc.get('regime', 0)):.0f}"
          if is_abt else f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100"),
 
         f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>",
