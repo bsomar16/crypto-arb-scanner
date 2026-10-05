@@ -427,11 +427,24 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
             trigger_changed = bool(old_trigger and old_trigger != r.get("entry_trigger", ""))
 
-            # Legacy fired records predate signal_key/BOS persistence. Treat
-            # missing structural fields conservatively: unchanged setup/trigger
-            # stays suppressed instead of being mistaken for a new BOS.
+            # Legacy fired records predate signal_key persistence, but some
+            # records already contain bos_level. Preserve that structural anchor
+            # when it is available so a genuinely new BOS can re-arm after cooldown.
             if old_key:
                 same_setup = old_key == current_key
+            elif old.get("bos_level") is not None and r.get("bos_level") is not None:
+                try:
+                    old_bos = format(float(old.get("bos_level")), ".10g")
+                    current_bos = format(float(r.get("bos_level")), ".10g")
+                except (TypeError, ValueError):
+                    old_bos = current_bos = None
+                if old_bos is not None and current_bos is not None:
+                    same_setup = "|".join((coin, old_setup, old_trigger, old_bos)) == current_key
+                else:
+                    same_setup = (
+                        old_setup == str(r.get("setup_type", "") or "")
+                        and (not old_trigger or old_trigger == str(r.get("entry_trigger", "") or ""))
+                    )
             else:
                 same_setup = (
                     old_setup == str(r.get("setup_type", "") or "")
