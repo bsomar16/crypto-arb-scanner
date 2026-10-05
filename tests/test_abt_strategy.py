@@ -78,6 +78,28 @@ class ABTToolkitTests(unittest.TestCase):
         self.assertTrue(result["abt"]["absorption_confirmed"])
         self.assertEqual(result["abt"]["shakeout_index"], 77)
 
+    def test_abt_lifecycle_stages_share_one_opportunity(self):
+        import tempfile
+        import signal_lifecycle
+
+        original = signal_lifecycle.PATH
+        with tempfile.TemporaryDirectory() as td:
+            signal_lifecycle.PATH = f"{td}/signal_lifecycle.json"
+            base = {"coin": "TEST", "interval": "15m", "strategy": "ABT",
+                    "strategy_family": "ABT~", "setup_type": "SHAKEOUT_ABSORPTION",
+                    "entry": 100.0, "t3": 110.0}
+            key1 = signal_lifecycle.register(base)
+            key2 = signal_lifecycle.register(dict(base, strategy_family="ABT*",
+                                                   setup_type="DEMAND_REVERSAL", entry=101.0))
+            key3 = signal_lifecycle.register(dict(base, strategy_family="ABT",
+                                                   setup_type="TRENDLINE_BREAKOUT", entry=102.0))
+            self.assertEqual(key1, key2)
+            self.assertEqual(key2, key3)
+            row = signal_lifecycle._read()[key1]
+            self.assertEqual(row["stage"], "ABT")
+            self.assertEqual([x["stage"] for x in row["stage_history"]], ["ABT*", "ABT"])
+        signal_lifecycle.PATH = original
+
     def test_no_stage_when_latest_candle_does_not_confirm_setup(self):
         n = 80
         closes = [110.0] * n
