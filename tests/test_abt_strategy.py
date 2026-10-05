@@ -143,6 +143,30 @@ class ABTToolkitTests(unittest.TestCase):
         finally:
             signal_lifecycle.PATH = original
 
+
+    def test_abt_overextension_is_rejected(self):
+        n = 80
+        closes = [100.0 + i * 0.05 for i in range(n)]
+        highs = [x + 1.0 for x in closes]
+        lows = [x - 1.0 for x in closes]
+        opens = [x - 0.2 for x in closes]
+        volumes = [100.0] * n
+        # Force a valid-looking reversal candle, then reject on the 24h move gate.
+        lows[-1] = closes[-1] - 2.0
+        opens[-1] = closes[-1] - 0.5
+        result = abt_strategy.evaluate_abt(
+            closes, highs, lows, opens, volumes,
+            interval="15m",
+            atr=1.0,
+            cfg={
+                "signal_min_potential_pct": 5,
+                "signal_min_rr": 1.5,
+                "abt_max_chg24_pct": 50,
+            },
+            chg24=75.0,
+        )
+        self.assertIsNone(result)
+
     def test_no_stage_when_latest_candle_does_not_confirm_setup(self):
         n = 80
         closes = [110.0] * n
