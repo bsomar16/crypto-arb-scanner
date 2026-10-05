@@ -158,7 +158,14 @@ def _base_targets(price, highs, atr, max_potential=80.0, min_potential=5.0):
     return 0 so the caller can reject the setup rather than presenting an
     artificial +5% target as if it were structural.
     """
-    resistances = sorted({float(h) for h in highs[-120:-1] if float(h) > price})
+    # Only use confirmed historical pivot highs as resistance. Raw candle
+    # highs are too noisy and can turn an insignificant wick into a target.
+    historical = list(highs[-120:-1])
+    pivot_levels = [
+        float(v) for _, v in _pivot_highs(historical, left=2, right=2)
+        if float(v) > price
+    ]
+    resistances = sorted(set(pivot_levels))
     minimum_target = price * (1.0 + float(min_potential) / 100.0)
     structural = next((h for h in resistances if h >= minimum_target), 0.0)
     if structural <= price:
