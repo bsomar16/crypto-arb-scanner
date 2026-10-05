@@ -23,7 +23,7 @@ ABT_NON_CRYPTO_ASSETS = {"EUR", "GBP", "AUD", "CAD", "CHF", "TRY", "BRL", "PLN",
 def _confidence_components(stage, mtf, vol_ratio, rsi, order_block, volatility, potential, rr):
     """Transparent ABT confidence model."""
     states = mtf.get("states", {})
-    structure = {"ABT~": 20.0, "ABT*": 23.0, "ABT": 25.0}[stage]
+    structure = {"ABT~": 20.0, "ABT*": 25.0, "ABT": 30.0}[stage]
     mtf_score = 0.0
     if states.get("4h") == "BULLISH": mtf_score += 15.0
     elif states.get("4h") == "MIXED": mtf_score += 7.0
@@ -328,6 +328,12 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         return None
 
     confidence = _confidence_components(stage, mtf, vol_ratio, rsi, order_block, volatility, potential, rr)
+    # Estimate a bounded holding window from target distance versus ATR.
+    interval_minutes = {"5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080}.get(interval, 60)
+    atr_pct = (a / price) * 100.0 if price > 0 else 0.0
+    bars_to_target = max(2.0, min(200.0, potential / max(atr_pct, 0.05) * 0.8))
+    hold_min_hours = max(interval_minutes / 60.0, bars_to_target * interval_minutes / 60.0 * 0.5)
+    hold_max_hours = max(hold_min_hours * 1.8, bars_to_target * interval_minutes / 60.0 * 2.0)
     reasons = {
         "ABT~": ["shakeout + absorption", "demand-zone hold"],
         "ABT*": ["demand-zone reversal", "lower-wick rejection"],
@@ -364,6 +370,8 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         "confidence_score": confidence["total"],
         "confidence_components": confidence,
         "signal_action": "WATCH" if stage == "ABT~" else "BUY",
+        "estimated_hold_min_hours": round(hold_min_hours, 1),
+        "estimated_hold_max_hours": round(hold_max_hours, 1),
         "atr": a,
         "candle_open_time": int(cfg.get("_candle_open_time", 0) or 0),
         "trend_4h": mtf["states"].get("4h", "UNKNOWN"),
