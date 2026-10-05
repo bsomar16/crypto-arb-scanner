@@ -531,6 +531,12 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
 
 def run_buy(token, chat_id, realtime_cache=None):
     cfg = load_cfg()
+    try:
+        outcome_refresh = signal_outcomes.update_pending(cfg=cfg)
+        if outcome_refresh.get("updated"):
+            log("OUTCOMES", f"updated={outcome_refresh.get('updated')} pending={outcome_refresh.get('pending')}")
+    except Exception as e:
+        log("OUTCOMES", "refresh error:", e)
     intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h", "4h", "1d", "1w"]) if i in ("5m", "15m", "1h", "4h", "1d", "1w")]
     if not intervals:
         intervals = ["5m", "15m", "1h", "4h", "1d", "1w"]
