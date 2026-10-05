@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from statistics import mean
 import indicators as ind
+from target_quality import optimize_targets
 
 
 ABT_STAGES = ("ABT~", "ABT*", "ABT")
@@ -128,16 +129,14 @@ def _mtf_alignment(interval, local_closes, higher_closes=None):
     return {"alignment": alignment, "states": states}
 
 
-def _targets(price, highs, atr, max_potential=80.0):
+def _base_targets(price, highs, atr, max_potential=80.0):
     future_res = [h for h in highs[-80:-1] if h > price]
     structural = min(future_res) if future_res else price + 3.0 * atr
     target = max(structural, price + 3.0 * atr)
     potential = (target / price - 1.0) * 100 if price else 0.0
     potential = max(5.0, min(float(max_potential), potential))
     target = price * (1.0 + potential / 100.0)
-    t1 = price + (target - price) * 0.35
-    t2 = price + (target - price) * 0.65
-    return t1, t2, target, potential
+    return target
 
 
 def _score(stage, candle_bull, zone_touch, trendline_break, shakeout, absorption,
@@ -262,9 +261,30 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     if stage == "ABT" and mtf["alignment"] == "BEARISH":
         return None
 
-    t1, t2, t3, potential = _targets(
-        price, highs, a, float(cfg.get("signal_max_potential_pct", 80.0))
+    max_potential = min(80.0, float(cfg.get("signal_max_potential_pct", 80.0)))
+    base_target = _base_targets(price, highs, a, max_potential)
+    base_t1 = price + (base_target - price) * 0.35
+    base_t2 = price + (base_target - price) * 0.65
+    target_plan = optimize_targets(
+        {
+            "entry": price,
+            "t1": base_t1,
+            "t2": base_t2,
+            "t3": base_target,
+            "target": base_target,
+            "risk_pct": 0.0,
+            "rr": float(cfg.get("signal_min_rr", 1.5)),
+            "interval": interval,
+            "setup_type": setup,
+            "min_potential_pct": float(cfg.get("signal_min_potential_pct", 5.0)),
+            "max_potential_pct": max_potential,
+        },
+        {},
+        min_samples=int(cfg.get("target_min_samples", 30) or 30),
+        enabled=bool(cfg.get("target_optimization_enabled", True)),
     )
+    t1, t2, t3 = target_plan["t1"], target_plan["t2"], target_plan["t3"]
+    potential = (t3 / price - 1.0) * 100 if price else 0.0
     risk_dist = max(a * float(cfg.get("abt_stop_atr", 1.5)), price * 0.006)
     stop = price - risk_dist
     risk_pct = (price / stop - 1.0) * 100 if stop > 0 else 0.0
