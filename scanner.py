@@ -293,7 +293,7 @@ def _buy_signal_identity(r):
         bos = format(float(r.get("bos_level", 0) or 0), ".10g")
     except (TypeError, ValueError):
         bos = "0"
-    family = str(r.get("strategy_family", "") or r.get("strategy", "") or "")
+    family = str(r.get("strategy_family", "") or "")
     return "|".join((coin, family, setup, trigger, bos))
 
 
