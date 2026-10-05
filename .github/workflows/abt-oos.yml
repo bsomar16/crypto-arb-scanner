@@ -1,0 +1,46 @@
+name: ABT OOS walk-forward research
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated symbols"
+        required: false
+        default: "BTC,ETH,SOL,BNB,XRP,ADA,DOGE"
+      intervals:
+        description: "Comma-separated spot intervals"
+        required: false
+        default: "15m,1h,4h"
+      bars:
+        description: "Historical bars per local interval"
+        required: false
+        default: "2500"
+
+jobs:
+  abt-oos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest tests.test_abt_oos -v
+      - name: Compile check
+        run: python -m py_compile abt_strategy.py abt_oos.py
+      - name: Run causal ABT OOS walk-forward
+        run: >
+          python abt_oos.py
+          --symbols "${{ inputs.symbols }}"
+          --intervals "${{ inputs.intervals }}"
+          --bars "${{ inputs.bars }}"
+          --train-bars 1500
+          --test-bars 500
+          --step-bars 500
+          --output state/abt_oos_report.json
+      - name: Publish OOS report
+        uses: actions/upload-artifact@v4
+        with:
+          name: abt-oos-report
+          path: state/abt_oos_report.json
