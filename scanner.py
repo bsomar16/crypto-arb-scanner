@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Crypto-only signal and arbitrage bot orchestration.
+"""Crypto-only signal bot orchestration.
 
-Modes: arb | daily | buy | price | backtest | portfolio | check | report | all
+Modes: daily | buy | realtime | price | backtest | validate | portfolio | check | report | all
 """
 
 import concurrent.futures
@@ -11,18 +11,15 @@ import sys
 import time
 from argparse import ArgumentParser
 from datetime import datetime, timezone
-from statistics import median
 
 from botutil import esc, telegram_msg, load_json, save_json, fmt_price, env_float, env_int, log, set_json_logs
 from signal_audit import SignalAudit
-from markets import (EXCHANGES, fetch_exchange, fetch_binance_24h, crypto_quote,
-                     coin_status, calc_net, depth_estimate, volume_spike)
+from markets import fetch_binance_24h, crypto_quote
 from signals import analyze_coin_daily, intraday_signal
 import sentiment
 import portfolio as portfolio_mod
 import alerts as alerts_mod
 import backtest as backtest_mod
-import traps as traps_mod
 import store as store_mod
 import positions as positions_mod
 import exposure as exposure_mod
@@ -37,11 +34,6 @@ import validation as validation_mod
 import multi_exchange
 import shadow_trading
 
-MIN_EXCHANGES = 4
-SPREAD_ALERT_PCT = 8.0
-MAX_ALERTS_PER_RUN = 10
-TRAP_EXPIRY_DAYS = 7.0
-TRAP_FILE = "traps.json"
 STATE_DIR = "state"
 
 DEFAULTS = {
@@ -68,10 +60,6 @@ DEFAULTS = {
     "holdings": [],
     "price_alerts": [],
     "backtest_symbols": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE"],
-    "min_exchanges": MIN_EXCHANGES,
-    "spread_alert_pct": SPREAD_ALERT_PCT,
-    "max_alerts_per_run": MAX_ALERTS_PER_RUN,
-    "trap_expiry_days": TRAP_EXPIRY_DAYS,
     "position_expiry_days": 14,
     "max_open_positions": 5,
     "realtime_scan_interval_seconds": 60,
@@ -112,71 +100,6 @@ def load_cfg():
 
 def now_s():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-def arb_limits(cfg):
-    return {"min_ex": env_int("MIN_EXCHANGES", cfg.get("min_exchanges", MIN_EXCHANGES)), "spread": env_float("SPREAD_ALERT_PCT", cfg.get("spread_alert_pct", SPREAD_ALERT_PCT)), "max_alerts": env_int("MAX_ALERTS_PER_RUN", cfg.get("max_alerts_per_run", MAX_ALERTS_PER_RUN)), "trap_days": env_float("TRAP_EXPIRY_DAYS", cfg.get("trap_expiry_days", TRAP_EXPIRY_DAYS))}
-
-def fmt_dollar(v):
-    v = float(v or 0)
-    if v >= 1e6: return f"{v / 1e6:.1f}M"
-    if v >= 1e3: return f"{v / 1e3:.1f}k"
-    return f"{v:.0f}"
-
-def dw_status_line(ex, st):
-    info = (st or {}).get(ex)
-    if not info or (info.get("dep") is None and info.get("wd") is None): return "🔒 Private API"
-    nets = info.get("net") or []
-    net_s = f" ({nets[0]})" if nets and nets[0] else ""
-    dep, wd = info.get("dep"), info.get("wd")
-    if dep and wd: return f"✅ D/W Active{net_s}"
-    return f"⚠️ {'D on' if dep else 'D off'} · {'W on' if wd else 'W off'}{net_s}"
-
-def _alert_block(r, idx, total, net):
-    st = coin_status(r["coin"])
-    d1 = (depth_estimate(r["low_ex"], r["coin"]) or {}).get("full_usd", 0)
-    d2 = (depth_estimate(r["high_ex"], r["coin"]) or {}).get("full_usd", 0)
-    return ["", f"🚨 <b>ARB ALERT: {esc(r['coin'])} (+{net:.1f}%)</b>", f"⏱ Run: {idx} of {total}", "", f"🟢 BUY: {r['low_ex']}", f"• Price: {fmt_price(r['low'])}", f"• Depth: ~${fmt_dollar(d1)}", f"• Status: {dw_status_line(r['low_ex'], st)}", "", f"🔴 SELL: {r['high_ex']}", f"• Price: {fmt_price(r['high'])}", f"• Depth: ~${fmt_dollar(d2)}", f"• Status: {dw_status_line(r['high_ex'], st)}"]
-
-ARB_ALLOWED_EXCHANGES = frozenset({"BINANCE", "BYBIT", "OKX", "BITGET", "MEXC", "GATE", "KUCOIN", "HTX"})
-ARB_BLOCKED_EXCHANGES = frozenset({"POLONIEX"})
-
-
-def run_arb(token, chat_id):
-    cfg = load_cfg(); lim = arb_limits(cfg)
-    # Defense-in-depth: even if a stale config/environment reintroduces an
-    # exchange name, ARB must never query or report a blocked venue.
-    configured = [str(ex).upper() for ex in EXCHANGES]
-    blocked = [ex for ex in configured if ex in ARB_BLOCKED_EXCHANGES]
-    if blocked:
-        log("ARB", "blocked exchanges removed:", ",".join(blocked))
-    arb_exchanges = [ex for ex in configured if ex in ARB_ALLOWED_EXCHANGES and ex not in ARB_BLOCKED_EXCHANGES]
-    try: positions_mod.check_positions(token, chat_id, cfg)
-    except Exception as e: log("ARB", "positions check error:", e)
-    traps = traps_mod.load_traps(TRAP_FILE, lim["trap_days"]); maps, offline = {}, []
-    for ex in arb_exchanges:
-        maps[ex] = fetch_exchange(ex); log(ex, f"{len(maps[ex])} pairs")
-        if not maps[ex]: offline.append(ex)
-    counts = {}
-    for m in maps.values():
-        for c in m: counts[c] = counts.get(c, 0) + 1
-    universe = [c for c, n in counts.items() if n >= lim["min_ex"]]; new_alerts, all_flagged = [], []
-    for c in sorted(universe):
-        prices = {ex: p for ex, m in maps.items() if c in m and (p := m[c]) > 0}
-        if len(prices) < lim["min_ex"]: continue
-        vals = list(prices.values()); hi, lo = max(vals), min(vals); hi_ex, lo_ex = max(prices, key=prices.get), min(prices, key=prices.get)
-        spread = (hi - lo) / lo * 100; net = calc_net(hi, lo, hi_ex, lo_ex)
-        if net >= lim["spread"]:
-            all_flagged.append(c)
-            if c not in traps and len(new_alerts) < lim["max_alerts"]: new_alerts.append({"coin": c, "spread": spread, "net": net, "low": lo, "low_ex": lo_ex, "high": hi, "high_ex": hi_ex, "median": median(vals)})
-    new_alerts.sort(key=lambda r: r["net"], reverse=True); traps_mod.save_traps(TRAP_FILE, traps_mod.mark_flagged(traps, all_flagged))
-    for r in new_alerts:
-        try: store_mod.spread_log(r["coin"], r["spread"], r["net"], r["low_ex"], r["high_ex"], r["low"], r["high"], r["median"])
-        except Exception as e: log("ARB", "spread_log error:", e)
-    if not new_alerts: log("[ARB] no new alerts"); return False
-    lines = [f"📊 <b>ARB SCAN</b> · {now_s()}", f"🌐 {len(universe)} coins · {len(arb_exchanges)} exchanges · {len(arb_exchanges)-len(offline)}/{len(arb_exchanges)} feeds", "", f"🚨 <b>NEW ALERTS ({len(new_alerts)})</b>"]
-    for i, r in enumerate(new_alerts, 1): lines.extend(_alert_block(r, i, len(new_alerts), r["net"]))
-    if offline: lines.extend(["", f"⚠️ offline feeds: {', '.join(offline)}"])
-    telegram_msg(token, chat_id, "\n".join(lines)); return True
 
 def _candidate_universe(cfg, q, star, t24=None):
     """Build a wide discovery universe instead of volume-rank-only candidates."""
@@ -795,13 +718,6 @@ def run_check(token, chat_id):
     cfg = load_cfg(); sent = 0
     try: sent = positions_mod.check_positions(token, chat_id, cfg)
     except Exception as e: log("CHECK", "positions error:", e)
-    try:
-        fu = store_mod.followup_spreads(hours_back=6, threshold=cfg.get("spread_alert_pct", 8.0))
-        if fu and token and chat_id:
-            lines = [f"🔄 <b>SPREAD FOLLOW-UP (6h)</b> · {now_s()}", ""]
-            for coin, ts, net, still in fu[-8:]: lines.append(f"   {coin} net {net:+.2f}% · {'open' if still else 'closed'} · alert {ts[11:16]}")
-            telegram_msg(token, chat_id, "\n".join(lines)); sent += 1
-    except Exception as e: log("CHECK", "followup error:", e)
     return sent > 0
 
 def run_report(fmt):
@@ -812,7 +728,7 @@ def run_report(fmt):
     except Exception as e: log("REPORT", "html write error:", e)
     print(text); return text
 
-MODES = ["arb", "daily", "buy", "realtime", "price", "backtest", "validate", "portfolio", "check", "report", "all"]
+MODES = ["daily", "buy", "realtime", "price", "backtest", "validate", "portfolio", "check", "report", "all"]
 
 def main():
     ap = ArgumentParser(); ap.add_argument("--mode", choices=MODES, default="buy"); ap.add_argument("--all", action="store_true")
@@ -828,7 +744,6 @@ def main():
     elif mode == "daily": run_daily(token, chat_id)
     elif mode == "buy": run_buy(token, chat_id)
     elif mode == "realtime": run_realtime(token, chat_id)
-    elif mode == "arb": run_arb(token, chat_id)
     elif mode == "price": run_price(token, chat_id)
     elif mode == "backtest": run_backtest(token, chat_id)
     elif mode == "validate": run_validate(token, chat_id)
