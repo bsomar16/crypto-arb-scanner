@@ -208,25 +208,26 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
 
     # Shakeout/absorption: bearish high-volume climax followed 1-3 bars later
     # by a quiet, narrow candle that holds above the climax low.
-    avg20 = mean(volumes[-22:-2]) if len(volumes) >= 22 else mean(volumes[:-2])
     climax = None
+    climax_avg20 = 0.0
     for back in range(1, 4):
         i = n - 1 - back
-        if i < 0:
+        if i < 20:
             continue
-        crange = highs[i] - lows[i]
+        avg20 = mean(volumes[i - 20:i])
         if (
             closes[i] < opens[i]
             and volumes[i] >= avg20 * float(cfg.get("abt_climax_volume_x", 2.0))
             and zone and lows[i] <= zone["top"]
         ):
             climax = i
+            climax_avg20 = avg20
             break
     absorption = False
     if climax is not None:
         quiet_range = highs[-1] - lows[-1]
         absorption = bool(
-            volumes[-1] <= avg20 * float(cfg.get("abt_absorption_volume_x", 0.60))
+            volumes[-1] <= climax_avg20 * float(cfg.get("abt_absorption_volume_x", 0.60))
             and quiet_range <= (highs[climax] - lows[climax]) * float(cfg.get("abt_absorption_range_ratio", 0.40))
             and lows[-1] > lows[climax]
             and candle_bull
