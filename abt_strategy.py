@@ -111,13 +111,12 @@ def _mtf_state(closes):
     return "MIXED"
 
 
-def _mtf_alignment(interval, local_closes, higher_closes=None):
-    local = _mtf_state(local_closes)
-    higher = _mtf_state(higher_closes or [])
-    # The scanner's existing data cadence is 5m/15m/1h/4h/1d/1w. We expose
-    # the four requested context buckets without inventing unavailable candles.
-    states = {"5m": "UNKNOWN", "15m": "UNKNOWN", "1h": "UNKNOWN", "4h": higher}
-    states[interval] = local
+def _mtf_alignment(interval, local_closes, mtf_closes=None):
+    """Return causal multi-timeframe state for all supported spot intervals."""
+    mtf_closes = mtf_closes or {}
+    states = {k: _mtf_state(mtf_closes.get(k, []))
+              for k in ("5m", "15m", "1h", "4h", "1d", "1w")}
+    states[interval] = _mtf_state(local_closes)
     bullish = sum(v == "BULLISH" for v in states.values())
     bearish = sum(v == "BEARISH" for v in states.values())
     if bullish >= 2 and bullish > bearish:
@@ -158,7 +157,7 @@ def _score(stage, candle_bull, zone_touch, trendline_break, shakeout, absorption
 
 
 def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
-                 atr=None, higher_closes=None, order_block=None,
+                 atr=None, higher_closes=None, mtf_closes=None, order_block=None,
                  volatility=None, cfg=None):
     """Evaluate the latest closed candle only and return one ABT stage."""
     cfg = cfg or {}
@@ -232,7 +231,9 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
             and candle_bull
         )
 
-    mtf = _mtf_alignment(interval, closes, higher_closes)
+    if mtf_closes is None and higher_closes is not None:
+        mtf_closes = {"4h": higher_closes}
+    mtf = _mtf_alignment(interval, closes, mtf_closes)
     if absorption:
         stage = "ABT~"
         setup = "SHAKEOUT_ABSORPTION"
@@ -326,6 +327,12 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         "candle_open_time": int(cfg.get("_candle_open_time", 0) or 0),
         "trend_4h": mtf["states"].get("4h", "UNKNOWN"),
         "trend_interval": "4h",
+        "mtf_5m": mtf["states"].get("5m", "UNKNOWN"),
+        "mtf_15m": mtf["states"].get("15m", "UNKNOWN"),
+        "mtf_1h": mtf["states"].get("1h", "UNKNOWN"),
+        "mtf_4h": mtf["states"].get("4h", "UNKNOWN"),
+        "mtf_1d": mtf["states"].get("1d", "UNKNOWN"),
+        "mtf_1w": mtf["states"].get("1w", "UNKNOWN"),
         "abt": {
             "stage": stage,
             "pivot_left": int(cfg.get("abt_pivot_left", 5)),
@@ -368,14 +375,17 @@ def evaluate_abt_coin(coin, interval="15m", limit=180, cfg=None):
     lows = [float(k[3]) for k in data]
     opens = [float(k[1]) for k in data]
     volumes = [float(k[5]) for k in data]
-    higher_closes = None
-    if interval != "4h":
+    mtf_closes = {}
+    # All MTF series exclude the currently forming candle.
+    for tf in ("5m", "15m", "1h", "4h", "1d", "1w"):
+        if tf == interval:
+            continue
         higher = http_json(
-            f"https://data-api.binance.vision/api/v3/klines?symbol={coin}USDT&interval=4h&limit=100",
+            f"https://data-api.binance.vision/api/v3/klines?symbol={coin}USDT&interval={tf}&limit=100",
             timeout=15,
         )
         if higher and len(higher) > 1:
-            higher_closes = [float(k[4]) for k in higher[:-1]]
+            mtf_closes[tf] = [float(k[4]) for k in higher[:-1]]
     try:
         import signal_context
         a = ind.atr(highs, lows, closes) or closes[-1] * 0.01
@@ -383,7 +393,8 @@ def evaluate_abt_coin(coin, interval="15m", limit=180, cfg=None):
         cfg["_candle_open_time"] = int(data[-1][0])
         result = evaluate_abt(
             closes, highs, lows, opens, volumes, interval=interval, atr=a,
-            higher_closes=higher_closes,
+            higher_closes=mtf_closes.get("4h"),
+            mtf_closes=mtf_closes,
             order_block=ctx.get("order_block"),
             volatility=ctx.get("volatility"),
             cfg=cfg,
