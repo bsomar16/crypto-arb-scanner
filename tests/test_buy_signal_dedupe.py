@@ -40,7 +40,7 @@ class BuySignalDedupeTests(unittest.TestCase):
         self.assertEqual(fresh, [])
         self.assertEqual(updates, {})
 
-    def test_material_entry_change_is_a_new_signal(self):
+    def test_material_entry_change_alone_is_suppressed(self):
         hits = [self._signal(entry=0.00190)]
         fired = {
             "GALA": {
@@ -51,8 +51,8 @@ class BuySignalDedupeTests(unittest.TestCase):
             }
         }
         fresh, updates = scanner._dedupe_buy_signals(hits, fired, 16000, active_coins=set())
-        self.assertEqual(len(fresh), 1)
-        self.assertIn("GALA", updates)
+        self.assertEqual(fresh, [])
+        self.assertEqual(updates, {})
 
     def test_setup_change_is_a_new_signal(self):
         hits = [self._signal(setup="BREAKOUT", score=83)]
