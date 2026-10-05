@@ -1,8 +1,12 @@
 name: Crypto Signal Bot
 
 on:
-  # Scheduling is external (cron-job.org). Do not add a native schedule here:
-  # two schedulers would create duplicate BUY/TP notifications.
+  # GitHub Actions is the authoritative scheduler. External cron services are not required.
+  schedule:
+    - cron: "7,22,37,52 * * * *"   # arbitrage scan
+    - cron: "2,17,32,47 * * * *"   # multi-timeframe BUY signals
+    - cron: "7 8 * * *"            # daily crypto report 08:07 UTC
+    - cron: "10 12 * * 1"          # weekly backtest, Monday 12:10 UTC
   workflow_dispatch:
     inputs:
       mode:
@@ -13,6 +17,7 @@ on:
         options:
           - buy
           - daily
+          - arb
           - price
           - backtest
           - check
@@ -27,9 +32,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  arb-scan:
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'arb')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: arb-scan
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run crypto arbitrage scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py --mode arb
+      - name: Commit bot state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3; do
+            if [ -n "$(git status --porcelain)" ]; then
+              git add -A
+              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" || true
+            else
+              echo "No local state changes"
+            fi
+            git pull --rebase origin main && git push && break
+            sleep 8
+          done
+
   buy-signals:
     if: |
-      github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'all')
+      (github.event_name == 'schedule' && github.event.schedule == '2,17,32,47 * * * *') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'all'))
     runs-on: ubuntu-latest
     concurrency:
       group: buy-scan
@@ -69,6 +108,7 @@ jobs:
 
   daily-picks:
     if: |
+      (github.event_name == 'schedule' && github.event.schedule == '7 8 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'daily') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
     runs-on: ubuntu-latest
@@ -101,7 +141,9 @@ jobs:
           done
 
   weekly-backtest:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'backtest'
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '10 12 * * 1') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'backtest')
     runs-on: ubuntu-latest
     concurrency:
       group: weekly-backtest
