@@ -1,0 +1,36 @@
+name: oos-4h-momentum-expansion
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'oos_4h_momentum_expansion.py'
+      - '.github/workflows/oos-4h-momentum-expansion.yml'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
+  push:
+    branches: [main]
+    paths:
+      - 'oos_4h_momentum_expansion.py'
+      - '.github/workflows/oos-4h-momentum-expansion.yml'
+      - 'signals.py'
+      - 'entry_engine.py'
+      - 'live_replay.py'
+      - 'config.json'
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Run frozen OOS study
+        run: python oos_4h_momentum_expansion.py
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-momentum-expansion
+          path: state/oos_4h_momentum_expansion.json
+          if-no-files-found: error
