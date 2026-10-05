@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 PATH = "state/signal_lifecycle.json"
 STATES = ("DETECTED", "ACTIVE", "TP1", "TP2", "TP3", "STOPPED", "EXPIRED", "INVALIDATED", "CLOSED")
+ACTIVE_STATES = frozenset(("DETECTED", "ACTIVE", "TP1", "TP2"))
 
 
 def _now():
@@ -40,19 +41,37 @@ def signal_key(signal):
     return "|".join(str(signal.get(k, "")) for k in ("coin", "interval", "setup_type", "entry"))
 
 
-def opportunity_key(signal):
-    """Keep ABT stages together without suppressing later opportunities."""
-    if str(signal.get("strategy", "")).upper() != "ABT":
-        return signal_key(signal)
-    base = "|".join((
+def _abt_base(signal):
+    return "|".join((
         str(signal.get("coin", "")).upper(),
         str(signal.get("interval", "")),
         "ABT",
     ))
+
+
+def _active_abt_key(data, base):
+    """Find an existing active ABT opportunity, including timestamped keys."""
+    candidates = []
+    for key, row in data.items():
+        if not isinstance(row, dict) or row.get("state") not in ACTIVE_STATES:
+            continue
+        if key == base or key.startswith(base + "|") or row.get("opportunity_base_key") == base:
+            candidates.append((str(row.get("updated_at") or row.get("detected_at") or ""), key))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def opportunity_key(signal):
+    """Keep ABT stages together without suppressing later closed opportunities."""
+    if str(signal.get("strategy", "")).upper() != "ABT":
+        return signal_key(signal)
+    base = _abt_base(signal)
     data = _read()
-    row = data.get(base)
-    if isinstance(row, dict) and row.get("state") in ("DETECTED", "ACTIVE", "TP1", "TP2"):
-        return base
+    active = _active_abt_key(data, base)
+    if active:
+        return active
     candle = signal.get("candle_open_time") or signal.get("abt", {}).get("candle_open_time")
     return f"{base}|{int(candle)}" if candle else base
 
@@ -82,10 +101,13 @@ def register(signal):
             "state": "DETECTED",
             "events": [],
         }
+        if str(signal.get("strategy", "")).upper() == "ABT":
+            row["opportunity_base_key"] = _abt_base(signal)
         data[key] = row
     if isinstance(row, dict) and str(signal.get("strategy", "")).upper() == "ABT":
         stage = str(signal.get("strategy_family", "") or "")
         previous = str(row.get("stage", "") or "")
+        row["opportunity_base_key"] = row.get("opportunity_base_key") or _abt_base(signal)
         if stage:
             row["stage"] = stage
             row["strategy_family"] = stage
@@ -151,5 +173,5 @@ def active_keys():
     data = _read()
     return {
         key for key, row in data.items()
-        if isinstance(row, dict) and row.get("state") in ("DETECTED", "ACTIVE", "TP1", "TP2")
+        if isinstance(row, dict) and row.get("state") in ACTIVE_STATES
     }
