@@ -172,7 +172,25 @@ def _rank_trade_candidates(hits, cfg):
         bullish = row.get("bullish_potential", {}) or {}
         # Small ranking preference only; this never creates a BUY or bypasses gates.
         row["bullish_potential_modifier"] = round((float(bullish.get("score", 50.0)) - 50.0) * 0.08, 1)
-        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier + row["market_regime_modifier"] + row["bullish_potential_modifier"])), 1)
+        if str(row.get("strategy", "")).upper() == "ABT":
+            try:
+                hs = signal_history.comparable_stats(row, min_samples=int(cfg.get("abt_confidence_min_samples", 30)))
+            except Exception:
+                hs = None
+            if hs and hs.get("win_pct") is not None and int(hs.get("sample", 0) or 0) >= int(cfg.get("abt_confidence_min_samples", 30)):
+                raw_conf = float(row.get("confidence_score", row.get("score", 0)) or 0)
+                win_pct = float(hs.get("win_pct", 0) or 0)
+                row["confidence_calibrated"] = round(max(0.0, min(100.0, raw_conf * 0.70 + win_pct * 0.30)), 1)
+                row["confidence_historical_win_pct"] = round(win_pct, 1)
+                row["confidence_historical_sample"] = int(hs.get("sample", 0) or 0)
+                row["confidence_calibration_scope"] = hs.get("scope")
+                row["confidence_calibration_modifier"] = round(max(-5.0, min(5.0, (win_pct - 70.0) * 0.15)), 1)
+            else:
+                row["confidence_calibrated"] = float(row.get("confidence_score", row.get("score", 0)) or 0)
+                row["confidence_calibration_modifier"] = 0.0
+        else:
+            row["confidence_calibration_modifier"] = 0.0
+        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier + row["market_regime_modifier"] + row["bullish_potential_modifier"] + float(row.get("confidence_calibration_modifier", 0.0)))), 1)
         scored.append(row)
     scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     return scored
