@@ -1,0 +1,32 @@
+name: oos-4h-baseline-power
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - 'oos_4h_baseline_power.py'
+      - 'live_replay.py'
+      - 'signals.py'
+      - 'config.json'
+      - '.github/workflows/oos-4h-baseline-power.yml'
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run expanded baseline OOS study
+        run: python oos_4h_baseline_power.py
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: oos-4h-baseline-power
+          path: state/oos_4h_baseline_power.json
+          if-no-files-found: error
+          retention-days: 30
