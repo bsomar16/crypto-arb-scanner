@@ -273,7 +273,7 @@ def _signal_message(r):
         f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100",
 
         f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>",
-        f"📊 Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%",
+        f"📊 Score: <b>{float(r.get('score', 0)):.0f}/100</b> · RSI {float(r.get('rsi', 0)):.0f} · volume ×{float(r.get('vol_x', 0)):.2f} · 24h {float(r.get('chg24', 0)):+.1f}%",
         f"🧠 Why: {esc(reasons)}" if reasons else "🧠 Why: structure + momentum confirmation",
     ]
 
