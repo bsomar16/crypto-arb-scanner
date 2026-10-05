@@ -5,7 +5,7 @@ import unittest
 import signal_history
 
 
-class ForwardResearchCaptureTests(unittest.TestCase):
+class ForwardResearchCaptureTests(unittest.TestCase):  # research telemetry only
     def test_record_signal_persists_entry_time_features(self):
         with tempfile.TemporaryDirectory() as td:
             path = f"{td}/signals.jsonl"
