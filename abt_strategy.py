@@ -296,6 +296,13 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     if stage == "ABT" and vol_ratio < float(cfg.get("abt_breakout_min_vol_x", 1.20)):
         return None
 
+    # Avoid chasing already-parabolic moves. The ABT setup remains visible only
+    # after a fresh structural reset rather than treating a vertical 24h move as
+    # a normal breakout/reversal entry.
+    max_chg24 = float(cfg.get("abt_max_chg24_pct", 50.0))
+    if max_chg24 > 0 and abs(float(chg24 or 0.0)) > max_chg24:
+        return None
+
     max_potential = min(80.0, float(cfg.get("signal_max_potential_pct", 80.0)))
     base_target = _base_targets(price, highs, a, max_potential)
     base_t1 = price + (base_target - price) * 0.35
@@ -316,7 +323,7 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         },
         {},
         min_samples=int(cfg.get("target_min_samples", 30) or 30),
-        enabled=bool(cfg.get("target_optimization_enabled", True)),
+        enabled=bool(cfg.get("target_optimization_enabled", True)) and bool(cfg.get("abt_target_optimization_enabled", False)),
     )
     t1, t2, t3 = target_plan["t1"], target_plan["t2"], target_plan["t3"]
     potential = (t3 / price - 1.0) * 100 if price else 0.0
