@@ -20,7 +20,7 @@ BINANCE = "https://api.binance.com"
 STATE_PATH = "state/signal_outcomes.json"
 REFRESH_PATH = "state/signal_outcomes_refresh.json"
 MILESTONES = (5, 10, 20, 30, 50, 80)
-DEFAULT_HORIZON_BARS = {"5m": 288, "15m": 96, "1h": 48}
+DEFAULT_HORIZON_BARS = {"5m": 288, "15m": 96, "1h": 48, "4h": 42, "1d": 30, "1w": 12}
 
 
 def _now():
