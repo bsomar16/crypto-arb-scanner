@@ -646,6 +646,10 @@ def run_buy(token, chat_id, realtime_cache=None):
         r["trade_quality"] = round(max(0.0, min(100.0, float(r.get("trade_quality", 0.0)) + r["multi_exchange_modifier"])), 1)
     ranked.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     selected = ranked
+    # ABT~ is an early discovery stage, never an executable BUY. Keep it in
+    # notification flow for monitoring, but exclude it from trade/position flow.
+    trade_selected = [r for r in selected if str(r.get("signal_action", "BUY")).upper() != "WATCH"]
+    early_watch = [r for r in selected if str(r.get("signal_action", "BUY")).upper() == "WATCH"]
     # Research-only forward capture: persist every newly qualified BUY signal
     # with entry-time features. This does not create, suppress, rank, or execute
     # signals and is intentionally independent of Telegram notification claims.
@@ -663,6 +667,8 @@ def run_buy(token, chat_id, realtime_cache=None):
     claimed_keys = _claim_buy_notification_keys(selected, now_ts)
     before_claim = len(selected)
     selected = [r for r in selected if _buy_signal_identity(r) in claimed_keys]
+    trade_selected = [r for r in selected if str(r.get("signal_action", "BUY")).upper() != "WATCH"]
+    early_watch = [r for r in selected if str(r.get("signal_action", "BUY")).upper() == "WATCH"]
     allowed_coins = {str(r.get("coin", "")).upper() for r in selected}
     updates = {coin: value for coin, value in updates.items() if coin in allowed_coins}
     if before_claim != len(selected):
@@ -745,14 +751,19 @@ def run_buy(token, chat_id, realtime_cache=None):
     lines = [
         f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}",
         f"🔎 Wide discovery: {len(discovery_rows)} candidates · deep: {len(cands)} · {len(tasks)} MTF scans",
-        f"🎯 Quality-qualified signals: {len(selected)} of {len(fresh)}",
+        f"🎯 BUY-qualified signals: {len(trade_selected)} · early ABT watch: {len(early_watch)} · qualified total: {len(selected)} of {len(fresh)}",
         "",
     ]
-    for i, r in enumerate(selected, 1):
+    for i, r in enumerate(trade_selected, 1):
         if i > 1:
             lines.append("")
         lines.extend([f"<b>#{i}</b>" + (" ⭐" if r.get("star") else "")])
         lines.extend(_signal_message(r))
+    if early_watch:
+        lines.extend(["", "👀 <b>EARLY ABT WATCHLIST</b>"])
+        for i, r in enumerate(early_watch, 1):
+            lines.extend(["", f"<b>W{i}</b>" + (" ⭐" if r.get("star") else "")])
+            lines.extend(_signal_message(r))
 
     if fired_alerts:
         lines.extend(["", "🔔 <b>PRICE ALERTS</b>"])
@@ -777,7 +788,7 @@ def run_buy(token, chat_id, realtime_cache=None):
     if updates or migrated_fired:
         save_json("state/fired_signals.json", fired)
 
-    for r in selected:
+    for r in trade_selected:
         try:
             signal_lifecycle.register(r)
         except Exception as e:
@@ -786,9 +797,9 @@ def run_buy(token, chat_id, realtime_cache=None):
     shadow_result = {"opened": 0, "closed": 0, "outcome_source": "shadow"}
     if bool(cfg.get("shadow_trading_enabled", False)):
         try:
-            prices = {str(r.get("coin", "")).upper(): float(r.get("entry", r.get("price", 0))) for r in selected}
+            prices = {str(r.get("coin", "")).upper(): float(r.get("entry", r.get("price", 0))) for r in trade_selected}
             shadow_result = shadow_trading.run_once(
-                selected,
+                trade_selected,
                 lambda coin: prices.get(str(coin).upper()),
                 cfg,
                 path=str(cfg.get("shadow_state_path", "state/shadow_trades.jsonl")),
@@ -798,7 +809,7 @@ def run_buy(token, chat_id, realtime_cache=None):
             log("SHADOW", "shadow trading error:", e)
 
     try:
-        opened = positions_mod.open_picks(selected, cfg, source="buy")
+        opened = positions_mod.open_picks(trade_selected, cfg, source="buy")
     except Exception as e:
         log("BUY", "positions open error:", e)
     return True
