@@ -138,6 +138,8 @@ def open_picks(picks, cfg, source="daily"):
             "rating": r.get("rating", "BUY"), "score": r.get("score"), "potential_pct": r.get("potential_pct"),
             "risk_pct": r.get("risk_pct"), "rr": r.get("rr"),
             "setup_type": r.get("setup_type"), "interval": r.get("interval"),
+            "strategy": r.get("strategy"), "strategy_family": r.get("strategy_family"),
+            "strategy_id": r.get("strategy_id"),
             "source": source, "mode": "paper", "exchange": r.get("exchange"),
             "portfolio_risk_action": correlation.get("risk_action", "ALLOW"),
             "portfolio_correlated": bool(correlation.get("correlated", False)),
