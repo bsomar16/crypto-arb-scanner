@@ -158,7 +158,7 @@ def _score(stage, candle_bull, zone_touch, trendline_break, shakeout, absorption
 
 def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
                  atr=None, higher_closes=None, mtf_closes=None, order_block=None,
-                 volatility=None, cfg=None):
+                 volatility=None, chg24=0.0, cfg=None):
     """Evaluate the latest closed candle only and return one ABT stage."""
     cfg = cfg or {}
     n = len(closes)
