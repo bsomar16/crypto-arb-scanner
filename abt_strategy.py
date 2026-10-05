@@ -151,12 +151,18 @@ def _mtf_alignment(interval, local_closes, mtf_closes=None):
     return {"alignment": alignment, "states": states}
 
 
-def _base_targets(price, highs, atr, max_potential=80.0):
+def _base_targets(price, highs, atr, max_potential=80.0, min_potential=5.0):
+    """Return a real resistance target; never manufacture the configured floor.
+
+    If there is no confirmed resistance beyond the minimum required potential,
+    return 0 so the caller can reject the setup rather than presenting an
+    artificial +5% target as if it were structural.
+    """
     resistances = sorted({float(h) for h in highs[-120:-1] if float(h) > price})
-    minimum_target = price * (1.0 + 5.0 / 100.0)
+    minimum_target = price * (1.0 + float(min_potential) / 100.0)
     structural = next((h for h in resistances if h >= minimum_target), 0.0)
     if structural <= price:
-        structural = price + max(2.5 * float(atr), price * 0.05)
+        return 0.0
     max_target = price * (1.0 + float(max_potential) / 100.0)
     return min(structural, max_target)
 
@@ -310,7 +316,10 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         return None
 
     max_potential = min(80.0, float(cfg.get("signal_max_potential_pct", 80.0)))
-    base_target = _base_targets(price, highs, a, max_potential)
+    min_potential = float(cfg.get("signal_min_potential_pct", 5.0))
+    base_target = _base_targets(price, highs, a, max_potential, min_potential)
+    if base_target <= price:
+        return None
     base_t1 = price + (base_target - price) * 0.35
     base_t2 = price + (base_target - price) * 0.65
     target_plan = optimize_targets(
