@@ -257,8 +257,14 @@ def _signal_message(r):
     family_label = f" · {family}" if family else ""
     reasons = ", ".join(r.get("reasons", [])[:5])
     bp = r.get("bullish_potential", {}) or {}
-    tier = bp.get("tier", "STANDARD")
-    bp_score = float(bp.get("score", 0) or 0)
+    cc = r.get("confidence_components", {}) or {}
+    is_abt = str(r.get("strategy", "")).upper() == "ABT"
+    if is_abt:
+        tier = str(r.get("strategy_family", "ABT"))
+        bp_score = float(r.get("confidence_score", r.get("score", 0)) or 0)
+    else:
+        tier = bp.get("tier", "STANDARD")
+        bp_score = float(bp.get("score", 0) or 0)
     action = str(r.get("signal_action", "BUY") or "BUY").upper()
     header = "🟡 <b>EARLY ABT SETUP</b>" if action == "WATCH" else "🟢 <b>CONFIRMED BUY SIGNAL</b>"
     action_line = "👀 <b>Action: WATCH</b> · Await ABT* / ABT confirmation" if action == "WATCH" else "🎯 <b>Action: BUY</b>"
@@ -266,7 +272,7 @@ def _signal_message(r):
     return [
         header,
         f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}{family_label}",
-        f"📌 Setup: <b>{setup}</b> · {r.get('trend_interval', '4h')}: {r.get('trend_4h', '?')}",
+        f"📌 Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')} · 1h: {r.get('mtf_1h', '?')}",
         action_line,
         f"💰 Entry: <b>{fmt_price(r['entry'])}</b> · 🛑 Stop: {fmt_price(r['stop'])}",
         "🎯 <b>Targets:</b>",
@@ -274,7 +280,8 @@ def _signal_message(r):
         f"⏳ <b>TP2:</b> {fmt_price(r['t2'])}",
         f"⏳ <b>TP3:</b> {fmt_price(r['t3'])}",
         f"📈 <b>Modelled potential:</b> +{float(r.get('potential_pct', 0.0)):.1f}% · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
-        f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100",
+        (f"🧠 ABT confidence: <b>{bp_score:.0f}/100</b> · Structure {float(cc.get('structure', 0)):.0f} · MTF {float(cc.get('mtf', 0)):.0f} · Vol {float(cc.get('volume', 0)):.0f} · Momentum {float(cc.get('momentum', 0)):.0f}"
+         if is_abt else f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100"),
 
         f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>",
         f"📊 Score: <b>{float(r.get('score', 0)):.0f}/100</b> · RSI {float(r.get('rsi', 0)):.0f} · volume ×{float(r.get('vol_x', 0)):.2f} · 24h {float(r.get('chg24', 0)):+.1f}%",
