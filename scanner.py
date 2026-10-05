@@ -351,7 +351,7 @@ def _buy_signal_identity(r):
         bos = format(float(r.get("bos_level", 0) or 0), ".10g")
     except (TypeError, ValueError):
         bos = "0"
-    return "|".join((coin, interval, setup, trigger, bos))
+    return "|".join((coin, setup, trigger, bos))
 
 
 def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02,
@@ -402,14 +402,14 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             old_interval = str(old.get("interval", "") or "")
             old_setup = str(old.get("setup_type", "") or "")
             old_trigger = str(old.get("entry_trigger", "") or "")
-            interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
             setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
             trigger_changed = bool(old_trigger and old_trigger != r.get("entry_trigger", ""))
 
-            # A different BOS anchor is a real structural change. Re-arm only
-            # after cooldown; entry/score strengthening alone is insufficient.
-            material_rearm = (not same_setup) and (interval_changed or setup_changed or trigger_changed)
-            if not (interval_changed or setup_changed or trigger_changed):
+            # Timeframe changes alone do not create a second alert for the same
+            # underlying setup. A new BOS anchor, setup type, or entry trigger
+            # is required after cooldown; entry/score/candle drift is not enough.
+            material_rearm = (not same_setup) and (setup_changed or trigger_changed)
+            if not (setup_changed or trigger_changed):
                 material_rearm = not same_setup
 
             is_new_signal = bool(cooldown_elapsed and material_rearm)
