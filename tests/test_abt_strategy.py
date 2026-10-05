@@ -1,5 +1,6 @@
 import unittest
 
+
 import abt_strategy
 
 
@@ -95,39 +96,51 @@ class ABTToolkitTests(unittest.TestCase):
         import signal_lifecycle
 
         original = signal_lifecycle.PATH
-        with tempfile.TemporaryDirectory() as td:
-            signal_lifecycle.PATH = f"{td}/signal_lifecycle.json"
-            base = {"coin": "TEST", "interval": "15m", "strategy": "ABT",
-                    "strategy_family": "ABT", "setup_type": "TRENDLINE_BREAKOUT",
-                    "entry": 100.0, "t3": 110.0, "candle_open_time": 1000}
-            key1 = signal_lifecycle.register(base)
-            signal_lifecycle.transition(key1, "CLOSED", event="tp3")
-            key2 = signal_lifecycle.register(dict(base, candle_open_time=2000, entry=105.0))
-            self.assertNotEqual(key1, key2)
-            self.assertTrue(key2.endswith("|2000"))
-        signal_lifecycle.PATH = original
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                signal_lifecycle.PATH = f"{td}/signal_lifecycle.json"
+                base = {"coin": "TEST", "interval": "15m", "strategy": "ABT",
+                        "strategy_family": "ABT", "setup_type": "TRENDLINE_BREAKOUT",
+                        "entry": 100.0, "t3": 110.0, "candle_open_time": 1000}
+                key1 = signal_lifecycle.register(base)
+                signal_lifecycle.transition(key1, "CLOSED", event="tp3")
+                key2 = signal_lifecycle.register(dict(base, candle_open_time=2000, entry=105.0))
+                self.assertNotEqual(key1, key2)
+                self.assertTrue(key2.endswith("|2000"))
+        finally:
+            signal_lifecycle.PATH = original
 
-    def test_abt_lifecycle_stages_share_one_opportunity(self):
+    def test_abt_lifecycle_stages_share_one_timestamped_opportunity(self):
         import tempfile
         import signal_lifecycle
 
         original = signal_lifecycle.PATH
-        with tempfile.TemporaryDirectory() as td:
-            signal_lifecycle.PATH = f"{td}/signal_lifecycle.json"
-            base = {"coin": "TEST", "interval": "15m", "strategy": "ABT",
-                    "strategy_family": "ABT~", "setup_type": "SHAKEOUT_ABSORPTION",
-                    "entry": 100.0, "t3": 110.0}
-            key1 = signal_lifecycle.register(base)
-            key2 = signal_lifecycle.register(dict(base, strategy_family="ABT*",
-                                                   setup_type="DEMAND_REVERSAL", entry=101.0))
-            key3 = signal_lifecycle.register(dict(base, strategy_family="ABT",
-                                                   setup_type="TRENDLINE_BREAKOUT", entry=102.0))
-            self.assertEqual(key1, key2)
-            self.assertEqual(key2, key3)
-            row = signal_lifecycle._read()[key1]
-            self.assertEqual(row["stage"], "ABT")
-            self.assertEqual([x["stage"] for x in row["stage_history"]], ["ABT*", "ABT"])
-        signal_lifecycle.PATH = original
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                signal_lifecycle.PATH = f"{td}/signal_lifecycle.json"
+                base = {"coin": "TEST", "interval": "15m", "strategy": "ABT",
+                        "strategy_family": "ABT~", "setup_type": "SHAKEOUT_ABSORPTION",
+                        "entry": 100.0, "t3": 110.0, "candle_open_time": 1000}
+                key1 = signal_lifecycle.register(base)
+                key2 = signal_lifecycle.register(dict(
+                    base, strategy_family="ABT*", setup_type="DEMAND_REVERSAL",
+                    entry=101.0, candle_open_time=1015,
+                ))
+                key3 = signal_lifecycle.register(dict(
+                    base, strategy_family="ABT", setup_type="TRENDLINE_BREAKOUT",
+                    entry=102.0, candle_open_time=1030,
+                ))
+                self.assertEqual(key1, key2)
+                self.assertEqual(key2, key3)
+                self.assertTrue(key1.endswith("|1000"))
+                row = signal_lifecycle._read()[key1]
+                self.assertEqual(row["stage"], "ABT")
+                self.assertEqual(
+                    [x["stage"] for x in row["stage_history"]],
+                    ["ABT*", "ABT"],
+                )
+        finally:
+            signal_lifecycle.PATH = original
 
     def test_no_stage_when_latest_candle_does_not_confirm_setup(self):
         n = 80
