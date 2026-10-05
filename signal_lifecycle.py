@@ -41,18 +41,20 @@ def signal_key(signal):
 
 
 def opportunity_key(signal):
-    """Stable lifecycle key for one logical opportunity.
-
-    ABT~ -> ABT* -> ABT are stages of the same opportunity, not three
-    independent trades. Legacy BUY lifecycle identity remains unchanged.
-    """
-    if str(signal.get("strategy", "")).upper() == "ABT":
-        return "|".join((
-            str(signal.get("coin", "")).upper(),
-            str(signal.get("interval", "")),
-            "ABT",
-        ))
-    return signal_key(signal)
+    """Keep ABT stages together without suppressing later opportunities."""
+    if str(signal.get("strategy", "")).upper() != "ABT":
+        return signal_key(signal)
+    base = "|".join((
+        str(signal.get("coin", "")).upper(),
+        str(signal.get("interval", "")),
+        "ABT",
+    ))
+    data = _read()
+    row = data.get(base)
+    if isinstance(row, dict) and row.get("state") in ("DETECTED", "ACTIVE", "TP1", "TP2"):
+        return base
+    candle = signal.get("candle_open_time") or signal.get("abt", {}).get("candle_open_time")
+    return f"{base}|{int(candle)}" if candle else base
 
 
 def register(signal):
@@ -70,6 +72,7 @@ def register(signal):
             "strategy": signal.get("strategy"),
             "strategy_family": signal.get("strategy_family"),
             "stage": signal.get("strategy_family"),
+            "stage_history": [],
             "entry": signal.get("entry"),
             "target": signal.get("t3", signal.get("target")),
             "t1": signal.get("t1"),
@@ -99,7 +102,7 @@ def transition(signal_or_key, state, event=None, price=None):
     state = str(state or "").upper()
     if state not in STATES:
         raise ValueError(f"unsupported lifecycle state: {state}")
-    key = signal_or_key if isinstance(signal_or_key, str) else opportunity_key(signal_or_key)
+    key = signal_or_key if isinstance(signal_or_key, str) else register(signal_or_key)
     data = _read()
     row = data.get(key)
     if not isinstance(row, dict):
