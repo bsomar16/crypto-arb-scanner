@@ -8,7 +8,6 @@ class ABTToolkitTests(unittest.TestCase):
     def test_pivots_are_not_available_before_right_bars(self):
         highs = [10.0] * 20
         highs[10] = 20.0
-        # A pivot at index 10 cannot exist until index 15 is available.
         self.assertNotIn((10, 20.0), abt_strategy._pivot_highs(highs, 5, 5, upto=14))
         self.assertIn((10, 20.0), abt_strategy._pivot_highs(highs, 5, 5, upto=15))
 
@@ -36,7 +35,6 @@ class ABTToolkitTests(unittest.TestCase):
         opens = [110.0] * n
         volumes = [100.0] * n
 
-        # Confirmed demand pivot at 60; its pivot-right bars are 61-65.
         closes[60] = 100.0
         opens[60] = 101.0
         highs[60] = 101.0
@@ -47,14 +45,12 @@ class ABTToolkitTests(unittest.TestCase):
             highs[i] = 108.0
             lows[i] = 103.0
 
-        # Bearish high-volume climax two candles before the decision candle.
         closes[77] = 100.4
         opens[77] = 103.0
         highs[77] = 108.0
         lows[77] = 99.8
         volumes[77] = 250.0
 
-        # Quiet bullish absorption candle; narrow and above the climax low.
         closes[79] = 101.0
         opens[79] = 100.8
         highs[79] = 101.2
@@ -81,17 +77,15 @@ class ABTToolkitTests(unittest.TestCase):
         self.assertEqual(result["abt"]["shakeout_index"], 77)
 
     def test_structural_target_avoids_artificial_five_percent_floor(self):
-        target = abt_strategy._base_targets(
-            100.0,
-            [100.5, 101.0, 102.0, 101.0, 103.0, 107.5, 105.0, 108.0, 109.0, 108.0],
-            atr=1.0,
-            max_potential=80.0,
-        )
-        self.assertGreaterEqual(target, 107.5)
+        # 107 is a confirmed 2x2 pivot.
+        highs = [100.5, 101.0, 102.0, 101.0, 103.0, 107.0, 105.0, 104.0, 103.0, 102.0]
+        target = abt_strategy._base_targets(100.0, highs, atr=1.0, max_potential=80.0)
+        self.assertEqual(target, 107.0)
 
     def test_structural_target_ladder_prefers_real_intermediate_resistance(self):
         price = 100.0
-        highs = [102.0, 103.0, 104.0, 106.0, 107.5, 110.0]
+        # 106 and 110 are confirmed 2x2 pivots; 106 is the first target.
+        highs = [102.0, 103.0, 106.0, 104.0, 105.0, 107.5, 104.0, 110.0, 108.0, 107.0]
         target = abt_strategy._base_targets(
             price, highs, atr=1.0, max_potential=80.0, min_potential=5.0
         )
@@ -105,9 +99,11 @@ class ABTToolkitTests(unittest.TestCase):
         self.assertEqual(ladder, [103.0, 104.0, 106.0])
 
     def test_structural_target_ignores_unconfirmed_wick_resistance(self):
+        # 105.5/106 are not confirmed pivots; 107 is not confirmed because it
+        # has no right-side bars.
         target = abt_strategy._base_targets(
             100.0,
-            [100.5, 101.0, 105.5, 102.0, 103.0, 104.0, 103.0],
+            [100.5, 101.0, 105.5, 106.0, 103.0, 104.0, 107.0],
             atr=1.0,
             max_potential=80.0,
             min_potential=5.0,
@@ -187,7 +183,6 @@ class ABTToolkitTests(unittest.TestCase):
         finally:
             signal_lifecycle.PATH = original
 
-
     def test_abt_overextension_is_rejected(self):
         n = 80
         closes = [100.0 + i * 0.05 for i in range(n)]
@@ -195,7 +190,6 @@ class ABTToolkitTests(unittest.TestCase):
         lows = [x - 1.0 for x in closes]
         opens = [x - 0.2 for x in closes]
         volumes = [100.0] * n
-        # Force a valid-looking reversal candle, then reject on the 24h move gate.
         lows[-1] = closes[-1] - 2.0
         opens[-1] = closes[-1] - 0.5
         result = abt_strategy.evaluate_abt(
