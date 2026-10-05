@@ -149,12 +149,13 @@ def _mtf_alignment(interval, local_closes, mtf_closes=None):
 
 
 def _base_targets(price, highs, atr, max_potential=80.0):
-    future_res = [h for h in highs[-80:-1] if h > price]
-    structural = min(future_res) if future_res else price + 3.0 * atr
-    potential = (structural / price - 1.0) * 100 if price else 0.0
-    potential = max(0.0, min(float(max_potential), potential))
-    target = price * (1.0 + potential / 100.0)
-    return target
+    resistances = sorted({float(h) for h in highs[-120:-1] if float(h) > price})
+    minimum_target = price * (1.0 + 5.0 / 100.0)
+    structural = next((h for h in resistances if h >= minimum_target), 0.0)
+    if structural <= price:
+        structural = price + max(2.5 * float(atr), price * 0.05)
+    max_target = price * (1.0 + float(max_potential) / 100.0)
+    return min(structural, max_target)
 
 
 def _score(stage, candle_bull, zone_touch, trendline_break, shakeout, absorption,
@@ -285,6 +286,8 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     if states.get("4h") == "BEARISH":
         return None
     if stage == "ABT" and not (states.get("4h") == "BULLISH" and states.get("1h") == "BULLISH"):
+        return None
+    if stage == "ABT" and states.get("1d") == "BEARISH":
         return None
     if stage == "ABT*" and states.get("4h") == "MIXED" and states.get("1h") != "BULLISH":
         return None
