@@ -72,6 +72,7 @@ class ABTToolkitTests(unittest.TestCase):
                 "abt_min_score_breakout": 40,
                 "signal_min_potential_pct": 5,
                 "signal_min_rr": 1.0,
+                "target_optimization_enabled": False,
             },
         )
         self.assertIsNotNone(result)
