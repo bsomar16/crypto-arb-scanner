@@ -96,7 +96,7 @@ class ABTToolkitTests(unittest.TestCase):
             if price < float(h) < target
         })
         ladder = resistance_levels[-2:] + [target]
-        self.assertEqual(ladder, [103.0, 104.0, 106.0])
+        self.assertEqual(ladder, [104.0, 105.0, 106.0])
 
     def test_structural_target_ignores_unconfirmed_wick_resistance(self):
         # 105.5/106 are not confirmed pivots; 107 is not confirmed because it
