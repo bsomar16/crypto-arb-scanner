@@ -29,12 +29,15 @@ def _confidence_components(stage, mtf, vol_ratio, rsi, order_block, volatility, 
     elif states.get("4h") == "MIXED": mtf_score += 7.0
     if states.get("1h") == "BULLISH": mtf_score += 6.0
     if states.get("1d") == "BULLISH": mtf_score += 4.0
+    if states.get("1w") == "BULLISH": mtf_score += 3.0
     volume_score = min(15.0, max(0.0, float(vol_ratio)) * 7.5)
     momentum_score = 10.0 if 48.0 <= float(rsi) <= 68.0 else 7.0 if 40.0 <= float(rsi) <= 75.0 else 3.0
     ob_score = min(10.0, max(0.0, float((order_block or {}).get("quality_score", 0.0))) * 0.10)
     volatility_score = 5.0 if (volatility or {}).get("state") == "EXPANDING" else 3.0 if (volatility or {}).get("state") == "NORMAL" else 1.0
     liquidity_score = 5.0 if float(vol_ratio) >= 1.2 else 3.0 if float(vol_ratio) >= 0.8 else 1.0
     regime_score = 5.0 if states.get("1d") == "BULLISH" else 3.0 if states.get("1d") == "MIXED" else 1.0
+    if states.get("1w") == "BEARISH":
+        regime_score = max(0.0, regime_score - 1.0)
     total = structure + mtf_score + volume_score + momentum_score + ob_score + volatility_score + liquidity_score + regime_score
     return {"structure": round(structure,1), "mtf": round(mtf_score,1), "volume": round(volume_score,1), "momentum": round(momentum_score,1), "order_block": round(ob_score,1), "volatility": round(volatility_score,1), "liquidity": round(liquidity_score,1), "regime": round(regime_score,1), "total": round(min(100.0,total),1), "potential_pct": round(float(potential),2), "rr": round(float(rr),2)}
 
