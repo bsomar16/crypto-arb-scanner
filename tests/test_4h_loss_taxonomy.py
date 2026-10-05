@@ -1,4 +1,4 @@
-from oos_4h_loss_taxonomy import classify_loss
+from oos_4h_loss_taxonomy import classify_loss  # research-only taxonomy
 
 
 def test_classify_immediate_failed_followthrough():
