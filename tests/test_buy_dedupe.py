@@ -1,6 +1,6 @@
 import unittest
 
-from scanner import _dedupe_buy_signals
+from scanner import _buy_signal_identity, _dedupe_buy_signals
 
 
 def signal(coin="TOMO", entry=1.0, score=60.0, setup="BREAKOUT", interval="5m",
@@ -13,6 +13,15 @@ def signal(coin="TOMO", entry=1.0, score=60.0, setup="BREAKOUT", interval="5m",
 
 
 class BuyDedupeTests(unittest.TestCase):
+    def test_signal_identity_ignores_volatile_price_and_candle_fields(self):
+        a = signal(entry=1.0, score=60, candle=100)
+        b = signal(entry=1.04, score=72, candle=500)
+        self.assertEqual(_buy_signal_identity(a), _buy_signal_identity(b))
+
+    def test_signal_identity_changes_on_new_bos_anchor(self):
+        a = signal(bos_level=0.99)
+        b = signal(bos_level=1.02)
+        self.assertNotEqual(_buy_signal_identity(a), _buy_signal_identity(b))
     def test_same_tomo_setup_on_new_candle_is_suppressed(self):
         old = {"TOMO": {"ts": 1000, "entry": 1.0, "score": 60, "setup_type": "BREAKOUT",
                         "interval": "5m", "candle_open_time": 100}}
