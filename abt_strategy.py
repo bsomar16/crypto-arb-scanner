@@ -320,8 +320,27 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     base_target = _base_targets(price, highs, a, max_potential, min_potential)
     if base_target <= price:
         return None
-    base_t1 = price + (base_target - price) * 0.35
-    base_t2 = price + (base_target - price) * 0.65
+    # Build TP1/TP2 from real resistance levels when available. The prior
+    # 35%/65% interpolation made every signal look artificially uniform even
+    # when the market had meaningful nearby structure.
+    resistance_levels = sorted({
+        round(float(h), 12)
+        for h in highs[-120:-1]
+        if price < float(h) < base_target
+    })
+    ladder = resistance_levels[-2:] + [base_target]
+    ladder = sorted(set(ladder))
+    if len(ladder) >= 3:
+        base_t1, base_t2 = ladder[-3], ladder[-2]
+    elif len(ladder) == 2:
+        base_t1, base_t2 = ladder[0], ladder[1]
+    else:
+        base_t1 = price + (base_target - price) * 0.35
+        base_t2 = price + (base_target - price) * 0.65
+    # Keep strict ordering even when clustered resistance levels are present.
+    if not (price < base_t1 < base_t2 < base_target):
+        base_t1 = price + (base_target - price) * 0.35
+        base_t2 = price + (base_target - price) * 0.65
     target_plan = optimize_targets(
         {
             "entry": price,
