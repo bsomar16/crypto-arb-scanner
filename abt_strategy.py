@@ -170,6 +170,10 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
 
     price = float(closes[-1])
     candle_bull = _bullish_candle(opens, closes, lows, highs)
+    rsi = float(ind.rsi(closes, 14) or 50.0)
+    recent_vol = sum(volumes[-2:]) / 2.0
+    base_vol = sum(volumes[-22:-2]) / 20.0
+    vol_ratio = recent_vol / base_vol if base_vol > 0 else 0.0
     zone = _demand_zone(lows, a, int(cfg.get("abt_pivot_left", 5)), int(cfg.get("abt_pivot_right", 5)))
     if zone and price < zone["bottom"]:
         zone = None
@@ -319,6 +323,9 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         "stop": stop,
         "t1": t1, "t2": t2, "t3": t3, "target": t3,
         "potential_pct": round(potential, 1),
+        "rsi": round(rsi, 1),
+        "vol_x": round(vol_ratio, 2),
+        "chg24": round(float(chg24 or 0.0), 2),
         "risk_pct": round(risk_pct, 2),
         "rr": round(rr, 2),
         "score": score,
@@ -359,7 +366,7 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     }
 
 
-def evaluate_abt_coin(coin, interval="15m", limit=180, cfg=None):
+def evaluate_abt_coin(coin, interval="15m", limit=180, cfg=None, chg24=0.0):
     """Fetch closed spot candles and evaluate the latest ABT setup."""
     from botutil import http_json
     cfg = dict(cfg or {})
@@ -397,6 +404,7 @@ def evaluate_abt_coin(coin, interval="15m", limit=180, cfg=None):
             mtf_closes=mtf_closes,
             order_block=ctx.get("order_block"),
             volatility=ctx.get("volatility"),
+            chg24=chg24,
             cfg=cfg,
         )
         if result:
