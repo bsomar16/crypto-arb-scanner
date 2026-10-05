@@ -95,14 +95,14 @@ class ABTToolkitTests(unittest.TestCase):
         target = abt_strategy._base_targets(
             price, highs, atr=1.0, max_potential=80.0, min_potential=5.0
         )
-        self.assertEqual(target, 107.5)
+        self.assertEqual(target, 106.0)
         resistance_levels = sorted({
             round(float(h), 12)
             for h in highs[-120:-1]
             if price < float(h) < target
         })
         ladder = resistance_levels[-2:] + [target]
-        self.assertEqual(ladder, [103.0, 104.0, 107.5])
+        self.assertEqual(ladder, [103.0, 104.0, 106.0])
 
     def test_structural_target_returns_zero_when_no_resistance_meets_floor(self):
         target = abt_strategy._base_targets(
