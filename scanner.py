@@ -31,6 +31,7 @@ import outcome_attribution
 import signal_history
 import market_regime
 import signal_lifecycle
+import abt_strategy
 import validation as validation_mod
 import multi_exchange
 import shadow_trading
@@ -90,6 +91,21 @@ DEFAULTS = {
     "shadow_notional_usdt": 300.0,
     "shadow_state_path": "state/shadow_trades.jsonl",
     "shadow_4h_structure_candidate_enabled": False,
+    # Native TradingView Auto Breakout Toolkit family. Disabled by default until OOS validation.
+    "abt_enabled": False,
+    "abt_min_bars": 70,
+    "abt_pivot_left": 5,
+    "abt_pivot_right": 5,
+    "abt_require_untouched_trendline": True,
+    "abt_breakout_buffer_atr": 0.15,
+    "abt_touch_lookback": 15,
+    "abt_climax_volume_x": 2.0,
+    "abt_absorption_volume_x": 0.60,
+    "abt_absorption_range_ratio": 0.40,
+    "abt_stop_atr": 1.5,
+    "abt_min_score_early": 52,
+    "abt_min_score_reversal": 55,
+    "abt_min_score_breakout": 58,
     "shadow_4h_structure_state_path": "state/shadow_4h_structure.jsonl",
 }
 
@@ -237,13 +253,15 @@ def _signal_message(r):
     """Format every BUY alert with the same compact hierarchy."""
     setup = r.get("setup_type", "MOMENTUM")
     kind = r.get("trade_horizon", "Scalp" if r["interval"] in ("5m", "15m") else "Medium")
+    family = str(r.get("strategy_family", "") or "")
+    family_label = f" · {family}" if family else ""
     reasons = ", ".join(r.get("reasons", [])[:5])
     bp = r.get("bullish_potential", {}) or {}
     tier = bp.get("tier", "STANDARD")
     bp_score = float(bp.get("score", 0) or 0)
     return [
         "🟢 <b>CONFIRMED BUY SIGNAL</b>",
-        f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}",
+        f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}{family_label}",
         f"📌 Setup: <b>{setup}</b> · {r.get('trend_interval', '4h')}: {r.get('trend_4h', '?')}",
         "🎯 <b>Action: BUY</b>",
         f"💰 Entry: <b>{fmt_price(r['entry'])}</b> · 🛑 Stop: {fmt_price(r['stop'])}",
@@ -275,7 +293,8 @@ def _buy_signal_identity(r):
         bos = format(float(r.get("bos_level", 0) or 0), ".10g")
     except (TypeError, ValueError):
         bos = "0"
-    return "|".join((coin, setup, trigger, bos))
+    family = str(r.get("strategy_family", "") or "")
+    return "|".join((coin, family, setup, trigger, bos))
 
 
 def _claim_buy_notification_keys(signals, now_ts, ttl_days=30):
@@ -531,7 +550,8 @@ def run_buy(token, chat_id, realtime_cache=None):
 
     def scan(task):
         sym, interval = task
-        return intraday_signal(
+        results = []
+        standard = intraday_signal(
             sym,
             interval=interval,
             min_vol_x=None,
@@ -545,10 +565,17 @@ def run_buy(token, chat_id, realtime_cache=None):
             cfg=cfg,
             audit=audit,
         )
+        if standard:
+            results.append(standard)
+        if bool(cfg.get("abt_enabled", False)):
+            abt = abt_strategy.evaluate_abt_coin(sym, interval=interval, cfg=cfg)
+            if abt:
+                results.append(abt)
+        return results
 
     workers = int(cfg.get("deep_scan_workers", 16))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
-        hits = [r for r in ex.map(scan, tasks) if r]
+        hits = [r for batch in ex.map(scan, tasks) for r in (batch or [])]
 
     fired = load_json("state/fired_signals.json", {}) or {}
     migrated_fired = False
@@ -585,6 +612,9 @@ def run_buy(token, chat_id, realtime_cache=None):
     # Signal generation is quality-gated, not quota-gated.
     # Portfolio exposure limits must not suppress a valid market signal.
     ranked = _rank_trade_candidates(fresh, cfg)
+    abt_fresh = [r for r in fresh if r.get("strategy") == "ABT"]
+    if abt_fresh:
+        log("ABT", f"qualified stages: {', '.join(sorted({str(r.get('strategy_family')) for r in abt_fresh}))}")
 
     # Cross-exchange SPOT price consensus is informational/ranking context.
     # Only a bounded set is queried; it never creates or suppresses signals.
