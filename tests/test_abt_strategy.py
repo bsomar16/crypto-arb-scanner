@@ -44,7 +44,7 @@ class ABTToolkitTests(unittest.TestCase):
         for i in range(61, 66):
             closes[i] = 105.0
             opens[i] = 104.0
-            highs[i] = 106.0
+            highs[i] = 108.0
             lows[i] = 103.0
 
         # Bearish high-volume climax two candles before the decision candle.
