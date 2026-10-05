@@ -335,13 +335,32 @@ def _signal_message(r):
         f"🧠 Why: {esc(reasons)}" if reasons else "🧠 Why: structure + momentum confirmation",
     ]
 
+def _buy_signal_identity(r):
+    """Stable business identity for one logical BUY setup.
+
+    The identity intentionally excludes volatile fields such as score, entry
+    price and candle_open_time. Those values can change while the same BOS /
+    retest setup remains active. A new BOS level, setup, trigger, or interval
+    represents a materially different setup and may re-arm after cooldown.
+    """
+    coin = str(r.get("coin", "")).upper()
+    interval = str(r.get("interval", "") or "")
+    setup = str(r.get("setup_type", "") or "")
+    trigger = str(r.get("entry_trigger", "") or "")
+    try:
+        bos = format(float(r.get("bos_level", 0) or 0), ".10g")
+    except (TypeError, ValueError):
+        bos = "0"
+    return "|".join((coin, interval, setup, trigger, bos))
+
+
 def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02,
                         cooldown_minutes=240, rearm_score_delta=10.0, limit=None, audit=None):
-    """Return one BUY notification per coin.
+    """Return only materially new BUY setups.
 
-    A coin is silent while it has an open tracked position. After that signal
-    closes, the same coin can alert again only when the new setup is materially
-    different (entry moved, setup changed, or timeframe changed).
+    Score, entry-price drift and candle changes alone never create a second
+    notification for the same logical setup. This closes the old re-arm path
+    that could repeatedly notify on the same BOS/retest structure.
     """
     updates = {}
     fresh = []
@@ -359,33 +378,40 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             best_by_coin[coin] = r
 
     for coin, r in best_by_coin.items():
-        # Never emit another BUY while this coin's previous signal is active.
         if coin in active_coins:
             if audit is not None:
                 audit.reject("dedupe_active_position")
             continue
 
         old = fired.get(coin, {})
-        old_entry = float(old.get("entry", 0) or 0)
-        old_setup = str(old.get("setup_type", "") or "")
-        old_interval = str(old.get("interval", "") or "")
-        old_candle = int(old.get("candle_open_time", 0) or 0)
-        old_score = float(old.get("score", 0) or 0)
-        old_trigger = str(old.get("entry_trigger", "") or "")
-        candle_changed = int(r.get("candle_open_time", 0) or 0) > old_candle if old_candle else False
-        if old_entry <= 0:
+        if not old:
             is_new_signal = True
         else:
-            entry_changed = abs(float(r["entry"]) - old_entry) / old_entry >= entry_change_pct
-            setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
-            score_strengthened = float(r.get("score", 0) or 0) - old_score >= rearm_score_delta
-            trigger_changed = bool(old_trigger and old_trigger != r.get("entry_trigger", ""))
+            old_key = str(old.get("signal_key", "") or "")
+            if not old_key:
+                old_key = _buy_signal_identity(old)
+
+            current_key = _buy_signal_identity(r)
             elapsed_min = max(0.0, (float(now_ts) - float(old.get("ts", 0) or 0)) / 60.0)
             cooldown_elapsed = elapsed_min >= max(0.0, float(cooldown_minutes))
-            # A new candle, timeframe change, or ordinary price drift is NOT a
-            # new signal. Re-arm only after the cooldown plus a structural/setup
-            # change, or a material entry move accompanied by a stronger score.
-            material_rearm = setup_changed or trigger_changed or (entry_changed and score_strengthened)
+
+            # Same logical setup: never re-alert because score, entry, candle,
+            # targets or other volatile values changed.
+            same_setup = old_key == current_key
+
+            old_interval = str(old.get("interval", "") or "")
+            old_setup = str(old.get("setup_type", "") or "")
+            old_trigger = str(old.get("entry_trigger", "") or "")
+            interval_changed = bool(old_interval and old_interval != r.get("interval", ""))
+            setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
+            trigger_changed = bool(old_trigger and old_trigger != r.get("entry_trigger", ""))
+
+            # A different BOS anchor is a real structural change. Re-arm only
+            # after cooldown; entry/score strengthening alone is insufficient.
+            material_rearm = (not same_setup) and (interval_changed or setup_changed or trigger_changed)
+            if not (interval_changed or setup_changed or trigger_changed):
+                material_rearm = not same_setup
+
             is_new_signal = bool(cooldown_elapsed and material_rearm)
 
         if old and not is_new_signal:
@@ -401,6 +427,8 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             "interval": r.get("interval", ""),
             "entry_trigger": r.get("entry_trigger", ""),
             "candle_open_time": int(r.get("candle_open_time", 0) or 0),
+            "bos_level": r.get("bos_level"),
+            "signal_key": _buy_signal_identity(r),
         }
         fresh.append(r)
 
