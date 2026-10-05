@@ -99,11 +99,11 @@ class ABTToolkitTests(unittest.TestCase):
         self.assertEqual(ladder, [104.0, 105.0, 106.0])
 
     def test_structural_target_ignores_unconfirmed_wick_resistance(self):
-        # 105.5/106 are not confirmed pivots; 107 is not confirmed because it
-        # has no right-side bars.
+        # Every >5% wick is either followed by a higher candle or lacks
+        # the two right-side bars required for pivot confirmation.
         target = abt_strategy._base_targets(
             100.0,
-            [100.5, 101.0, 105.5, 106.0, 103.0, 104.0, 107.0],
+            [100.5, 101.0, 105.5, 103.0, 106.0, 107.0, 108.0],
             atr=1.0,
             max_potential=80.0,
             min_potential=5.0,
