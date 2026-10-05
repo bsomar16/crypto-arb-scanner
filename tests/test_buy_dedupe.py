@@ -61,6 +61,16 @@ class BuyDedupeTests(unittest.TestCase):
         self.assertEqual(len(fresh), 1)
         self.assertIn("TOMO", updates)
 
+    def test_same_bos_anchor_after_cooldown_stays_suppressed(self):
+        old = {"TOMO": {"ts": 1000, "entry": 1.0, "score": 60, "setup_type": "BREAKOUT",
+                        "interval": "5m", "entry_trigger": "BOS_RETEST_CONFIRM",
+                        "bos_level": 0.99, "candle_open_time": 100}}
+        fresh, _ = _dedupe_buy_signals(
+            [signal(entry=1.03, score=71, candle=400, bos_level=0.99)],
+            old, 1000 + 241 * 60, cooldown_minutes=240, rearm_score_delta=10,
+        )
+        self.assertEqual(fresh, [])
+
     def test_price_drift_alone_after_cooldown_is_suppressed(self):
         old = {"TOMO": {"ts": 1000, "entry": 1.0, "score": 60, "setup_type": "BREAKOUT",
                         "interval": "5m", "entry_trigger": "BOS_RETEST_CONFIRM", "candle_open_time": 100}}
