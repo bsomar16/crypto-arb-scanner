@@ -418,22 +418,25 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             is_new_signal = True
         else:
             old_key = str(old.get("signal_key", "") or "")
-            if not old_key:
-                old_key = _buy_signal_identity(old)
-
             current_key = _buy_signal_identity(r)
             elapsed_min = max(0.0, (float(now_ts) - float(old.get("ts", 0) or 0)) / 60.0)
             cooldown_elapsed = elapsed_min >= max(0.0, float(cooldown_minutes))
 
-            # Same logical setup: never re-alert because score, entry, candle,
-            # targets or other volatile values changed.
-            same_setup = old_key == current_key
-
-            old_interval = str(old.get("interval", "") or "")
             old_setup = str(old.get("setup_type", "") or "")
             old_trigger = str(old.get("entry_trigger", "") or "")
             setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
             trigger_changed = bool(old_trigger and old_trigger != r.get("entry_trigger", ""))
+
+            # Legacy fired records predate signal_key/BOS persistence. Treat
+            # missing structural fields conservatively: unchanged setup/trigger
+            # stays suppressed instead of being mistaken for a new BOS.
+            if old_key:
+                same_setup = old_key == current_key
+            else:
+                same_setup = (
+                    old_setup == str(r.get("setup_type", "") or "")
+                    and (not old_trigger or old_trigger == str(r.get("entry_trigger", "") or ""))
+                )
 
             # Timeframe changes alone do not create a second alert for the same
             # underlying setup. A new BOS anchor, setup type, or entry trigger
