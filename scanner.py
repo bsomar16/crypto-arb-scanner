@@ -458,7 +458,7 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
                 except (TypeError, ValueError):
                     old_bos = current_bos = None
                 if old_bos is not None and current_bos is not None:
-                    same_setup = "|".join((coin, old_setup, old_trigger, old_bos)) == current_key
+                    same_setup = "|".join((coin, "", old_setup, old_trigger, old_bos)) == current_key
                 else:
                     same_setup = (
                         old_setup == str(r.get("setup_type", "") or "")
