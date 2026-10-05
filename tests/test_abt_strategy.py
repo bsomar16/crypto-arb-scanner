@@ -126,6 +126,36 @@ class ABTToolkitTests(unittest.TestCase):
         self.assertGreaterEqual(quality["pivot_count"], 1)
         self.assertIn(106.0, quality["levels"])
 
+    def test_target_confluence_includes_order_block_and_market_structure(self):
+        price = 100.0
+        highs = [102.0, 103.0, 106.0, 104.0, 105.0, 106.0, 104.0, 106.0, 105.0, 104.0]
+        quality = abt_strategy._target_confluence(
+            price, 106.0, highs, atr=1.0,
+            order_block={"bullish": True, "quality_score": 80.0, "midpoint": 101.0, "status": "FRESH"},
+            mtf={"states": {"1h": "BULLISH", "4h": "BULLISH", "1d": "BULLISH"}},
+        )
+        self.assertGreaterEqual(quality["pivot_score"], 35.0)
+        self.assertEqual(quality["order_block_score"], 25.0)
+        self.assertEqual(quality["market_structure_score"], 20.0)
+        self.assertEqual(quality["score"], 100.0)
+        self.assertTrue(quality["order_block_support"])
+        self.assertEqual(quality["market_structure"], "BULLISH")
+
+    def test_target_confluence_never_credits_invalidated_or_above_target_ob(self):
+        price = 100.0
+        highs = [102.0, 103.0, 106.0, 104.0, 105.0, 106.0, 104.0, 106.0, 105.0, 104.0]
+        base = {"bullish": True, "quality_score": 90.0, "midpoint": 101.0}
+        invalidated = abt_strategy._target_confluence(
+            price, 106.0, highs, atr=1.0, order_block=dict(base, status="INVALIDATED"),
+            mtf={"states": {"1h": "BULLISH", "4h": "BULLISH", "1d": "BULLISH"}},
+        )
+        above_target = abt_strategy._target_confluence(
+            price, 106.0, highs, atr=1.0, order_block=dict(base, midpoint=108.0, status="FRESH"),
+            mtf={"states": {"1h": "BULLISH", "4h": "BULLISH", "1d": "BULLISH"}},
+        )
+        self.assertEqual(invalidated["order_block_score"], 0.0)
+        self.assertEqual(above_target["order_block_score"], 0.0)
+
     def test_structural_target_returns_zero_when_no_resistance_meets_floor(self):
         target = abt_strategy._base_targets(
             100.0,
