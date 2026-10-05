@@ -110,6 +110,22 @@ class ABTToolkitTests(unittest.TestCase):
         )
         self.assertEqual(target, 0.0)
 
+    def test_target_ladder_uses_confirmed_pivots_only(self):
+        price = 100.0
+        # 106 is confirmed. 108 is only a raw wick and must not become a ladder level.
+        highs = [102.0, 103.0, 106.0, 104.0, 105.0, 107.5, 104.0, 108.0, 107.0, 106.5]
+        levels = abt_strategy._confirmed_resistance_levels(price, highs, left=2, right=2)
+        self.assertIn(106.0, levels)
+        self.assertNotIn(108.0, levels)
+
+    def test_target_confluence_is_causal_and_descriptive(self):
+        price = 100.0
+        highs = [102.0, 103.0, 106.0, 104.0, 105.0, 106.0, 104.0, 106.0, 105.0, 104.0]
+        quality = abt_strategy._target_confluence(price, 106.0, highs, atr=1.0, left=2, right=2)
+        self.assertGreaterEqual(quality["score"], 55.0)
+        self.assertGreaterEqual(quality["pivot_count"], 1)
+        self.assertIn(106.0, quality["levels"])
+
     def test_structural_target_returns_zero_when_no_resistance_meets_floor(self):
         target = abt_strategy._base_targets(
             100.0,

@@ -151,6 +151,41 @@ def _mtf_alignment(interval, local_closes, mtf_closes=None):
     return {"alignment": alignment, "states": states}
 
 
+def _confirmed_resistance_levels(price, highs, left=2, right=2, lookback=120):
+    """Return only causally confirmed historical pivot resistance levels."""
+    historical = list(highs[-int(lookback):-1])
+    return sorted({
+        round(float(v), 12)
+        for _, v in _pivot_highs(historical, left=left, right=right)
+        if float(v) > float(price)
+    })
+
+
+def _target_confluence(price, target, highs, atr=0.0, left=2, right=2):
+    """Score structural target quality from confirmed resistance confluence.
+
+    This is descriptive only: it never manufactures or moves a target. A target
+    gets stronger when multiple confirmed pivots cluster near it and weaker when
+    it is an isolated level. All evidence is historical and causal.
+    """
+    levels = _confirmed_resistance_levels(price, highs, left=left, right=right)
+    if not levels or target <= price:
+        return {"score": 0.0, "pivot_count": 0, "cluster_count": 0, "levels": []}
+    tolerance = max(float(target) * 0.005, float(atr or 0.0) * 0.35)
+    cluster = [level for level in levels if abs(level - float(target)) <= tolerance]
+    pivot_count = len(cluster)
+    score = min(100.0, 55.0 + max(0, pivot_count - 1) * 20.0)
+    if pivot_count == 1:
+        score = 55.0
+    return {
+        "score": round(score, 1),
+        "pivot_count": pivot_count,
+        "cluster_count": pivot_count,
+        "levels": cluster,
+        "tolerance": round(tolerance, 8),
+    }
+
+
 def _base_targets(price, highs, atr, max_potential=80.0, min_potential=5.0):
     """Return a real resistance target; never manufacture the configured floor.
 
@@ -158,14 +193,7 @@ def _base_targets(price, highs, atr, max_potential=80.0, min_potential=5.0):
     return 0 so the caller can reject the setup rather than presenting an
     artificial +5% target as if it were structural.
     """
-    # Only use confirmed historical pivot highs as resistance. Raw candle
-    # highs are too noisy and can turn an insignificant wick into a target.
-    historical = list(highs[-120:-1])
-    pivot_levels = [
-        float(v) for _, v in _pivot_highs(historical, left=2, right=2)
-        if float(v) > price
-    ]
-    resistances = sorted(set(pivot_levels))
+    resistances = _confirmed_resistance_levels(price, highs, left=2, right=2)
     minimum_target = price * (1.0 + float(min_potential) / 100.0)
     structural = next((h for h in resistances if h >= minimum_target), 0.0)
     if structural <= price:
@@ -330,11 +358,9 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
     # Build TP1/TP2 from real resistance levels when available. The prior
     # 35%/65% interpolation made every signal look artificially uniform even
     # when the market had meaningful nearby structure.
-    resistance_levels = sorted({
-        round(float(h), 12)
-        for h in highs[-120:-1]
-        if price < float(h) < base_target
-    })
+    resistance_levels = [h for h in _confirmed_resistance_levels(
+        price, highs, left=2, right=2
+    ) if h < base_target]
     ladder = resistance_levels[-2:] + [base_target]
     ladder = sorted(set(ladder))
     if len(ladder) >= 3:
@@ -367,6 +393,9 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         enabled=bool(cfg.get("target_optimization_enabled", True)) and bool(cfg.get("abt_target_optimization_enabled", False)),
     )
     t1, t2, t3 = target_plan["t1"], target_plan["t2"], target_plan["t3"]
+    target_confluence = _target_confluence(
+        price, t3, highs, atr=a, left=2, right=2
+    )
     potential = (t3 / price - 1.0) * 100 if price else 0.0
     risk_dist = max(a * float(cfg.get("abt_stop_atr", 1.5)), price * 0.006)
     stop = price - risk_dist
@@ -413,6 +442,7 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
         "chg24": round(float(chg24 or 0.0), 2),
         "risk_pct": round(risk_pct, 2),
         "rr": round(rr, 2),
+        "target_confluence": target_confluence,
         "score": confidence["total"],
         "st": confidence["total"],
         "confidence_score": confidence["total"],
