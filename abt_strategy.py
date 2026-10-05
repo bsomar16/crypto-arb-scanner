@@ -329,3 +329,46 @@ def evaluate_abt(closes, highs, lows, opens, volumes, *, interval="15m",
             "abt_trendline_break": crossed,
         },
     }
+
+
+def evaluate_abt_coin(coin, interval="15m", limit=180, cfg=None):
+    """Fetch closed spot candles and evaluate the latest ABT setup."""
+    from botutil import http_json
+    cfg = dict(cfg or {})
+    url = f"https://data-api.binance.vision/api/v3/klines?symbol={coin}USDT&interval={interval}&limit={int(limit)}"
+    data = http_json(url, timeout=15)
+    if not data or len(data) < 71:
+        return None
+    # Binance includes the currently forming candle. Drop it before all
+    # pivot/trendline calculations.
+    data = data[:-1]
+    closes = [float(k[4]) for k in data]
+    highs = [float(k[2]) for k in data]
+    lows = [float(k[3]) for k in data]
+    opens = [float(k[1]) for k in data]
+    volumes = [float(k[5]) for k in data]
+    higher_closes = None
+    if interval != "4h":
+        higher = http_json(
+            f"https://data-api.binance.vision/api/v3/klines?symbol={coin}USDT&interval=4h&limit=100",
+            timeout=15,
+        )
+        if higher and len(higher) > 1:
+            higher_closes = [float(k[4]) for k in higher[:-1]]
+    try:
+        import signal_context
+        a = ind.atr(highs, lows, closes) or closes[-1] * 0.01
+        ctx = signal_context.build_signal_context(closes, highs, lows, volumes, a, closes[-1])
+        cfg["_candle_open_time"] = int(data[-1][0])
+        result = evaluate_abt(
+            closes, highs, lows, opens, volumes, interval=interval, atr=a,
+            higher_closes=higher_closes,
+            order_block=ctx.get("order_block"),
+            volatility=ctx.get("volatility"),
+            cfg=cfg,
+        )
+        if result:
+            result["coin"] = coin.upper()
+        return result
+    except Exception:
+        return None
