@@ -158,7 +158,7 @@ def entry_diagnostics(closes, highs, lows, opens, interval, atr=None, allow_earl
         candidates.append(("next_candle", o, h, l, c, _body_strength(o, h, l, c), 0.35))
     if allow_early_retest:
         o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-        candidates.append(("retest_candle", o, h, l, c, _body_strength(o, h, l, c), float(early_retest_body_min))
+        candidates.append(("retest_candle", o, h, l, c, _body_strength(o, h, l, c), float(early_retest_body_min)))
     best = None
     for name, o, h, l, c, body, threshold in candidates:
         bullish = c > o and c >= broken_level
