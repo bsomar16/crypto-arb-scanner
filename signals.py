@@ -196,7 +196,8 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
         structure = structure_snapshot(closes, highs, lows)
         entry_opens = [float(k[1]) for k in data]
         entry_diagnostic = entry_diagnostics(
-            closes, highs, lows, entry_opens, interval, atr=a, allow_early_retest=True
+            closes, highs, lows, entry_opens, interval, atr=a, allow_early_retest=True,
+            early_retest_body_min=float((cfg or {}).get("signal_early_retest_body_min", 0.45))
         )
         entry = evaluate_entry(
             closes, highs, lows, entry_opens, interval, atr=a,
@@ -204,6 +205,7 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             require_sweep=bool((cfg or {}).get("signal_require_sweep", False)),
             allow_early_retest=bool((cfg or {}).get("signal_allow_early_retest", True)),
             confirmation_body_min=float((cfg or {}).get("signal_confirmation_body_min", 0.35)),
+            early_retest_body_min=float((cfg or {}).get("signal_early_retest_body_min", 0.45)),
         )
         if not entry:
             return _audit_reject(
