@@ -17,8 +17,8 @@ VALID_INTERVALS = {"5m", "15m", "1h", "4h", "1d", "1w"}
 
 # Strategy-specific BUY profiles. 24h volume remains a liquidity filter only.\n# Recall is intentionally relaxed modestly; core entry confirmation, R:R, target\n# envelope, regime protection, and outcome-aware adaptive screening remain hard gates.\n# These are not an 80% win-rate guarantee; precision is validated out-of-sample.
 STRATEGY_PROFILES = {
-    "scalp_5m": {"kind": "Scalp", "interval": "5m", "min_vol_x": 1.05, "min_score": 52, "min_rr": 1.60, "stop_atr": 1.15, "target_atr": 3.0},
-    "scalp_15m": {"kind": "Scalp", "interval": "15m", "min_vol_x": 1.00, "min_score": 50, "min_rr": 1.50, "stop_atr": 1.40, "target_atr": 4.0},
+    "scalp_5m": {"kind": "Scalp", "interval": "5m", "min_vol_x": 1.00, "min_score": 52, "min_rr": 1.60, "stop_atr": 1.15, "target_atr": 3.0},
+    "scalp_15m": {"kind": "Scalp", "interval": "15m", "min_vol_x": 0.95, "min_score": 50, "min_rr": 1.50, "stop_atr": 1.40, "target_atr": 4.0},
     "medium_1h": {"kind": "Medium", "interval": "1h", "min_vol_x": 1.00, "min_score": 50, "min_rr": 1.50, "stop_atr": 1.80, "target_atr": 5.5, "hold_min_hours": 2, "hold_max_hours": 36},
     "medium_4h": {"kind": "Medium", "interval": "4h", "min_vol_x": 0.95, "min_score": 50, "min_rr": 1.50, "stop_atr": 2.00, "target_atr": 5.0, "hold_min_hours": 8, "hold_max_hours": 120},
     "long_1d": {"kind": "Long", "interval": "1d", "min_vol_x": 0.90, "min_score": 52, "min_rr": 1.60, "stop_atr": 2.20, "target_atr": 6.0, "hold_min_hours": 48, "hold_max_hours": 504},
