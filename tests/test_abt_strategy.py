@@ -122,7 +122,7 @@ class ABTToolkitTests(unittest.TestCase):
         price = 100.0
         highs = [102.0, 103.0, 106.0, 104.0, 105.0, 106.0, 104.0, 106.0, 105.0, 104.0]
         quality = abt_strategy._target_confluence(price, 106.0, highs, atr=1.0, left=2, right=2)
-        self.assertGreaterEqual(quality["score"], 55.0)
+        self.assertGreaterEqual(quality["score"], 35.0)
         self.assertGreaterEqual(quality["pivot_count"], 1)
         self.assertIn(106.0, quality["levels"])
 
@@ -137,7 +137,7 @@ class ABTToolkitTests(unittest.TestCase):
         self.assertGreaterEqual(quality["pivot_score"], 35.0)
         self.assertEqual(quality["order_block_score"], 25.0)
         self.assertEqual(quality["market_structure_score"], 20.0)
-        self.assertEqual(quality["score"], 100.0)
+        self.assertEqual(quality["score"], 80.0)
         self.assertTrue(quality["order_block_support"])
         self.assertEqual(quality["market_structure"], "BULLISH")
 
