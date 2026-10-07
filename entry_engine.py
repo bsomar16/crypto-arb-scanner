@@ -42,18 +42,23 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
     confirm = None
     for i in range(bos["index"] + 1, n):
         if lows[i] <= broken_level + tol and closes[i] >= broken_level - tol * 0.10:
-            retest = {"index": i, "level": broken_level, "low": lows[i], "close": closes[i]}
+            candidate_retest = {"index": i, "level": broken_level, "low": lows[i], "close": closes[i]}
+            if retest is None:
+                retest = candidate_retest
             if i + 1 < n:
                 o, h, l, c = opens[i + 1], highs[i + 1], lows[i + 1], closes[i + 1]
                 body = _body_strength(o, h, l, c)
                 if c > o and c >= broken_level and body >= float(confirmation_body_min):
+                    retest = candidate_retest
                     confirm = {"index": i + 1, "open": o, "high": h, "low": l, "close": c, "body_strength": body, "early": False}
             if confirm is None and allow_early_retest:
                 o, h, l, c = opens[i], highs[i], lows[i], closes[i]
                 body = _body_strength(o, h, l, c)
                 if c > o and c > broken_level and body >= float(early_retest_body_min):
+                    retest = candidate_retest
                     confirm = {"index": i, "open": o, "high": h, "low": l, "close": c, "body_strength": body, "early": True}
-            break
+            if confirm is not None:
+                break
     if require_retest and (retest is None or confirm is None):
         return None
     if confirm is None:
