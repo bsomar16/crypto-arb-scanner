@@ -23,8 +23,8 @@ class EntryQualityTests(unittest.TestCase):
         self.assertEqual(result["trigger_index"], 47)
 
     def test_diagnostics_identifies_recoverable_later_retest(self):
-        closes = [100.0] * 45 + [101.0, 102.0, 101.0, 102.0]
-        opens = [100.0] * 45 + [100.0, 100.5, 101.05, 100.5]
+        closes = [100.0] * 45 + [101.0, 102.0, 101.2, 102.0]
+        opens = [100.0] * 45 + [100.0, 100.5, 101.25, 100.5]
         highs = [100.5] * 45 + [101.2, 102.4, 101.2, 102.4]
         lows = [99.5] * 45 + [99.8, 100.3, 100.8, 100.3]
         result = entry_diagnostics(
