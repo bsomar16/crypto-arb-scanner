@@ -143,46 +143,68 @@ def entry_diagnostics(closes, highs, lows, opens, interval, atr=None, allow_earl
                 "confirmation_candle": False, "sweep_confirmed": bool(sweep), "reason": "no_bos"}
 
     broken_level = bos["level"]
-    retest = None
+    retests = []
     for i in range(bos["index"] + 1, n):
         if lows[i] <= broken_level + tol and closes[i] >= broken_level - tol * 0.10:
-            retest = {"index": i, "level": broken_level, "close": closes[i]}
-            break
-    if retest is None:
+            retests.append({"index": i, "level": broken_level, "close": closes[i]})
+
+    if not retests:
         progress = 35.0
         distance = max(0.0, _pct(price, broken_level))
         return {"near_miss_score": round(progress, 1), "bos_confirmed": True, "retest_confirmed": False,
                 "confirmation_candle": False, "sweep_confirmed": bool(sweep),
                 "bos_level": broken_level, "price_vs_bos_pct": round(distance, 3),
-                "reason": "awaiting_retest"}
+                "retest_count": 0, "reason": "awaiting_retest"}
 
-    i = retest["index"]
     candidates = []
-    if i + 1 < n:
-        o, h, l, c = opens[i + 1], highs[i + 1], lows[i + 1], closes[i + 1]
-        candidates.append(("next_candle", o, h, l, c, _body_strength(o, h, l, c), 0.35))
-    if allow_early_retest:
-        o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-        candidates.append(("retest_candle", o, h, l, c, _body_strength(o, h, l, c), float(early_retest_body_min)))
-    best = None
-    for name, o, h, l, c, body, threshold in candidates:
-        bullish = c > o and c >= broken_level
-        if best is None or body > best["body_strength"]:
-            best = {"name": name, "body_strength": body, "threshold": threshold,
-                    "bullish": bullish, "close": c}
+    for retest in retests:
+        i = retest["index"]
+        if i + 1 < n:
+            o, h, l, c = opens[i + 1], highs[i + 1], lows[i + 1], closes[i + 1]
+            candidates.append({
+                "name": "next_candle", "retest_index": i, "confirmation_index": i + 1,
+                "body_strength": _body_strength(o, h, l, c),
+                "bullish": c > o and c >= broken_level,
+                "threshold": 0.35,
+            })
+        if allow_early_retest:
+            o, h, l, c = opens[i], highs[i], lows[i], closes[i]
+            candidates.append({
+                "name": "retest_candle", "retest_index": i, "confirmation_index": i,
+                "body_strength": _body_strength(o, h, l, c),
+                "bullish": c > o and c > broken_level,
+                "threshold": float(early_retest_body_min),
+            })
+
+    best = max(candidates, key=lambda item: float(item["body_strength"])) if candidates else None
+    qualifying = [
+        item for item in candidates
+        if item["bullish"] and float(item["body_strength"]) >= float(item["threshold"])
+    ]
+    best_qualifying = max(qualifying, key=lambda item: item["confirmation_index"]) if qualifying else None
     body = float(best["body_strength"]) if best else 0.0
     threshold = float(best["threshold"]) if best else 0.45
-    body_ratio = min(1.0, body / max(threshold, 1e-9))
     direction_bonus = 1.0 if best and best["bullish"] else 0.0
-    # 70 points means BOS + retest; the remaining 30 points measure actual
-    # confirmation-body progress and direction. This is a ranking diagnostic,
-    # not a BUY threshold and not a probability estimate.
+    body_ratio = min(1.0, body / max(threshold, 1e-9))
     score = 70.0 + 30.0 * body_ratio * direction_bonus
-    return {"near_miss_score": round(min(100.0, score), 1), "bos_confirmed": True,
-            "retest_confirmed": True, "confirmation_candle": bool(best and best["bullish"] and body >= threshold),
-            "sweep_confirmed": bool(sweep), "bos_level": broken_level,
-            "retest_distance_pct": round(abs(_pct(retest["close"], broken_level)), 3),
-            "confirmation_body": round(body, 3), "confirmation_body_required": round(threshold, 3),
-            "confirmation_body_gap": round(max(0.0, threshold - body), 3),
-            "confirmation_direction_bullish": bool(best and best["bullish"]),
-            "reason": "confirmation_missing" if not (best and best["bullish"] and body >= threshold) else "confirmed"}
+    return {
+        "near_miss_score": round(min(100.0, score), 1),
+        "bos_confirmed": True,
+        "retest_confirmed": True,
+        "confirmation_candle": bool(best_qualifying),
+        "sweep_confirmed": bool(sweep),
+        "bos_level": broken_level,
+        "retest_distance_pct": round(abs(_pct(retests[0]["close"], broken_level)), 3),
+        "retest_count": len(retests),
+        "confirmed_retest_count": len(qualifying),
+        "recoverable_later_retest": bool(
+            best_qualifying and best_qualifying["retest_index"] > retests[0]["index"]
+        ),
+        "confirmation_body": round(body, 3),
+        "confirmation_body_required": round(threshold, 3),
+        "confirmation_body_gap": round(max(0.0, threshold - body), 3),
+        "confirmation_direction_bullish": bool(best and best["bullish"]),
+        "best_confirmation_index": best_qualifying["confirmation_index"] if best_qualifying else None,
+        "reason": "recoverable_later_retest" if best_qualifying and best_qualifying["retest_index"] > retests[0]["index"]
+                  else "confirmation_missing" if not best_qualifying else "confirmed",
+    }
