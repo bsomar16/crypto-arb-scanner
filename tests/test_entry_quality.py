@@ -9,7 +9,7 @@ class EntryQualityTests(unittest.TestCase):
         self.assertEqual(_body_strength(100, 100, 100, 100), 0.0)
 
     def test_confirmation_can_follow_a_weak_first_retest(self):
-        closes = [100.0] * 45 + [102.0, 100.95, 102.0]
+        closes = [100.0] * 45 + [102.0, 101.0, 102.0]
         opens = [100.0] * 45 + [100.0, 101.05, 100.5]
         highs = [101.0] * 45 + [102.2, 101.2, 102.4]
         lows = [99.0] * 45 + [99.8, 100.8, 100.3]
