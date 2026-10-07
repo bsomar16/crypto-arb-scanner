@@ -8,7 +8,7 @@ def _pct(a, b):
 def _body_strength(o, h, l, c):
     return abs(c - o) / max(h - l, 1e-12)
 
-def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retest=True, require_sweep=True, allow_early_retest=True, confirmation_body_min=0.35):
+def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retest=True, require_sweep=True, allow_early_retest=True, confirmation_body_min=0.35, early_retest_body_min=0.45):
     """Return a causal long-entry confirmation or None using only closed candles."""
     n = len(closes)
     if n < 45 or len(opens) != n or len(highs) != n or len(lows) != n:
@@ -51,7 +51,7 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
             if confirm is None and allow_early_retest:
                 o, h, l, c = opens[i], highs[i], lows[i], closes[i]
                 body = _body_strength(o, h, l, c)
-                if c > o and c > broken_level and body >= 0.45:
+                if c > o and c > broken_level and body >= float(early_retest_body_min):
                     confirm = {"index": i, "open": o, "high": h, "low": l, "close": c, "body_strength": body, "early": True}
             break
     if require_retest and (retest is None or confirm is None):
@@ -100,7 +100,7 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
     }
 
 
-def entry_diagnostics(closes, highs, lows, opens, interval, atr=None, allow_early_retest=True):
+def entry_diagnostics(closes, highs, lows, opens, interval, atr=None, allow_early_retest=True, early_retest_body_min=0.45):
     """Return measurable entry-stage progress for a rejected long setup.
 
     This is diagnostics only: it never changes the live entry gate. The score is
@@ -158,7 +158,7 @@ def entry_diagnostics(closes, highs, lows, opens, interval, atr=None, allow_earl
         candidates.append(("next_candle", o, h, l, c, _body_strength(o, h, l, c), 0.35))
     if allow_early_retest:
         o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-        candidates.append(("retest_candle", o, h, l, c, _body_strength(o, h, l, c), 0.45))
+        candidates.append(("retest_candle", o, h, l, c, _body_strength(o, h, l, c), float(early_retest_body_min)))
     best = None
     for name, o, h, l, c, body, threshold in candidates:
         bullish = c > o and c >= broken_level
