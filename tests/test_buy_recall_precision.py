@@ -10,7 +10,7 @@ class BuyRecallPrecisionTests(unittest.TestCase):
         self.assertEqual(strategy_profile("1h")["min_score"], 50)
         self.assertEqual(strategy_profile("5m")["min_vol_x"], 1.00)
         self.assertEqual(strategy_profile("15m")["min_vol_x"], 0.95)
-        self.assertEqual(strategy_profile("1h")["min_vol_x"], 1.00)
+        self.assertEqual(strategy_profile("1h")["min_vol_x"], 0.95)
 
     def test_risk_reward_remains_bounded_and_target_atr_is_unchanged(self):
         self.assertEqual(STRATEGY_PROFILES["scalp_5m"]["min_rr"], 1.60)
