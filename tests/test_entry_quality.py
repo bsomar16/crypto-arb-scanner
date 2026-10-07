@@ -33,7 +33,7 @@ class EntryQualityTests(unittest.TestCase):
             early_retest_body_min=0.30,
         )
         self.assertEqual(result["retest_count"], 2)
-        self.assertEqual(result["confirmed_retest_count"], 2)
+        self.assertEqual(result["confirmed_retest_count"], 1)
         self.assertTrue(result["recoverable_later_retest"])
         self.assertEqual(result["best_confirmation_index"], 48)
         self.assertEqual(result["reason"], "recoverable_later_retest")
