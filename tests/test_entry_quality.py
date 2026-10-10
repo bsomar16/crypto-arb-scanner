@@ -23,18 +23,19 @@ class EntryQualityTests(unittest.TestCase):
         self.assertEqual(result["trigger_index"], 47)
 
     def test_diagnostics_identifies_recoverable_later_retest(self):
-        closes = [100.0] * 45 + [102.0, 101.0, 102.0]
-        opens = [100.0] * 45 + [100.0, 101.05, 100.5]
-        highs = [101.0] * 45 + [102.2, 101.2, 102.4]
-        lows = [99.0] * 45 + [99.8, 100.8, 100.3]
+        closes = [100.0] * 45 + [101.0, 102.0, 101.2, 102.0]
+        opens = [100.0] * 45 + [100.0, 100.5, 101.25, 101.36]
+        highs = [100.5] * 45 + [101.2, 102.4, 101.2, 102.0]
+        lows = [99.5] * 45 + [99.8, 100.3, 100.8, 100.0]
         result = entry_diagnostics(
             closes, highs, lows, opens, "15m", atr=1.0,
-            allow_early_retest=False,
+            allow_early_retest=True,
+            early_retest_body_min=0.30,
         )
         self.assertEqual(result["retest_count"], 2)
         self.assertEqual(result["confirmed_retest_count"], 1)
         self.assertTrue(result["recoverable_later_retest"])
-        self.assertEqual(result["best_confirmation_index"], 47)
+        self.assertEqual(result["best_confirmation_index"], 48)
         self.assertEqual(result["reason"], "recoverable_later_retest")
 
 if __name__ == "__main__":
