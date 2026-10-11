@@ -4,6 +4,8 @@
 Production thresholds are unchanged. This study replays the frozen 4h signal
 stream with early retest enabled and varies only its body-strength threshold.
 Each candidate is evaluated across five sequential OOS windows under TP1/TP3.
+Historical candles are fetched once per symbol per run so threshold comparisons
+use the same in-memory candle snapshot and avoid redundant API requests.
 """
 from __future__ import annotations
 import json
@@ -61,6 +63,17 @@ def collect_signals(symbol, rows, trend_rows, start, end, cfg, body_min):
 def main():
     with open("config.json", encoding="utf-8") as fh:
         cfg = json.load(fh)
+    # Freeze one candle snapshot per symbol for the entire threshold/window
+    # matrix. Re-fetching inside each candidate loop can both waste API calls
+    # and make threshold comparisons use slightly different historical data.
+    history_by_symbol = {}
+    requested_bars = int(cfg.get("backtest_bars", 3000))
+    trend_bars = max(500, requested_bars // 8)
+    for symbol in SYMBOLS:
+        rows = fetch_history(symbol, INTERVAL, requested_bars)
+        trend = fetch_history(symbol, "1d", trend_bars)
+        history_by_symbol[symbol] = (rows, trend)
+
     pooled = {f"{t:.2f}": {p: [] for p in POLICIES} for t in BODY_THRESHOLDS}
     windows = []
 
@@ -71,8 +84,7 @@ def main():
             collected = {p: [] for p in POLICIES}
             signal_count = 0
             for symbol in SYMBOLS:
-                rows = fetch_history(symbol, INTERVAL, int(cfg.get("backtest_bars", 3000)))
-                trend = fetch_history(symbol, "1d", max(500, int(cfg.get("backtest_bars", 3000)) // 8))
+                rows, trend = history_by_symbol[symbol]
                 if len(rows) < end:
                     continue
                 signals = collect_signals(symbol, rows, trend, start, end, cfg, threshold)
