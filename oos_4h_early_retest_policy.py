@@ -60,6 +60,32 @@ def collect_signals(symbol, rows, trend_rows, start, end, cfg, body_min):
         i += 1
     return signals
 
+def evaluate_window_deltas(windows, candidate_key, baseline_key="0.42"):
+    """Require a comparable candidate result in every baseline-informative window."""
+    informative = [
+        w for w in windows
+        if w["variants"][baseline_key]["policies"]["TP3"]["closed_decisive"] > 0
+    ]
+    deltas = []
+    passes = bool(informative)
+    for w in informative:
+        candidate = w["variants"][candidate_key]["policies"]["TP3"]
+        baseline = w["variants"][baseline_key]["policies"]["TP3"]
+        if candidate["precision_pct"] is None or baseline["precision_pct"] is None:
+            passes = False
+            continue
+        delta = round(float(candidate["precision_pct"]) - float(baseline["precision_pct"]), 2)
+        deltas.append({"window": w["window"], "delta_precision_pp": delta})
+        if delta < 0:
+            passes = False
+    return {
+        "passes": passes,
+        "informative_windows": [w["window"] for w in informative],
+        "evaluated_windows": len(deltas),
+        "deltas": deltas,
+    }
+
+
 def main():
     with open("config.json", encoding="utf-8") as fh:
         cfg = json.load(fh)
@@ -124,33 +150,16 @@ def main():
                 if p is not None and b is not None else None
             )
 
-    informative = [
-        w for w in windows
-        if w["variants"]["0.42"]["policies"]["TP3"]["closed_decisive"] > 0
-    ]
     for key in pooled_out:
-        deltas = []
-        all_windows_pass = bool(informative)
-        for w in informative:
-            row = w["variants"][key]["policies"]["TP3"]
-            base = w["variants"]["0.42"]["policies"]["TP3"]
-            # A missing candidate result is not a pass. Previously such windows
-            # were silently omitted, allowing a threshold to qualify on only
-            # the subset of windows where it happened to produce outcomes.
-            if row["precision_pct"] is None or base["precision_pct"] is None:
-                all_windows_pass = False
-                continue
-            delta = round(float(row["precision_pct"]) - float(base["precision_pct"]), 2)
-            deltas.append({"window": w["window"], "delta_precision_pp": delta})
-            if delta < 0:
-                all_windows_pass = False
-        pooled_out[key]["informative_windows"] = [w["window"] for w in informative]
-        pooled_out[key]["tp3_window_deltas_pp"] = deltas
-        pooled_out[key]["tp3_nonnegative_window_delta"] = all_windows_pass
+        comparison = evaluate_window_deltas(windows, key)
+        pooled_out[key]["informative_windows"] = comparison["informative_windows"]
+        pooled_out[key]["tp3_window_deltas_pp"] = comparison["deltas"]
+        pooled_out[key]["tp3_evaluated_window_count"] = comparison["evaluated_windows"]
+        pooled_out[key]["tp3_nonnegative_window_delta"] = comparison["passes"]
         pooled_out[key]["research_eligible"] = (
             key != "0.42"
             and pooled_out[key]["TP3"]["sample_met_20_closed"]
-            and all_windows_pass
+            and comparison["passes"]
         )
 
     out = {
