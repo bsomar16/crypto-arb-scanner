@@ -126,23 +126,31 @@ def main():
 
     informative = [
         w for w in windows
-        if any(
-            w["variants"][f"{t:.2f}"]["policies"]["TP3"]["closed_decisive"] > 0
-            for t in BODY_THRESHOLDS
-        )
+        if w["variants"]["0.42"]["policies"]["TP3"]["closed_decisive"] > 0
     ]
     for key in pooled_out:
         deltas = []
+        all_windows_pass = bool(informative)
         for w in informative:
             row = w["variants"][key]["policies"]["TP3"]
             base = w["variants"]["0.42"]["policies"]["TP3"]
-            if row["precision_pct"] is not None and base["precision_pct"] is not None:
-                deltas.append(row["precision_pct"] - base["precision_pct"])
-        pooled_out[key]["tp3_nonnegative_window_delta"] = bool(deltas) and all(x >= 0 for x in deltas)
+            # A missing candidate result is not a pass. Previously such windows
+            # were silently omitted, allowing a threshold to qualify on only
+            # the subset of windows where it happened to produce outcomes.
+            if row["precision_pct"] is None or base["precision_pct"] is None:
+                all_windows_pass = False
+                continue
+            delta = round(float(row["precision_pct"]) - float(base["precision_pct"]), 2)
+            deltas.append({"window": w["window"], "delta_precision_pp": delta})
+            if delta < 0:
+                all_windows_pass = False
+        pooled_out[key]["informative_windows"] = [w["window"] for w in informative]
+        pooled_out[key]["tp3_window_deltas_pp"] = deltas
+        pooled_out[key]["tp3_nonnegative_window_delta"] = all_windows_pass
         pooled_out[key]["research_eligible"] = (
             key != "0.42"
             and pooled_out[key]["TP3"]["sample_met_20_closed"]
-            and pooled_out[key]["tp3_nonnegative_window_delta"]
+            and all_windows_pass
         )
 
     out = {
