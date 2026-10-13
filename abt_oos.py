@@ -111,7 +111,7 @@ def _evaluate_trade(rows, signal_i, signal):
         hit_target = high >= target
         if hit_stop:
             return {
-                "outcome": "LOSS", "exit_i": j,
+                "outcome": "LOSS", "exit_i": j, "duration_bars": j - signal_i,
                 "ret_pct": (stop / entry - 1.0) * 100.0 - 0.15,
                 "mfe_pct": mfe, "mae_pct": mae, "milestones": milestones,
             }
@@ -120,14 +120,14 @@ def _evaluate_trade(rows, signal_i, signal):
                 milestones[p] = True
         if hit_target:
             return {
-                "outcome": "WIN", "exit_i": j,
+                "outcome": "WIN", "exit_i": j, "duration_bars": j - signal_i,
                 "ret_pct": (target / entry - 1.0) * 100.0 - 0.15,
                 "mfe_pct": mfe, "mae_pct": mae, "milestones": milestones,
             }
 
     last = float(rows[end - 1][4])
     return {
-        "outcome": "EXPIRED", "exit_i": end - 1,
+        "outcome": "EXPIRED", "exit_i": end - 1, "duration_bars": end - 1 - signal_i,
         "ret_pct": (last / entry - 1.0) * 100.0 - 0.15,
         "mfe_pct": mfe, "mae_pct": mae, "milestones": milestones,
     }
@@ -210,6 +210,8 @@ def _stats(records):
         "avg_mae_pct": mean(float(r["mae_pct"]) for r in records),
         "avg_potential_pct": mean(float(r["potential_pct"]) for r in records),
         "avg_rr": mean(float(r["rr"]) for r in records),
+        "avg_duration_bars": mean(durations),
+        "median_duration_bars": sorted(durations)[len(durations) // 2],
         "target_milestones_pct": milestones,
     }
 
