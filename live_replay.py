@@ -80,15 +80,21 @@ def evaluate_outcome(rows,i,signal,horizon,max_index=None):
     boundary=len(rows) if max_index is None else min(len(rows),int(max_index))
     end=min(boundary,i+1+horizon)
     reached={str(p):False for p in MILESTONES}; mfe=0.0; mae=0.0
+    target_levels = {"tp1": signal.get("t1"), "tp2": signal.get("t2"), "tp3": signal.get("t3", signal.get("target"))}
+    target_eligible = {name: value is not None and float(value) > entry for name, value in target_levels.items()}
+    target_hits = {name: False for name in target_levels}
     for j in range(i+1,end):
         high,low=float(rows[j][2]),float(rows[j][3])
         mfe=max(mfe,(high/entry-1)*100); mae=min(mae,(low/entry-1)*100)
-        if low<=stop: return {"outcome":"LOSS","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":j-i,"ret_pct":(stop/entry-1)*100,"window_complete":True,"censored":False}
+        if low<=stop: return {"outcome":"LOSS","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"target_hits":dict(target_hits),"target_eligible":dict(target_eligible),"hold_bars":j-i,"ret_pct":(stop/entry-1)*100,"window_complete":True,"censored":False}
+        for name, level in target_levels.items():
+            if target_eligible[name] and high >= float(level):
+                target_hits[name] = True
         for p in MILESTONES:
             if high>=entry*(1+p/100): reached[str(p)]=True
-        if high>=target: return {"outcome":"WIN","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":j-i,"ret_pct":(target/entry-1)*100,"window_complete":True,"censored":False}
+        if high>=target: return {"outcome":"WIN","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"target_hits":dict(target_hits),"target_eligible":dict(target_eligible),"hold_bars":j-i,"ret_pct":(target/entry-1)*100,"window_complete":True,"censored":False}
     last=float(rows[end-1][4]); complete=end>=min(len(rows),i+1+horizon)
-    return {"outcome":"EXPIRED","exit_i":end-1,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":end-1-i,"ret_pct":(last/entry-1)*100,"window_complete":complete,"censored":not complete}
+    return {"outcome":"EXPIRED","exit_i":end-1,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"target_hits":dict(target_hits),"target_eligible":dict(target_eligible),"hold_bars":end-1-i,"ret_pct":(last/entry-1)*100,"window_complete":complete,"censored":not complete}
 
 def replay_symbol(symbol,interval,rows,trend_rows,start_i,end_i,cfg=None,require_complete_outcome=True,audit=None,min_hour_vol=None,min_vol_x=None,min_score=None,min_rr=None,entry_policy=None):
     cfg=dict(cfg or {}); profile=next(p for p in STRATEGY_PROFILES.values() if p["interval"]==interval)
@@ -138,6 +144,11 @@ def summarize(rows):
     returns = [float(r["ret_pct"]) for r in evaluated if r.get("ret_pct") is not None]
     gross_wins = sum(max(0.0, value) for value in returns)
     gross_losses = -sum(min(0.0, value) for value in returns)
+    target_hit_stats = {}
+    for name in ("tp1", "tp2", "tp3"):
+        eligible_rows = [r for r in evaluated if (r.get("target_eligible") or {}).get(name, False)]
+        hits = sum(bool((r.get("target_hits") or {}).get(name, False)) for r in eligible_rows)
+        target_hit_stats[name] = {"hits": hits, "eligible": len(eligible_rows), "rate_pct": hits / len(eligible_rows) * 100 if eligible_rows else None}
     return {
         "signals": signals,
         "evaluated": len(evaluated),
@@ -153,6 +164,7 @@ def summarize(rows):
         # Gross price returns only; fees, spread and slippage are not deducted.
         "avg_return_pct_gross": mean(returns) if returns else None,
         "profit_factor_gross": gross_wins / gross_losses if gross_losses > 0 else None,
+        "target_hits": target_hit_stats,
         "milestones": {
             str(p): {
                 "hits": sum(bool((r.get("milestones") or {}).get(str(p))) for r in evaluated),
