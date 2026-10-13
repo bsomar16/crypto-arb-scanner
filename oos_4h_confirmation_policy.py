@@ -51,7 +51,9 @@ def collect_signals(symbol, rows, trend_rows, start, end, cfg, body_min):
 
 def main():
     with open("config.json",encoding="utf-8") as fh: cfg=json.load(fh)
-    pooled={str(t):{p:[] for p in POLICIES} for t in BODY_THRESHOLDS}
+    # Keep keys consistent with the per-variant f"{threshold:.2f}" keys below.
+    # str(0.30) becomes "0.3", which caused a KeyError for "0.30".
+    pooled={f"{t:.2f}":{p:[] for p in POLICIES} for t in BODY_THRESHOLDS}
     windows=[]
     for wn,start,end in WINDOWS:
         item={"window":wn,"start_bar":start,"end_bar":end,"variants":{}}
