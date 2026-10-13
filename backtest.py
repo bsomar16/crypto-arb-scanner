@@ -314,7 +314,7 @@ def run_backtest(cfg):
         print(f"[BACKTEST] unable to persist stats: {e}")
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"📈 <b>MTF CRYPTO BACKTEST</b> · {now}",
+    lines = [f"📈 {now}",
              "Closed-candle walk-forward · no look-ahead · conservative same-candle SL/TP handling",
              f"Costs: {COST_PCT:.2f}% round trip · horizons: 5m={HORIZON_BARS['5m']} bars, 15m={HORIZON_BARS['15m']} bars, 1h={HORIZON_BARS['1h']} bars",
              ""]
