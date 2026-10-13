@@ -83,10 +83,10 @@ def evaluate_outcome(rows,i,signal,horizon,max_index=None):
     for j in range(i+1,end):
         high,low=float(rows[j][2]),float(rows[j][3])
         mfe=max(mfe,(high/entry-1)*100); mae=min(mae,(low/entry-1)*100)
-        if low<=stop: return {"outcome":"LOSS","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":j-i,"window_complete":True,"censored":False}
+        if low<=stop: return {"outcome":"LOSS","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":j-i,"ret_pct":(stop/entry-1)*100,"window_complete":True,"censored":False}
         for p in MILESTONES:
             if high>=entry*(1+p/100): reached[str(p)]=True
-        if high>=target: return {"outcome":"WIN","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":j-i,"window_complete":True,"censored":False}
+        if high>=target: return {"outcome":"WIN","exit_i":j,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":j-i,"ret_pct":(target/entry-1)*100,"window_complete":True,"censored":False}
     last=float(rows[end-1][4]); complete=end>=min(len(rows),i+1+horizon)
     return {"outcome":"EXPIRED","exit_i":end-1,"mfe_pct":mfe,"mae_pct":mae,"milestones":reached,"hold_bars":end-1-i,"ret_pct":(last/entry-1)*100,"window_complete":complete,"censored":not complete}
 
@@ -129,12 +129,44 @@ def replay_symbol(symbol,interval,rows,trend_rows,start_i,end_i,cfg=None,require
     return trades
 
 def summarize(rows):
-    closed=[r for r in rows if r.get("outcome") in ("WIN","LOSS")]
-    wins=sum(r.get("outcome")=="WIN" for r in closed); signals=len(rows); censored=sum(bool(r.get("censored")) for r in rows)
-    return {"signals":signals,"closed":len(closed),"wins":wins,"losses":len(closed)-wins,"expired":sum(r.get("outcome")=="EXPIRED" for r in rows),"censored":censored,
-            "precision_pct":wins/len(closed)*100 if closed else None,
-            "milestones":{str(p):{"hits":sum(bool((r.get("milestones") or {}).get(str(p))) for r in rows),"rate_pct":sum(bool((r.get("milestones") or {}).get(str(p))) for r in rows)/signals*100 if signals else None} for p in MILESTONES},
-            "avg_potential_pct":mean(float(r["potential_pct"]) for r in rows) if rows else None,"avg_rr":mean(float(r["rr"]) for r in rows) if rows else None,
-            "avg_mfe_pct":mean(float(r.get("mfe_pct",0)) for r in rows) if rows else None,"avg_mae_pct":mean(float(r.get("mae_pct",0)) for r in rows) if rows else None,
-            "avg_hold_hours":mean(float(r.get("estimated_hold_hours",0)) for r in rows) if rows else None,
-            **{f"milestone_{p}_pct":sum(bool((r.get("milestones") or {}).get(str(p))) for r in rows)/signals*100 if signals else None for p in MILESTONES}}
+    # Censored outcomes have not had their full evaluation window and must not
+    # affect precision or realized-return statistics.
+    evaluated = [r for r in rows if not r.get("censored")]
+    closed = [r for r in evaluated if r.get("outcome") in ("WIN", "LOSS")]
+    wins = sum(r.get("outcome") == "WIN" for r in closed)
+    signals = len(rows)
+    returns = [float(r["ret_pct"]) for r in evaluated if r.get("ret_pct") is not None]
+    gross_wins = sum(max(0.0, value) for value in returns)
+    gross_losses = -sum(min(0.0, value) for value in returns)
+    return {
+        "signals": signals,
+        "evaluated": len(evaluated),
+        "closed": len(closed),
+        "wins": wins,
+        "losses": len(closed) - wins,
+        "expired": sum(r.get("outcome") == "EXPIRED" for r in rows),
+        "censored": sum(bool(r.get("censored")) for r in rows),
+        # Closed-trade precision excludes expired trades; the all-outcome
+        # metric counts each fully observed expiry as a non-win.
+        "precision_pct": wins / len(closed) * 100 if closed else None,
+        "win_rate_all_outcomes_pct": wins / len(evaluated) * 100 if evaluated else None,
+        # Gross price returns only; fees, spread and slippage are not deducted.
+        "avg_return_pct_gross": mean(returns) if returns else None,
+        "profit_factor_gross": gross_wins / gross_losses if gross_losses > 0 else None,
+        "milestones": {
+            str(p): {
+                "hits": sum(bool((r.get("milestones") or {}).get(str(p))) for r in evaluated),
+                "rate_pct": sum(bool((r.get("milestones") or {}).get(str(p))) for r in evaluated) / len(evaluated) * 100 if evaluated else None,
+            }
+            for p in MILESTONES
+        },
+        "avg_potential_pct": mean(float(r["potential_pct"]) for r in evaluated if r.get("potential_pct") is not None) if any(r.get("potential_pct") is not None for r in evaluated) else None,
+        "avg_rr": mean(float(r["rr"]) for r in evaluated if r.get("rr") is not None) if any(r.get("rr") is not None for r in evaluated) else None,
+        "avg_mfe_pct": mean(float(r.get("mfe_pct", 0)) for r in evaluated) if evaluated else None,
+        "avg_mae_pct": mean(float(r.get("mae_pct", 0)) for r in evaluated) if evaluated else None,
+        "avg_hold_hours": mean(float(r.get("estimated_hold_hours", 0)) for r in evaluated) if evaluated else None,
+        **{
+            f"milestone_{p}_pct": sum(bool((r.get("milestones") or {}).get(str(p))) for r in evaluated) / len(evaluated) * 100 if evaluated else None
+            for p in MILESTONES
+        },
+    }

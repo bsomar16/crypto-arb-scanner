@@ -3,6 +3,33 @@ from live_replay import evaluate_outcome, _bars_for_hold
 from signals import TP_POTENTIAL_CEILINGS
 
 class LiveReplayTests(unittest.TestCase):
+    def test_summarize_reports_conservative_all_outcome_win_rate_and_returns(self):
+        from live_replay import summarize
+
+        rows = [
+            {"outcome": "WIN", "ret_pct": 4.0, "milestones": {"5": True}, "potential_pct": 5, "rr": 2},
+            {"outcome": "LOSS", "ret_pct": -2.0, "milestones": {}, "potential_pct": 5, "rr": 2},
+            {"outcome": "EXPIRED", "ret_pct": 1.0, "milestones": {}, "potential_pct": 5, "rr": 2},
+            {"outcome": "EXPIRED", "ret_pct": 99.0, "censored": True, "milestones": {}, "potential_pct": 5, "rr": 2},
+        ]
+        result = summarize(rows)
+        self.assertEqual(result["signals"], 4)
+        self.assertEqual(result["evaluated"], 3)
+        self.assertEqual(result["closed"], 2)
+        self.assertEqual(result["precision_pct"], 50.0)
+        self.assertAlmostEqual(result["win_rate_all_outcomes_pct"], 100 / 3)
+        self.assertAlmostEqual(result["avg_return_pct_gross"], 1.0)
+        self.assertAlmostEqual(result["profit_factor_gross"], 2.5)
+        self.assertEqual(result["censored"], 1)
+
+    def test_outcome_returns_are_recorded_for_win_and_loss(self):
+        win_rows = [[0,1,1,1,1,0,0,0], [1,1,1.2,0.99,1.15,0,0,0]]
+        loss_rows = [[0,1,1,1,1,0,0,0], [1,1,1.02,0.8,0.85,0,0,0]]
+        win = evaluate_outcome(win_rows, 0, {"entry":1.0,"stop":0.9,"t3":1.1}, 1)
+        loss = evaluate_outcome(loss_rows, 0, {"entry":1.0,"stop":0.9,"t3":1.1}, 1)
+        self.assertAlmostEqual(win["ret_pct"], 10.0)
+        self.assertAlmostEqual(loss["ret_pct"], -10.0)
+
     def test_all_horizon_caps_exist(self):
         self.assertEqual(set(TP_POTENTIAL_CEILINGS), {"5m","15m","1h","4h","1d","1w"})
 
