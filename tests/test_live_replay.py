@@ -47,7 +47,7 @@ class LiveReplayTests(unittest.TestCase):
         rows = [
             [0, 1, 1, 1, 1, 0, 0, 0],
             [1, 1, 1.06, 0.99, 1.04, 0, 0, 0],
-            [2, 1.04, 1.16, 1.01, 1.14, 0, 0, 0],
+            [2, 1.04, 1.12, 1.01, 1.10, 0, 0, 0],
         ]
         signal = {"entry": 1.0, "stop": 0.9, "t1": 1.05, "t2": 1.10, "t3": 1.15}
         result = evaluate_outcome(rows, 0, signal, 2)
