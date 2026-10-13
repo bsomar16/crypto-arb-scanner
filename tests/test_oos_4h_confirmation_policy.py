@@ -1,5 +1,5 @@
 import unittest
-from oos_4h_confirmation_policy import BODY_THRESHOLDS, WINDOWS, POLICIES
+from oos_4h_confirmation_policy import BODY_THRESHOLDS, WINDOWS, POLICIES, threshold_key
 
 class ConfirmationPolicyStudyTests(unittest.TestCase):
     def test_five_windows_are_fixed(self):
@@ -8,7 +8,7 @@ class ConfirmationPolicyStudyTests(unittest.TestCase):
         self.assertEqual(WINDOWS[-1],("oos_5",2500,3000))
         self.assertTrue(all(end-start==500 for _,start,end in WINDOWS))
     def test_pooled_threshold_keys_use_the_same_fixed_format_as_variant_keys(self):
-        keys = {f"{threshold:.2f}" for threshold in BODY_THRESHOLDS}
+        keys = {threshold_key(threshold) for threshold in BODY_THRESHOLDS}
         self.assertIn("0.30", keys)
         self.assertIn("0.35", keys)
         self.assertNotIn("0.3", keys)
