@@ -23,6 +23,10 @@ WINDOWS=[("oos_1",500,1000),("oos_2",1000,1500),("oos_3",1500,2000),("oos_4",200
 BODY_THRESHOLDS=(0.25,0.30,0.35,0.40,0.45,0.55)
 POLICIES=("TP1","TP3")
 
+def threshold_key(value):
+    """Format threshold values consistently for report dictionary keys."""
+    return f"{float(value):.2f}"
+
 def collect_signals(symbol, rows, trend_rows, start, end, cfg, body_min):
     audit=SignalAudit(); signals=[]
     i=max(70,start); boundary=min(end,len(rows)-1)
@@ -51,14 +55,14 @@ def collect_signals(symbol, rows, trend_rows, start, end, cfg, body_min):
 
 def main():
     with open("config.json",encoding="utf-8") as fh: cfg=json.load(fh)
-    # Keep keys consistent with the per-variant f"{threshold:.2f}" keys below.
+    # Keep keys consistent with the per-variant threshold_key(threshold) keys below.
     # str(0.30) becomes "0.3", which caused a KeyError for "0.30".
-    pooled={f"{t:.2f}":{p:[] for p in POLICIES} for t in BODY_THRESHOLDS}
+    pooled={threshold_key(t):{p:[] for p in POLICIES} for t in BODY_THRESHOLDS}
     windows=[]
     for wn,start,end in WINDOWS:
         item={"window":wn,"start_bar":start,"end_bar":end,"variants":{}}
         for threshold in BODY_THRESHOLDS:
-            key=f"{threshold:.2f}"
+            key=threshold_key(threshold)
             collected={p:[] for p in POLICIES}
             signal_count=0
             for symbol in SYMBOLS:
@@ -81,7 +85,7 @@ def main():
 
     pooled_out={}
     for threshold in BODY_THRESHOLDS:
-        key=f"{threshold:.2f}"; pooled_out[key]={}
+        key=threshold_key(threshold); pooled_out[key]={}
         for policy in POLICIES:
             m=summarize(pooled[key][policy]); m["sample_met_20_closed"]=m["closed_decisive"]>=20
             pooled_out[key][policy]=m
@@ -92,7 +96,7 @@ def main():
             p=pooled_out[key][policy]["precision_pct"]; b=baseline[policy]["precision_pct"]
             pooled_out[key][policy]["delta_vs_035_pp"]=round(float(p)-float(b),2) if p is not None and b is not None else None
 
-    informative=[w for w in windows if any(w["variants"][f"{t:.2f}"]["policies"]["TP3"]["closed_decisive"]>0 for t in BODY_THRESHOLDS)]
+    informative=[w for w in windows if any(w["variants"][threshold_key(t)]["policies"]["TP3"]["closed_decisive"]>0 for t in BODY_THRESHOLDS)]
     for key in pooled_out:
         row_by_window=[]
         for w in informative:
