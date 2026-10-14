@@ -11,15 +11,19 @@ SYMBOLS=["BTC","ETH","SOL","BNB","XRP","ADA","DOGE"]
 INTERVAL="4h"
 WINDOWS=[("oos_1",750,1500),("oos_2",1500,2250),("oos_3",2250,3000)]
 
+def setup_name(row):
+    """Read the canonical setup field with the same alias order as loss diagnostics."""
+    return str(row.get("setup_type") or row.get("setup") or "")
+
 # These hypotheses are frozen before rerunning the rolling windows. They are
 # descriptive follow-ups to the setup/regime decomposition; this study does
 # not search arbitrary thresholds.
 CANDIDATES={
  "baseline":lambda r:True,
- "pullback":lambda r:str(r.get("setup") or "")=="PULLBACK",
- "pullback_and_structure_ge_50":lambda r:str(r.get("setup") or "")=="PULLBACK" and float(r.get("structure_score",0))>=50,
- "pullback_and_base":lambda r:str(r.get("setup") or "")=="PULLBACK" and str(r.get("expansion_state") or "")=="BASE",
- "pullback_structure_and_base":lambda r:str(r.get("setup") or "")=="PULLBACK" and float(r.get("structure_score",0))>=50 and str(r.get("expansion_state") or "")=="BASE",
+ "pullback":lambda r:setup_name(r)=="PULLBACK",
+ "pullback_and_structure_ge_50":lambda r:setup_name(r)=="PULLBACK" and float(r.get("structure_score",0))>=50,
+ "pullback_and_base":lambda r:setup_name(r)=="PULLBACK" and str(r.get("expansion_state") or "")=="BASE",
+ "pullback_structure_and_base":lambda r:setup_name(r)=="PULLBACK" and float(r.get("structure_score",0))>=50 and str(r.get("expansion_state") or "")=="BASE",
  "non_expansion_and_structure_ge_50":lambda r:str(r.get("expansion_state") or "")!="EXPANSION" and float(r.get("structure_score",0))>=50,
 }
 
