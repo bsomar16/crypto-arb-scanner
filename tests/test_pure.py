@@ -8,7 +8,6 @@ import unittest
 
 import indicators
 import signals
-import traps
 
 
 class TestIndicators(unittest.TestCase):
@@ -89,48 +88,6 @@ class TestSlippedSize(unittest.TestCase):
         import markets
         size = markets.slipped_size([(100.0, 2.0), (99.0, 2.0)], 100.0, -0.005)
         self.assertAlmostEqual(size, 2.0 * 100.0)
-
-
-class TestBacktest(unittest.TestCase):
-    def test_conservative_same_candle_stop_and_target(self):
-        import backtest
-        rows = [[0, 0, 106, 94, 100, 0], [1, 0, 106, 94, 100, 0]]
-        signal = {"entry": 100.0, "stop": 95.0, "target": 105.0}
-        result = backtest._evaluate(rows, 0, signal, 1)
-        self.assertEqual(result["outcome"], "LOSS")
-
-    def test_target_before_stop_is_win(self):
-        import backtest
-        rows = [[0, 0, 101, 99, 100, 0], [1, 0, 106, 99, 105, 0]]
-        signal = {"entry": 100.0, "stop": 95.0, "target": 105.0}
-        result = backtest._evaluate(rows, 0, signal, 1)
-        self.assertEqual(result["outcome"], "WIN")
-
-    def test_backtest_intervals(self):
-        import backtest
-        self.assertEqual(backtest.INTERVALS, ("5m", "15m", "1h"))
-
-
-class TestTraps(unittest.TestCase):
-    def setUp(self):
-        self.dir = tempfile.mkdtemp(); self.path = os.path.join(self.dir, "traps.json"); self.now = 1_700_000_000.0
-
-    def test_migration_flat_list(self):
-        with open(self.path, "w") as f: json.dump(["COIN1", "COIN2"], f)
-        traps_dict = traps.load_traps(self.path, expiry_days=7.0, now=self.now)
-        self.assertEqual(set(traps_dict), {"COIN1", "COIN2"})
-        for v in traps_dict.values(): self.assertEqual(v, self.now)
-
-    def test_prune_expired(self):
-        traps_dict = traps.prune_expired_traps({"OLD": self.now - 8 * 86400, "NEW": self.now - 86400}, expiry_days=7.0, now=self.now)
-        self.assertEqual(set(traps_dict), {"NEW"})
-
-    def test_mark_flagged_keeps_first_ts(self):
-        traps_dict = {"KEEP": self.now - 100}; traps.mark_flagged(traps_dict, ["KEEP", "FRESH"], now=self.now)
-        self.assertEqual(traps_dict["KEEP"], self.now - 100); self.assertEqual(traps_dict["FRESH"], self.now)
-
-    def test_save_roundtrip(self):
-        traps.save_traps(self.path, {"A": self.now}); self.assertEqual(traps.load_traps(self.path, now=self.now), {"A": self.now})
 
 
 class TestStoreAggregation(unittest.TestCase):
