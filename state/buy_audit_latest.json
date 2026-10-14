@@ -1,47 +1,62 @@
 {
- "scans": 600,
- "hits": 3,
- "fresh": 1,
- "selected": 1,
- "attempts": 602,
- "qualified": 3,
- "rejected": 599,
- "qualification_rate_pct": 0.5,
+ "scans": 900,
+ "hits": 11,
+ "fresh": 3,
+ "selected": 0,
+ "attempts": 910,
+ "qualified": 5,
+ "rejected": 905,
+ "qualification_rate_pct": 0.55,
  "stages": {
+  "data_fetch": 1,
   "dedupe_active_position": 1,
-  "dedupe_unchanged": 1,
-  "entry_confirmation": 123,
+  "dedupe_notification_claim": 3,
+  "dedupe_unchanged": 6,
+  "entry_confirmation": 265,
   "liquidity": 320,
-  "qualified": 3,
-  "target_potential": 2,
-  "volume": 152
+  "qualified": 5,
+  "target_potential": 7,
+  "volume": 302
  },
  "by_interval": {
   "15m": {
-   "entry_confirmation": 78,
-   "liquidity": 123,
+   "entry_confirmation": 72,
+   "liquidity": 115,
    "qualified": 3,
-   "volume": 96
+   "target_potential": 1,
+   "volume": 109
+  },
+  "1h": {
+   "data_fetch": 1,
+   "entry_confirmation": 151,
+   "liquidity": 15,
+   "qualified": 2,
+   "target_potential": 3,
+   "volume": 128
   },
   "5m": {
-   "entry_confirmation": 45,
-   "liquidity": 197,
-   "target_potential": 2,
-   "volume": 56
+   "entry_confirmation": 42,
+   "liquidity": 190,
+   "target_potential": 3,
+   "volume": 65
   }
  },
  "by_setup": {
   "BREAKOUT": {
    "qualified": 1,
-   "target_potential": 2
+   "target_potential": 4
   },
   "MOMENTUM": {
-   "qualified": 2
+   "qualified": 4,
+   "target_potential": 2
+  },
+  "PULLBACK": {
+   "target_potential": 1
   }
  },
  "near_misses": [
   {
-   "event_id": 154,
+   "event_id": 151,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
@@ -51,87 +66,77 @@
    "near_miss_score": 99.79425274164394
   },
   {
-   "event_id": 107,
+   "event_id": 870,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "ARKM",
+   "volume_ratio": 0.944,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 99.38322592663725
+  },
+  {
+   "event_id": 499,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "BEAMX",
+   "volume_ratio": 0.94,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 98.97557821275777
+  },
+  {
+   "event_id": 895,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "IO",
+   "volume_ratio": 0.94,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 98.94138133585857
+  },
+  {
+   "event_id": 331,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "LSK",
+   "volume_ratio": 0.932,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 98.13068078740822
+  },
+  {
+   "event_id": 766,
+   "stage": "liquidity",
+   "interval": "1h",
+   "setup": null,
+   "coin": "SSV",
+   "hour_quote_volume": 48767.75,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 97.53549777
+  },
+  {
+   "event_id": 20,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
-   "coin": "BCH",
-   "volume_ratio": 0.993,
+   "coin": "DUSK",
+   "volume_ratio": 0.972,
    "required_volume_ratio": 1.0,
-   "near_miss_score": 99.31281677817718
+   "near_miss_score": 97.2084379275483
   },
   {
-   "event_id": 575,
+   "event_id": 727,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "QNT",
-   "volume_ratio": 0.943,
+   "coin": "AVNT",
+   "volume_ratio": 0.922,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 99.22618582650571
+   "near_miss_score": 97.07872972267171
   },
   {
-   "event_id": 356,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "WIN",
-   "volume_ratio": 0.933,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 98.17881478904435
-  },
-  {
-   "event_id": 293,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "GTC",
-   "hour_quote_volume": 49063.14,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 98.126278432
-  },
-  {
-   "event_id": 42,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "QQQB",
-   "hour_quote_volume": 49039.94,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 98.07987966
-  },
-  {
-   "event_id": 13,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "CFG",
-   "hour_quote_volume": 48918.25,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 97.83650272
-  },
-  {
-   "event_id": 586,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "KP3R",
-   "hour_quote_volume": 48876.47,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 97.7529318
-  },
-  {
-   "event_id": 196,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "PROM",
-   "hour_quote_volume": 48668.94,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 97.33788736
-  },
-  {
-   "event_id": 539,
+   "event_id": 540,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
@@ -141,57 +146,77 @@
    "near_miss_score": 97.03367918537056
   },
   {
-   "event_id": 110,
-   "stage": "volume",
-   "interval": "5m",
+   "event_id": 856,
+   "stage": "liquidity",
+   "interval": "1h",
    "setup": null,
-   "coin": "AAVE",
-   "volume_ratio": 0.969,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 96.88555461061839
+   "coin": "USDE",
+   "hour_quote_volume": 48234.84,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 96.4696792
   },
   {
-   "event_id": 369,
+   "event_id": 688,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "ZEC",
-   "volume_ratio": 0.915,
+   "coin": "PARTI",
+   "volume_ratio": 0.916,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 96.27283009381013
+   "near_miss_score": 96.41333584062643
   },
   {
-   "event_id": 578,
-   "stage": "liquidity",
-   "interval": "15m",
+   "event_id": 764,
+   "stage": "volume",
+   "interval": "1h",
    "setup": null,
-   "coin": "SYRUP",
-   "hour_quote_volume": 48005.72,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 96.0114332
+   "coin": "W",
+   "volume_ratio": 0.913,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 96.14433702341896
   },
   {
-   "event_id": 3,
+   "event_id": 869,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "BOME",
+   "volume_ratio": 0.913,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 96.06614230422846
+  },
+  {
+   "event_id": 49,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "BCH",
+   "hour_quote_volume": 48032.9,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 96.06579199999999
+  },
+  {
+   "event_id": 769,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "D",
+   "volume_ratio": 0.911,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 95.92040695242474
+  },
+  {
+   "event_id": 165,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
-   "coin": "TRX",
-   "volume_ratio": 0.959,
+   "coin": "EUR",
+   "volume_ratio": 0.957,
    "required_volume_ratio": 1.0,
-   "near_miss_score": 95.9157485968657
+   "near_miss_score": 95.7322773515194
   },
   {
-   "event_id": 97,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "ZK",
-   "hour_quote_volume": 47862.81,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 95.72562432400001
-  },
-  {
-   "event_id": 348,
+   "event_id": 346,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
@@ -201,7 +226,17 @@
    "near_miss_score": 95.68747114949294
   },
   {
-   "event_id": 433,
+   "event_id": 861,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "TRUMP",
+   "volume_ratio": 0.909,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 95.63947049167032
+  },
+  {
+   "event_id": 431,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
@@ -211,57 +246,67 @@
    "near_miss_score": 95.5840548
   },
   {
-   "event_id": 173,
-   "stage": "volume",
-   "interval": "5m",
+   "event_id": 484,
+   "stage": "liquidity",
+   "interval": "15m",
    "setup": null,
-   "coin": "SNDKB",
-   "volume_ratio": 0.951,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 95.13752375287872
+   "coin": "ALLO",
+   "hour_quote_volume": 47661.93,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 95.32386364
   },
   {
-   "event_id": 355,
+   "event_id": 597,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "IO",
+   "hour_quote_volume": 47174.62,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 94.34924111200002
+  },
+  {
+   "event_id": 590,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "NVDAB",
-   "volume_ratio": 0.898,
+   "coin": "AR",
+   "volume_ratio": 0.892,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 94.56837242333201
+   "near_miss_score": 93.89723495517974
   },
   {
-   "event_id": 333,
+   "event_id": 881,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "RENDER",
+   "volume_ratio": 0.892,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 93.86416040950003
+  },
+  {
+   "event_id": 450,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "SUN",
-   "hour_quote_volume": 46931.53,
+   "coin": "SENT",
+   "hour_quote_volume": 46821.69,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 93.86306066
+   "near_miss_score": 93.64337526
   },
   {
-   "event_id": 109,
-   "stage": "liquidity",
-   "interval": "5m",
+   "event_id": 883,
+   "stage": "volume",
+   "interval": "1h",
    "setup": null,
-   "coin": "NIL",
-   "hour_quote_volume": 46930.53,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 93.861051956
+   "coin": "XLM",
+   "volume_ratio": 0.888,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 93.46012135180152
   },
   {
-   "event_id": 544,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "C",
-   "hour_quote_volume": 46828.76,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 93.65751884
-  },
-  {
-   "event_id": 317,
+   "event_id": 320,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
@@ -271,57 +316,163 @@
    "near_miss_score": 93.37611199999999
   },
   {
-   "event_id": 83,
+   "event_id": 694,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "LPT",
+   "volume_ratio": 0.885,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 93.20369968697987
+  },
+  {
+   "event_id": 675,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "DAR",
+   "volume_ratio": 0.883,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 92.97719251126398
+  },
+  {
+   "event_id": 39,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "LUMIA",
-   "hour_quote_volume": 46597.48,
+   "coin": "NIL",
+   "hour_quote_volume": 46390.72,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 93.19495240799999
+   "near_miss_score": 92.78144786800001
   },
   {
-   "event_id": 382,
+   "event_id": 90,
+   "stage": "volume",
+   "interval": "5m",
+   "setup": null,
+   "coin": "AVA",
+   "volume_ratio": 0.926,
+   "required_volume_ratio": 1.0,
+   "near_miss_score": 92.6041227342393
+  },
+  {
+   "event_id": 645,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "BCH",
+   "volume_ratio": 0.874,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 91.9655448711859
+  },
+  {
+   "event_id": 606,
+   "stage": "entry_confirmation",
+   "interval": "1h",
+   "setup": null,
+   "coin": "AT",
+   "near_miss_score": 91.9,
+   "bos_confirmed": true,
+   "retest_confirmed": true,
+   "confirmation_candle": false,
+   "sweep_confirmed": false,
+   "bos_level": 0.1382,
+   "retest_distance_pct": 0.217,
+   "retest_count": 2,
+   "confirmed_retest_count": 0,
+   "recoverable_later_retest": false,
+   "confirmation_body": 0.255,
+   "confirmation_body_required": 0.35,
+   "confirmation_body_gap": 0.095,
+   "confirmation_direction_bullish": true,
+   "best_confirmation_index": null,
+   "reason": "confirmation_missing"
+  },
+  {
+   "event_id": 370,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "ESP",
+   "hour_quote_volume": 45620.89,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 91.241781
+  },
+  {
+   "event_id": 773,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "RED",
+   "volume_ratio": 0.863,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 90.85962690083934
+  },
+  {
+   "event_id": 654,
+   "stage": "entry_confirmation",
+   "interval": "1h",
+   "setup": null,
+   "coin": "STPT",
+   "near_miss_score": 90.7,
+   "bos_confirmed": true,
+   "retest_confirmed": true,
+   "confirmation_candle": false,
+   "sweep_confirmed": false,
+   "bos_level": 0.07155,
+   "retest_distance_pct": 1.845,
+   "retest_count": 1,
+   "confirmed_retest_count": 0,
+   "recoverable_later_retest": false,
+   "confirmation_body": 0.29,
+   "confirmation_body_required": 0.42,
+   "confirmation_body_gap": 0.13,
+   "confirmation_direction_bullish": true,
+   "best_confirmation_index": null,
+   "reason": "confirmation_missing"
+  },
+  {
+   "event_id": 529,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "ICP",
+   "volume_ratio": 0.861,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 90.64725060322043
+  },
+  {
+   "event_id": 329,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
    "coin": "KMNO",
-   "hour_quote_volume": 46330.67,
+   "hour_quote_volume": 45319.83,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 92.6613389
+   "near_miss_score": 90.63966562
   },
   {
-   "event_id": 309,
+   "event_id": 397,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "STX",
-   "volume_ratio": 0.879,
+   "coin": "XRP",
+   "volume_ratio": 0.86,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 92.57010161275463
+   "near_miss_score": 90.51521517210051
   },
   {
-   "event_id": 380,
+   "event_id": 308,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "LUMIA",
-   "volume_ratio": 0.87,
+   "coin": "ZEC",
+   "volume_ratio": 0.859,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 91.56089062302563
+   "near_miss_score": 90.465243100873
   },
   {
-   "event_id": 349,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "SENT",
-   "hour_quote_volume": 45365.42,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 90.73083358
-  },
-  {
-   "event_id": 67,
+   "event_id": 57,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
@@ -331,7 +482,27 @@
    "near_miss_score": 89.98602559800001
   },
   {
-   "event_id": 17,
+   "event_id": 18,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "SUN",
+   "hour_quote_volume": 44969.46,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 89.93891074000001
+  },
+  {
+   "event_id": 805,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "LINK",
+   "volume_ratio": 0.85,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 89.50894665093006
+  },
+  {
+   "event_id": 19,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
@@ -341,7 +512,7 @@
    "near_miss_score": 89.44441300307318
   },
   {
-   "event_id": 327,
+   "event_id": 325,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
@@ -351,37 +522,97 @@
    "near_miss_score": 89.4380266131307
   },
   {
-   "event_id": 313,
+   "event_id": 201,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "DASH",
+   "hour_quote_volume": 44718.32,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 89.43663704
+  },
+  {
+   "event_id": 411,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "ARB",
+   "volume_ratio": 0.843,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 88.75265481462496
+  },
+  {
+   "event_id": 705,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "SEI",
+   "volume_ratio": 0.841,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 88.57621961533124
+  },
+  {
+   "event_id": 750,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "MUBARAK",
+   "volume_ratio": 0.84,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 88.40155110697972
+  },
+  {
+   "event_id": 740,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "USD1",
+   "volume_ratio": 0.837,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 88.10053578384044
+  },
+  {
+   "event_id": 626,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "KMNO",
+   "volume_ratio": 0.837,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 88.0810780381156
+  },
+  {
+   "event_id": 452,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "ESP",
-   "hour_quote_volume": 44689.95,
+   "coin": "ZEN",
+   "hour_quote_volume": 44011.6,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 89.37989216
+   "near_miss_score": 88.02319986000002
   },
   {
-   "event_id": 593,
+   "event_id": 700,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "SUI",
-   "volume_ratio": 0.848,
+   "coin": "NVDAB",
+   "volume_ratio": 0.835,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 89.21419652575078
+   "near_miss_score": 87.92313148766787
   },
   {
-   "event_id": 590,
+   "event_id": 685,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "GTC",
-   "volume_ratio": 0.839,
+   "coin": "PEPE",
+   "volume_ratio": 0.835,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 88.26972847954816
+   "near_miss_score": 87.89153188690385
   },
   {
-   "event_id": 151,
+   "event_id": 150,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
@@ -391,17 +622,37 @@
    "near_miss_score": 87.83878343360497
   },
   {
-   "event_id": 403,
+   "event_id": 347,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
    "coin": "BCH",
-   "volume_ratio": 0.831,
+   "volume_ratio": 0.833,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 87.44001296495834
+   "near_miss_score": 87.68935995993554
   },
   {
-   "event_id": 127,
+   "event_id": 337,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "RARE",
+   "hour_quote_volume": 43826.03,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 87.65206450399998
+  },
+  {
+   "event_id": 684,
+   "stage": "liquidity",
+   "interval": "1h",
+   "setup": null,
+   "coin": "ORCLB",
+   "hour_quote_volume": 43764.62,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 87.52923374
+  },
+  {
+   "event_id": 122,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
@@ -411,37 +662,17 @@
    "near_miss_score": 87.29486260000002
   },
   {
-   "event_id": 150,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "AMP",
-   "hour_quote_volume": 43643.63,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 87.287253806
-  },
-  {
-   "event_id": 535,
+   "event_id": 784,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "HYPER",
-   "volume_ratio": 0.828,
+   "coin": "AERO",
+   "volume_ratio": 0.829,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 87.15132929210505
+   "near_miss_score": 87.2649220993209
   },
   {
-   "event_id": 280,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "ATOM",
-   "hour_quote_volume": 43564.28,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 87.12856678000001
-  },
-  {
-   "event_id": 172,
+   "event_id": 168,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
@@ -451,57 +682,77 @@
    "near_miss_score": 87.07343839364795
   },
   {
-   "event_id": 90,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "ALGO",
-   "hour_quote_volume": 43280.42,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 86.5608446
-  },
-  {
-   "event_id": 435,
+   "event_id": 545,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "RUNE",
-   "hour_quote_volume": 42788.35,
+   "coin": "MAV",
+   "hour_quote_volume": 43457.33,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 85.5767016
+   "near_miss_score": 86.91465236000002
   },
   {
-   "event_id": 536,
+   "event_id": 268,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "TRUMP",
+   "hour_quote_volume": 43439.25,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 86.87849544
+  },
+  {
+   "event_id": 403,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "OPEN",
-   "hour_quote_volume": 42396.79,
+   "coin": "WIN",
+   "hour_quote_volume": 43258.26,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 84.79358048
+   "near_miss_score": 86.51651243596001
   },
   {
-   "event_id": 31,
+   "event_id": 544,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "RONIN",
+   "hour_quote_volume": 43144.5,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 86.28899301399998
+  },
+  {
+   "event_id": 798,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "SUI",
+   "volume_ratio": 0.819,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 86.19536613482177
+  },
+  {
+   "event_id": 557,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "SUSHI",
+   "hour_quote_volume": 42994.5,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 85.98900042
+  },
+  {
+   "event_id": 75,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "LSK",
-   "hour_quote_volume": 42344.78,
+   "coin": "PYTH",
+   "hour_quote_volume": 42470.0,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 84.68955978
+   "near_miss_score": 84.94000737399999
   },
   {
-   "event_id": 93,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "TQQQB",
-   "hour_quote_volume": 42321.0,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 84.64199040000001
-  },
-  {
-   "event_id": 357,
+   "event_id": 350,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
@@ -511,14 +762,14 @@
    "near_miss_score": 84.5952506
   },
   {
-   "event_id": 510,
+   "event_id": 801,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "PUMP",
+   "coin": "SOL",
    "volume_ratio": 0.803,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 84.53855312888722
+   "near_miss_score": 84.49618403268121
   },
   {
    "event_id": 316,
@@ -531,47 +782,47 @@
    "near_miss_score": 84.42638459988676
   },
   {
-   "event_id": 5,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "WAL",
-   "volume_ratio": 0.844,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 84.41228821794749
-  },
-  {
-   "event_id": 596,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "ETC",
-   "volume_ratio": 0.799,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 84.11647080454503
-  },
-  {
-   "event_id": 170,
+   "event_id": 291,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "ERA",
-   "hour_quote_volume": 41748.96,
+   "coin": "CRV",
+   "hour_quote_volume": 42020.83,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 83.49792446
+   "near_miss_score": 84.0416542
   },
   {
-   "event_id": 379,
-   "stage": "liquidity",
+   "event_id": 890,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "NIGHT",
+   "volume_ratio": 0.798,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 83.99966262490385
+  },
+  {
+   "event_id": 515,
+   "stage": "volume",
    "interval": "15m",
    "setup": null,
    "coin": "NMR",
-   "hour_quote_volume": 41669.18,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 83.3383554
+   "volume_ratio": 0.796,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 83.74051997383839
   },
   {
-   "event_id": 500,
+   "event_id": 648,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "G",
+   "volume_ratio": 0.791,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 83.27378827525017
+  },
+  {
+   "event_id": 504,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
@@ -581,47 +832,67 @@
    "near_miss_score": 83.2521132
   },
   {
-   "event_id": 2,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "CAKE",
-   "volume_ratio": 0.826,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 82.64153516414683
-  },
-  {
-   "event_id": 10,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "G",
-   "hour_quote_volume": 41231.95,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 82.46389848
-  },
-  {
-   "event_id": 57,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "BAT",
-   "volume_ratio": 0.824,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 82.43688357177615
-  },
-  {
-   "event_id": 416,
+   "event_id": 315,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "ALT",
-   "hour_quote_volume": 41141.89,
+   "coin": "NEXO",
+   "hour_quote_volume": 41441.03,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 82.28378420000001
+   "near_miss_score": 82.88205328
   },
   {
    "event_id": 388,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "AVA",
+   "volume_ratio": 0.785,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 82.60954937425184
+  },
+  {
+   "event_id": 361,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "GMX",
+   "hour_quote_volume": 41136.6,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 82.27320146
+  },
+  {
+   "event_id": 882,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "DOT",
+   "volume_ratio": 0.779,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 82.03633274270855
+  },
+  {
+   "event_id": 286,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "DOT",
+   "hour_quote_volume": 41006.11,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 82.01221283999999
+  },
+  {
+   "event_id": 128,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "LUMIA",
+   "hour_quote_volume": 40992.9,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 81.98579171399999
+  },
+  {
+   "event_id": 375,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
@@ -631,87 +902,167 @@
    "near_miss_score": 81.97281840936
   },
   {
-   "event_id": 492,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "CGPT",
-   "hour_quote_volume": 40705.16,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 81.410323766
-  },
-  {
-   "event_id": 306,
+   "event_id": 710,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "CFG",
-   "volume_ratio": 0.773,
+   "coin": "MATIC",
+   "volume_ratio": 0.777,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 81.33323030172303
+   "near_miss_score": 81.79535168890712
   },
   {
-   "event_id": 563,
+   "event_id": 657,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "GMX",
+   "volume_ratio": 0.777,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 81.75819694592708
+  },
+  {
+   "event_id": 885,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "APT",
+   "volume_ratio": 0.772,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 81.21300751361386
+  },
+  {
+   "event_id": 865,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "XPL",
+   "volume_ratio": 0.771,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 81.16406314323831
+  },
+  {
+   "event_id": 435,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "MORPHO",
-   "hour_quote_volume": 40035.12,
+   "coin": "OPEN",
+   "hour_quote_volume": 40503.16,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 80.07023610000002
+   "near_miss_score": 81.00632102
   },
   {
-   "event_id": 447,
+   "event_id": 894,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
+   "setup": null,
+   "coin": "MEGA",
+   "volume_ratio": 0.767,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 80.75918681169017
+  },
+  {
+   "event_id": 786,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "INJ",
+   "volume_ratio": 0.766,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 80.6542333255419
+  },
+  {
+   "event_id": 66,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "TQQQB",
+   "hour_quote_volume": 40070.3,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 80.14060319999999
+  },
+  {
+   "event_id": 56,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "ASTER",
+   "hour_quote_volume": 40004.62,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 80.00923867
+  },
+  {
+   "event_id": 199,
+   "stage": "liquidity",
+   "interval": "5m",
    "setup": null,
    "coin": "AMP",
-   "volume_ratio": 0.752,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 79.1518708302569
+   "hour_quote_volume": 39990.21,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 79.98041667599999
   },
   {
-   "event_id": 301,
-   "stage": "volume",
+   "event_id": 549,
+   "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "DUSK",
-   "volume_ratio": 0.751,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 79.08177605182956
+   "coin": "METIS",
+   "hour_quote_volume": 39812.31,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 79.6246192
   },
   {
-   "event_id": 289,
+   "event_id": 720,
+   "stage": "liquidity",
+   "interval": "1h",
+   "setup": null,
+   "coin": "TKO",
+   "hour_quote_volume": 39645.37,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 79.29073148
+  },
+  {
+   "event_id": 292,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "KP3R",
-   "hour_quote_volume": 39230.19,
+   "coin": "AR",
+   "hour_quote_volume": 39614.98,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 78.46038920000001
+   "near_miss_score": 79.22995561999998
   },
   {
-   "event_id": 554,
+   "event_id": 336,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "MAGIC",
-   "volume_ratio": 0.744,
+   "coin": "DODO",
+   "volume_ratio": 0.752,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 78.32652557502163
+   "near_miss_score": 79.17509454181543
   },
   {
-   "event_id": 213,
+   "event_id": 277,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
-   "coin": "PUMP",
-   "volume_ratio": 0.782,
+   "coin": "UNI",
+   "volume_ratio": 0.785,
    "required_volume_ratio": 1.0,
-   "near_miss_score": 78.15656892508679
+   "near_miss_score": 78.54663458748179
   },
   {
-   "event_id": 419,
+   "event_id": 412,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "TSLAB",
+   "hour_quote_volume": 39099.81,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 78.1996111
+  },
+  {
+   "event_id": 414,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
@@ -721,17 +1072,17 @@
    "near_miss_score": 78.07025066638822
   },
   {
-   "event_id": 387,
+   "event_id": 622,
    "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "ALGO",
-   "volume_ratio": 0.74,
+   "coin": "AAPLB",
+   "volume_ratio": 0.741,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 77.88674867475457
+   "near_miss_score": 77.99683815652196
   },
   {
-   "event_id": 558,
+   "event_id": 562,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
@@ -741,57 +1092,37 @@
    "near_miss_score": 77.87697899999999
   },
   {
-   "event_id": 56,
+   "event_id": 307,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "MMT",
+   "volume_ratio": 0.74,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 77.84329748994486
+  },
+  {
+   "event_id": 242,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "MARSCOIN",
-   "hour_quote_volume": 38884.04,
+   "coin": "DEXE",
+   "hour_quote_volume": 38735.59,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 77.76807494
+   "near_miss_score": 77.47117956
   },
   {
-   "event_id": 443,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "GIGGLE",
-   "hour_quote_volume": 38882.38,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 77.76476348
-  },
-  {
-   "event_id": 461,
+   "event_id": 426,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "TAO",
-   "volume_ratio": 0.738,
+   "coin": "SOXLB",
+   "volume_ratio": 0.733,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 77.69624042877825
+   "near_miss_score": 77.12629345437568
   },
   {
-   "event_id": 577,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "ATOM",
-   "volume_ratio": 0.737,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 77.54205065403202
-  },
-  {
-   "event_id": 457,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "EUR",
-   "volume_ratio": 0.736,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 77.50939454883085
-  },
-  {
-   "event_id": 264,
+   "event_id": 276,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
@@ -801,7 +1132,7 @@
    "near_miss_score": 77.09883865095544
   },
   {
-   "event_id": 169,
+   "event_id": 167,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
@@ -811,27 +1142,47 @@
    "near_miss_score": 77.0473606571381
   },
   {
-   "event_id": 35,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "SUN",
-   "hour_quote_volume": 38270.0,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 76.54000588
-  },
-  {
-   "event_id": 549,
+   "event_id": 551,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "MANTA",
-   "hour_quote_volume": 38263.81,
+   "coin": "ROBO",
+   "hour_quote_volume": 38514.61,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 76.527618778
+   "near_miss_score": 77.02922018
   },
   {
-   "event_id": 496,
+   "event_id": 594,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "NIGHT",
+   "volume_ratio": 0.732,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 77.00041215943588
+  },
+  {
+   "event_id": 425,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "LUMIA",
+   "volume_ratio": 0.725,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 76.30380256056429
+  },
+  {
+   "event_id": 888,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "JTO",
+   "volume_ratio": 0.721,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 75.8917877585182
+  },
+  {
+   "event_id": 497,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
@@ -839,6 +1190,26 @@
    "volume_ratio": 0.72,
    "required_volume_ratio": 0.95,
    "near_miss_score": 75.8251973337627
+  },
+  {
+   "event_id": 514,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "VIRTUAL",
+   "volume_ratio": 0.714,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 75.12522977655395
+  },
+  {
+   "event_id": 717,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "1000SATS",
+   "volume_ratio": 0.712,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 74.97350661628369
   },
   {
    "event_id": 440,
@@ -851,27 +1222,67 @@
    "near_miss_score": 74.86935200196572
   },
   {
-   "event_id": 338,
+   "event_id": 158,
+   "stage": "volume",
+   "interval": "5m",
+   "setup": null,
+   "coin": "AAVE",
+   "volume_ratio": 0.746,
+   "required_volume_ratio": 1.0,
+   "near_miss_score": 74.61053569415243
+  },
+  {
+   "event_id": 436,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "AVA",
-   "volume_ratio": 0.711,
+   "coin": "EPIC",
+   "volume_ratio": 0.708,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 74.81589805439971
+   "near_miss_score": 74.56968671397917
   },
   {
-   "event_id": 509,
-   "stage": "liquidity",
-   "interval": "15m",
+   "event_id": 813,
+   "stage": "volume",
+   "interval": "1h",
    "setup": null,
-   "coin": "COTI",
-   "hour_quote_volume": 37048.62,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 74.09724594
+   "coin": "JUP",
+   "volume_ratio": 0.708,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 74.54782087017759
   },
   {
-   "event_id": 222,
+   "event_id": 159,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "SKY",
+   "hour_quote_volume": 37271.48,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 74.54295724
+  },
+  {
+   "event_id": 655,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "OPG",
+   "volume_ratio": 0.707,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 74.37427699220162
+  },
+  {
+   "event_id": 229,
+   "stage": "volume",
+   "interval": "5m",
+   "setup": null,
+   "coin": "NEAR",
+   "volume_ratio": 0.742,
+   "required_volume_ratio": 1.0,
+   "near_miss_score": 74.2084435448152
+  },
+  {
+   "event_id": 226,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
@@ -881,47 +1292,107 @@
    "near_miss_score": 74.01214314756717
   },
   {
-   "event_id": 230,
-   "stage": "liquidity",
-   "interval": "5m",
+   "event_id": 878,
+   "stage": "volume",
+   "interval": "1h",
    "setup": null,
-   "coin": "CFX",
-   "hour_quote_volume": 36752.22,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 73.50444372
+   "coin": "HBAR",
+   "volume_ratio": 0.702,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 73.87832831099013
   },
   {
-   "event_id": 336,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "NEXO",
-   "hour_quote_volume": 36546.61,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 73.0932124
-  },
-  {
-   "event_id": 505,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "SYN",
-   "hour_quote_volume": 36470.55,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 72.94110699
-  },
-  {
-   "event_id": 21,
+   "event_id": 147,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
-   "coin": "GLMR",
-   "volume_ratio": 0.726,
+   "coin": "USD1",
+   "volume_ratio": 0.738,
    "required_volume_ratio": 1.0,
-   "near_miss_score": 72.61150435603292
+   "near_miss_score": 73.75209519281243
   },
   {
-   "event_id": 452,
+   "event_id": 811,
+   "stage": "liquidity",
+   "interval": "1h",
+   "setup": null,
+   "coin": "DOGS",
+   "hour_quote_volume": 36775.34,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 73.55068615518
+  },
+  {
+   "event_id": 781,
+   "stage": "liquidity",
+   "interval": "1h",
+   "setup": null,
+   "coin": "CBRSB",
+   "hour_quote_volume": 36708.91,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 73.41782952
+  },
+  {
+   "event_id": 829,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "MINA",
+   "volume_ratio": 0.696,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 73.28818331868212
+  },
+  {
+   "event_id": 492,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "CHZ",
+   "hour_quote_volume": 36621.75,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 73.24350704
+  },
+  {
+   "event_id": 673,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "ADADOWN",
+   "volume_ratio": 0.693,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 72.96303525219045
+  },
+  {
+   "event_id": 305,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "WAL",
+   "volume_ratio": 0.692,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 72.87520475019275
+  },
+  {
+   "event_id": 651,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "ASTER",
+   "volume_ratio": 0.692,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 72.83559116796283
+  },
+  {
+   "event_id": 401,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "EDU",
+   "hour_quote_volume": 36414.75,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 72.8295032
+  },
+  {
+   "event_id": 451,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
@@ -931,27 +1402,17 @@
    "near_miss_score": 72.59579242635206
   },
   {
-   "event_id": 296,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "SUI",
-   "volume_ratio": 0.725,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 72.45050876588589
-  },
-  {
-   "event_id": 579,
+   "event_id": 775,
    "stage": "liquidity",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
-   "coin": "LINEA",
-   "hour_quote_volume": 36224.15,
+   "coin": "RKLBB",
+   "hour_quote_volume": 36288.77,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 72.448306648
+   "near_miss_score": 72.5775424
   },
   {
-   "event_id": 491,
+   "event_id": 494,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
@@ -961,57 +1422,77 @@
    "near_miss_score": 72.43279120000001
   },
   {
-   "event_id": 395,
+   "event_id": 668,
    "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "ZK",
-   "volume_ratio": 0.687,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 72.33571568210378
-  },
-  {
-   "event_id": 524,
-   "stage": "volume",
-   "interval": "15m",
+   "interval": "1h",
    "setup": null,
    "coin": "PYTH",
-   "volume_ratio": 0.684,
+   "volume_ratio": 0.686,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 72.03588607082877
+   "near_miss_score": 72.25182430307922
   },
   {
-   "event_id": 546,
+   "event_id": 767,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "COMP",
+   "volume_ratio": 0.682,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 71.73922625498575
+  },
+  {
+   "event_id": 463,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "AR",
+   "coin": "EUR",
    "volume_ratio": 0.68,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 71.61331598301815
+   "near_miss_score": 71.52673926437207
   },
   {
-   "event_id": 384,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "MRVLB",
-   "hour_quote_volume": 35731.82,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 71.46364686
-  },
-  {
-   "event_id": 274,
+   "event_id": 285,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "S",
-   "hour_quote_volume": 35708.19,
+   "coin": "RENDER",
+   "hour_quote_volume": 35753.14,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 71.416387172
+   "near_miss_score": 71.5062834
   },
   {
-   "event_id": 49,
+   "event_id": 752,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "AAVE",
+   "volume_ratio": 0.675,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 71.08890527092517
+  },
+  {
+   "event_id": 641,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "MARSCOIN",
+   "volume_ratio": 0.675,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 71.07552757757567
+  },
+  {
+   "event_id": 369,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "RUNE",
+   "hour_quote_volume": 35533.62,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 71.067244
+  },
+  {
+   "event_id": 44,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
@@ -1021,7 +1502,17 @@
    "near_miss_score": 71.06137746
   },
   {
-   "event_id": 538,
+   "event_id": 843,
+   "stage": "liquidity",
+   "interval": "1h",
+   "setup": null,
+   "coin": "TRIBE",
+   "hour_quote_volume": 35516.65,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 71.03330319999999
+  },
+  {
+   "event_id": 539,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
@@ -1031,50 +1522,27 @@
    "near_miss_score": 71.02411777609579
   },
   {
-   "event_id": 304,
-   "stage": "entry_confirmation",
-   "interval": "15m",
+   "event_id": 189,
+   "stage": "liquidity",
+   "interval": "5m",
    "setup": null,
-   "coin": "WAL",
-   "near_miss_score": 71.0,
-   "bos_confirmed": true,
-   "retest_confirmed": true,
-   "confirmation_candle": false,
-   "sweep_confirmed": false,
-   "bos_level": 0.05362,
-   "retest_distance_pct": 0.186,
-   "retest_count": 1,
-   "confirmed_retest_count": 0,
-   "recoverable_later_retest": false,
-   "confirmation_body": 0.014,
-   "confirmation_body_required": 0.42,
-   "confirmation_body_gap": 0.406,
-   "confirmation_direction_bullish": true,
-   "best_confirmation_index": null,
-   "reason": "confirmation_missing"
+   "coin": "AERO",
+   "hour_quote_volume": 35484.21,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 70.96841098
   },
   {
-   "event_id": 429,
+   "event_id": 341,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "LTC",
-   "volume_ratio": 0.674,
+   "coin": "MARSCOIN",
+   "volume_ratio": 0.673,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 70.9412376323593
+   "near_miss_score": 70.80151080532188
   },
   {
-   "event_id": 340,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "QQQB",
-   "volume_ratio": 0.674,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 70.90379006981452
-  },
-  {
-   "event_id": 119,
+   "event_id": 115,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
@@ -1084,37 +1552,60 @@
    "near_miss_score": 70.67430206
   },
   {
-   "event_id": 111,
+   "event_id": 390,
    "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "PARTI",
+   "hour_quote_volume": 35184.71,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 70.36941193999999
+  },
+  {
+   "event_id": 7,
+   "stage": "volume",
    "interval": "5m",
    "setup": null,
-   "coin": "BEAMX",
-   "hour_quote_volume": 35332.02,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 70.664043644
+   "coin": "WAL",
+   "volume_ratio": 0.702,
+   "required_volume_ratio": 1.0,
+   "near_miss_score": 70.20354273359386
   },
   {
-   "event_id": 331,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "MMT",
-   "volume_ratio": 0.671,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 70.6310785462257
-  },
-  {
-   "event_id": 378,
+   "event_id": 362,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "EDU",
-   "hour_quote_volume": 35097.7,
+   "coin": "ALT",
+   "hour_quote_volume": 35005.92,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 70.19539139999999
+   "near_miss_score": 70.01184996
   },
   {
-   "event_id": 311,
+   "event_id": 94,
+   "stage": "entry_confirmation",
+   "interval": "5m",
+   "setup": null,
+   "coin": "PEPE",
+   "near_miss_score": 70.0,
+   "bos_confirmed": true,
+   "retest_confirmed": true,
+   "confirmation_candle": false,
+   "sweep_confirmed": false,
+   "bos_level": 4.18e-06,
+   "retest_distance_pct": 0.239,
+   "retest_count": 2,
+   "confirmed_retest_count": 0,
+   "recoverable_later_retest": false,
+   "confirmation_body": 0.0,
+   "confirmation_body_required": 0.35,
+   "confirmation_body_gap": 0.35,
+   "confirmation_direction_bullish": false,
+   "best_confirmation_index": null,
+   "reason": "confirmation_missing"
+  },
+  {
+   "event_id": 317,
    "stage": "entry_confirmation",
    "interval": "15m",
    "setup": null,
@@ -1137,22 +1628,22 @@
    "reason": "confirmation_missing"
   },
   {
-   "event_id": 322,
+   "event_id": 352,
    "stage": "entry_confirmation",
    "interval": "15m",
    "setup": null,
-   "coin": "AT",
+   "coin": "RAD",
    "near_miss_score": 70.0,
    "bos_confirmed": true,
    "retest_confirmed": true,
    "confirmation_candle": false,
    "sweep_confirmed": false,
-   "bos_level": 0.1391,
-   "retest_distance_pct": 0.503,
+   "bos_level": 0.299,
+   "retest_distance_pct": 0.334,
    "retest_count": 2,
    "confirmed_retest_count": 0,
    "recoverable_later_retest": false,
-   "confirmation_body": 0.512,
+   "confirmation_body": 0.6,
    "confirmation_body_required": 0.42,
    "confirmation_body_gap": 0.0,
    "confirmation_direction_bullish": false,
@@ -1160,57 +1651,217 @@
    "reason": "confirmation_missing"
   },
   {
-   "event_id": 591,
+   "event_id": 466,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "SYRUP",
+   "hour_quote_volume": 34942.41,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 69.88481408
+  },
+  {
+   "event_id": 335,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "GOOGLB",
+   "hour_quote_volume": 34737.03,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 69.47406214
+  },
+  {
+   "event_id": 554,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "ETHFI",
-   "volume_ratio": 0.662,
+   "coin": "EIGEN",
+   "volume_ratio": 0.659,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 69.63383140749515
+   "near_miss_score": 69.34572552032253
   },
   {
-   "event_id": 353,
+   "event_id": 489,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "MARSCOIN",
-   "volume_ratio": 0.654,
+   "coin": "CKB",
+   "volume_ratio": 0.656,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 68.79209977199231
+   "near_miss_score": 69.05030060121682
   },
   {
-   "event_id": 258,
+   "event_id": 482,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "INIT",
+   "hour_quote_volume": 34457.37,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 68.914736672
+  },
+  {
+   "event_id": 309,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "A",
+   "hour_quote_volume": 34383.57,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 68.76713725999998
+  },
+  {
+   "event_id": 876,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "HYPE",
+   "volume_ratio": 0.653,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 68.69368340851057
+  },
+  {
+   "event_id": 796,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "FIDA",
+   "volume_ratio": 0.65,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 68.43487909091618
+  },
+  {
+   "event_id": 860,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "WLD",
+   "volume_ratio": 0.644,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 67.82874571320397
+  },
+  {
+   "event_id": 596,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "MEGA",
+   "volume_ratio": 0.643,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 67.67319940365509
+  },
+  {
+   "event_id": 113,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
-   "coin": "MAGIC",
-   "volume_ratio": 0.684,
+   "coin": "ARB",
+   "volume_ratio": 0.671,
    "required_volume_ratio": 1.0,
-   "near_miss_score": 68.36398975117031
+   "near_miss_score": 67.12488311237695
   },
   {
-   "event_id": 36,
+   "event_id": 2,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
    "coin": "BERA",
-   "hour_quote_volume": 33678.43,
+   "hour_quote_volume": 33515.99,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 67.356869597
+   "near_miss_score": 67.031981043
   },
   {
-   "event_id": 117,
+   "event_id": 587,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "APT",
+   "volume_ratio": 0.636,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 66.94758438202864
+  },
+  {
+   "event_id": 697,
+   "stage": "liquidity",
+   "interval": "1h",
+   "setup": null,
+   "coin": "AXTIB",
+   "hour_quote_volume": 33362.55,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 66.7250938
+  },
+  {
+   "event_id": 266,
+   "stage": "volume",
+   "interval": "5m",
+   "setup": null,
+   "coin": "WLD",
+   "volume_ratio": 0.667,
+   "required_volume_ratio": 1.0,
+   "near_miss_score": 66.66887685290499
+  },
+  {
+   "event_id": 715,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "ACE",
+   "volume_ratio": 0.632,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 66.50104913669206
+  },
+  {
+   "event_id": 662,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "KAVA",
+   "volume_ratio": 0.63,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 66.3580384536322
+  },
+  {
+   "event_id": 465,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "MAGIC",
+   "volume_ratio": 0.63,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 66.27888040116105
+  },
+  {
+   "event_id": 552,
+   "stage": "liquidity",
+   "interval": "15m",
+   "setup": null,
+   "coin": "VET",
+   "hour_quote_volume": 33130.51,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 66.26101896920001
+  },
+  {
+   "event_id": 219,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "ASTER",
-   "hour_quote_volume": 33209.64,
+   "coin": "NMR",
+   "hour_quote_volume": 33099.4,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 66.419285144
+   "near_miss_score": 66.1987996
   },
   {
-   "event_id": 520,
+   "event_id": 360,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "LTC",
+   "volume_ratio": 0.627,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 66.01091579252491
+  },
+  {
+   "event_id": 523,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
@@ -1220,77 +1871,177 @@
    "near_miss_score": 66.00363934980867
   },
   {
-   "event_id": 407,
+   "event_id": 563,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "WLD",
+   "volume_ratio": 0.623,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 65.62689092751755
+  },
+  {
+   "event_id": 405,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "INIT",
-   "hour_quote_volume": 32882.2,
+   "coin": "CGPT",
+   "hour_quote_volume": 32557.08,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 65.76440466
+   "near_miss_score": 65.11416246
   },
   {
-   "event_id": 249,
+   "event_id": 634,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "DODO",
+   "volume_ratio": 0.615,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 64.69406790556341
+  },
+  {
+   "event_id": 464,
+   "stage": "volume",
+   "interval": "15m",
+   "setup": null,
+   "coin": "W",
+   "volume_ratio": 0.615,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 64.68729758420984
+  },
+  {
+   "event_id": 63,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "AR",
-   "hour_quote_volume": 32517.75,
+   "coin": "GMX",
+   "hour_quote_volume": 32242.07,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 65.03550128
+   "near_miss_score": 64.48414408
   },
   {
-   "event_id": 426,
+   "event_id": 868,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "ROSE",
+   "volume_ratio": 0.611,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 64.35585020669588
+  },
+  {
+   "event_id": 420,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "ACE",
-   "volume_ratio": 0.616,
+   "coin": "S",
+   "volume_ratio": 0.609,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 64.8730712022817
+   "near_miss_score": 64.12842433070718
   },
   {
-   "event_id": 537,
+   "event_id": 479,
    "stage": "liquidity",
    "interval": "15m",
    "setup": null,
-   "coin": "ENSO",
-   "hour_quote_volume": 32303.05,
+   "coin": "SUPER",
+   "hour_quote_volume": 32007.14,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 64.60609384
+   "near_miss_score": 64.0142878
   },
   {
-   "event_id": 438,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "INJ",
-   "volume_ratio": 0.606,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 63.8289910933388
-  },
-  {
-   "event_id": 298,
-   "stage": "volume",
+   "event_id": 53,
+   "stage": "liquidity",
    "interval": "5m",
    "setup": null,
-   "coin": "UNI",
-   "volume_ratio": 0.638,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 63.7513184762265
+   "coin": "G",
+   "hour_quote_volume": 31920.5,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 63.84100206
   },
   {
-   "event_id": 305,
-   "stage": "volume",
-   "interval": "15m",
+   "event_id": 250,
+   "stage": "liquidity",
+   "interval": "5m",
    "setup": null,
-   "coin": "RARE",
-   "volume_ratio": 0.604,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 63.58393282658701
+   "coin": "GRAM",
+   "hour_quote_volume": 31791.1,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 63.58219664
   },
   {
-   "event_id": 176,
+   "event_id": 652,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "ORCA",
+   "volume_ratio": 0.603,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 63.50566046258748
+  },
+  {
+   "event_id": 756,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "LDO",
+   "volume_ratio": 0.603,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 63.497772651366866
+  },
+  {
+   "event_id": 864,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "KAT",
+   "volume_ratio": 0.602,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 63.36797385588351
+  },
+  {
+   "event_id": 747,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "IRENB",
+   "volume_ratio": 0.6,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 63.200935846774094
+  },
+  {
+   "event_id": 693,
+   "stage": "volume",
+   "interval": "1h",
+   "setup": null,
+   "coin": "BAT",
+   "volume_ratio": 0.6,
+   "required_volume_ratio": 0.95,
+   "near_miss_score": 63.12110997240873
+  },
+  {
+   "event_id": 804,
+   "stage": "liquidity",
+   "interval": "1h",
+   "setup": null,
+   "coin": "PIVX",
+   "hour_quote_volume": 31539.67,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 63.079333399999996
+  },
+  {
+   "event_id": 52,
+   "stage": "liquidity",
+   "interval": "5m",
+   "setup": null,
+   "coin": "RAD",
+   "hour_quote_volume": 31532.48,
+   "required_hour_quote_volume": 50000.0,
+   "near_miss_score": 63.06496359999999
+  },
+  {
+   "event_id": 174,
    "stage": "liquidity",
    "interval": "5m",
    "setup": null,
@@ -1300,7 +2051,7 @@
    "near_miss_score": 63.02560174
   },
   {
-   "event_id": 98,
+   "event_id": 88,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
@@ -1310,778 +2061,68 @@
    "near_miss_score": 63.016234643127945
   },
   {
-   "event_id": 460,
+   "event_id": 282,
+   "stage": "volume",
+   "interval": "5m",
+   "setup": null,
+   "coin": "ONDO",
+   "volume_ratio": 0.63,
+   "required_volume_ratio": 1.0,
+   "near_miss_score": 62.97378225740478
+  },
+  {
+   "event_id": 537,
    "stage": "volume",
    "interval": "15m",
    "setup": null,
-   "coin": "XRP",
+   "coin": "PAXG",
    "volume_ratio": 0.598,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 62.990013977082484
+   "near_miss_score": 62.91809582637356
   },
   {
-   "event_id": 47,
+   "event_id": 702,
    "stage": "liquidity",
-   "interval": "5m",
+   "interval": "1h",
    "setup": null,
-   "coin": "PENDLE",
-   "hour_quote_volume": 31298.79,
+   "coin": "COHRB",
+   "hour_quote_volume": 31348.75,
    "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 62.597581000000005
+   "near_miss_score": 62.69750284
   },
   {
-   "event_id": 281,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "RSR",
-   "hour_quote_volume": 31227.91,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 62.4558249046
-  },
-  {
-   "event_id": 52,
+   "event_id": 887,
    "stage": "volume",
-   "interval": "5m",
+   "interval": "1h",
    "setup": null,
-   "coin": "JST",
-   "volume_ratio": 0.622,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 62.21465885221772
-  },
-  {
-   "event_id": 463,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "SOXSB",
-   "hour_quote_volume": 31019.99,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 62.0399824
-  },
-  {
-   "event_id": 43,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "AVA",
-   "volume_ratio": 0.618,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 61.79895153740449
-  },
-  {
-   "event_id": 422,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "CKB",
-   "volume_ratio": 0.586,
+   "coin": "AR",
+   "volume_ratio": 0.595,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 61.65439024740246
+   "near_miss_score": 62.59581463730193
   },
   {
-   "event_id": 202,
+   "event_id": 735,
    "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "DASH",
-   "volume_ratio": 0.615,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 61.45236941556318
-  },
-  {
-   "event_id": 465,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "AUDIO",
-   "hour_quote_volume": 30697.92,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 61.39583666
-  },
-  {
-   "event_id": 365,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "TSLAB",
-   "hour_quote_volume": 30600.54,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 61.20108421999999
-  },
-  {
-   "event_id": 383,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "TOWNS",
-   "hour_quote_volume": 30471.64,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 60.943289042
-  },
-  {
-   "event_id": 7,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "ADX",
-   "hour_quote_volume": 30278.62,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 60.55724360000001
-  },
-  {
-   "event_id": 120,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "NBS",
-   "hour_quote_volume": 30239.32,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 60.478648714
-  },
-  {
-   "event_id": 133,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "LTC",
-   "volume_ratio": 0.602,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 60.169003586458366
-  },
-  {
-   "event_id": 518,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "MIR",
-   "volume_ratio": 0.57,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 60.03715122024587
-  },
-  {
-   "event_id": 526,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "CFX",
-   "volume_ratio": 0.566,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 59.592888887685085
-  },
-  {
-   "event_id": 576,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "W",
-   "volume_ratio": 0.565,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 59.50849608938963
-  },
-  {
-   "event_id": 470,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "BNB",
-   "volume_ratio": 0.563,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 59.3120241184749
-  },
-  {
-   "event_id": 345,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "PENDLE",
-   "volume_ratio": 0.563,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 59.279442299479626
-  },
-  {
-   "event_id": 504,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "KORUB",
-   "volume_ratio": 0.563,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 59.2266802400338
-  },
-  {
-   "event_id": 574,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "QUICK",
-   "hour_quote_volume": 29150.23,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 58.30046342
-  },
-  {
-   "event_id": 557,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "SCR",
-   "volume_ratio": 0.552,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 58.14621332364213
-  },
-  {
-   "event_id": 484,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "INTCB",
-   "volume_ratio": 0.549,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 57.774738084304836
-  },
-  {
-   "event_id": 74,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "DODO",
-   "hour_quote_volume": 28832.37,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 57.66473855
-  },
-  {
-   "event_id": 164,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "XRP",
-   "volume_ratio": 0.576,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 57.60057803826453
-  },
-  {
-   "event_id": 547,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "CRV",
-   "volume_ratio": 0.547,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 57.56498861009813
-  },
-  {
-   "event_id": 399,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "RED",
-   "hour_quote_volume": 28737.85,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 57.475691899999994
-  },
-  {
-   "event_id": 262,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "RONIN",
-   "hour_quote_volume": 28429.04,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 56.858073852000004
-  },
-  {
-   "event_id": 359,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "U",
-   "volume_ratio": 0.538,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 56.62707884257201
-  },
-  {
-   "event_id": 321,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "GLMR",
-   "volume_ratio": 0.536,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 56.37544329738806
-  },
-  {
-   "event_id": 533,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "EPIC",
-   "volume_ratio": 0.531,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 55.85564641007257
-  },
-  {
-   "event_id": 325,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "AAPLB",
-   "hour_quote_volume": 27888.93,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 55.77785976
-  },
-  {
-   "event_id": 235,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "BONK",
-   "hour_quote_volume": 27550.22,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 55.10044905742
-  },
-  {
-   "event_id": 171,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "ZAMA",
-   "volume_ratio": 0.55,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 55.04022442818075
-  },
-  {
-   "event_id": 555,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "EDEN",
-   "hour_quote_volume": 27486.82,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 54.973630892
-  },
-  {
-   "event_id": 250,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "CRV",
-   "hour_quote_volume": 27298.8,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 54.597590159999996
-  },
-  {
-   "event_id": 408,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "ARB",
-   "volume_ratio": 0.517,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 54.37749825766173
-  },
-  {
-   "event_id": 50,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "FRONT",
-   "volume_ratio": 0.54,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 53.988309719225654
-  },
-  {
-   "event_id": 441,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "PARTI",
-   "hour_quote_volume": 26975.25,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 53.95050914
-  },
-  {
-   "event_id": 446,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "AERO",
-   "volume_ratio": 0.51,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 53.65566968482361
-  },
-  {
-   "event_id": 18,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "HNT",
-   "hour_quote_volume": 26817.66,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 53.6353198
-  },
-  {
-   "event_id": 149,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "AERO",
-   "hour_quote_volume": 26809.45,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 53.61889164
-  },
-  {
-   "event_id": 414,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "ASTER",
-   "volume_ratio": 0.506,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 53.299819303637065
-  },
-  {
-   "event_id": 9,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "DUSK",
-   "volume_ratio": 0.532,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 53.16144981220224
-  },
-  {
-   "event_id": 400,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "YFII",
-   "hour_quote_volume": 26378.94,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 52.7578713
-  },
-  {
-   "event_id": 20,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "SNT",
-   "hour_quote_volume": 26309.7,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 52.619405199999996
-  },
-  {
-   "event_id": 33,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "KITE",
-   "hour_quote_volume": 26308.66,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 52.61731332
-  },
-  {
-   "event_id": 105,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "KLAY",
-   "hour_quote_volume": 26277.02,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 52.55403476
-  },
-  {
-   "event_id": 364,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "ORCA",
-   "volume_ratio": 0.493,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 51.86627981093428
-  },
-  {
-   "event_id": 474,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "2Z",
-   "hour_quote_volume": 25731.31,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 51.46261762
-  },
-  {
-   "event_id": 594,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "SUPER",
-   "hour_quote_volume": 25711.99,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 51.4239788
-  },
-  {
-   "event_id": 62,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "U",
-   "volume_ratio": 0.514,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 51.38529911424613
-  },
-  {
-   "event_id": 540,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "LOOM",
-   "volume_ratio": 0.488,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 51.371722633969696
-  },
-  {
-   "event_id": 553,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "ADAUP",
-   "hour_quote_volume": 25638.96,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 51.27791046
-  },
-  {
-   "event_id": 411,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "HFT",
-   "hour_quote_volume": 25548.28,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 51.096551055
-  },
-  {
-   "event_id": 346,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "GPS",
-   "volume_ratio": 0.485,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 51.065190304975566
-  },
-  {
-   "event_id": 534,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "SKY",
-   "volume_ratio": 0.485,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 51.060698445925134
-  },
-  {
-   "event_id": 481,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "PEPE",
-   "volume_ratio": 0.484,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 50.9140756228757
-  },
-  {
-   "event_id": 156,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "LTO",
-   "hour_quote_volume": 25359.08,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 50.718167199999996
-  },
-  {
-   "event_id": 139,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "RVN",
-   "hour_quote_volume": 25207.42,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 50.41483701400001
-  },
-  {
-   "event_id": 65,
-   "stage": "volume",
-   "interval": "5m",
-   "setup": null,
-   "coin": "USD1",
-   "volume_ratio": 0.499,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 49.90584353050852
-  },
-  {
-   "event_id": 343,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "VELODROME",
-   "hour_quote_volume": 24617.36,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 49.234724658000005
-  },
-  {
-   "event_id": 552,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "C98",
-   "hour_quote_volume": 24584.58,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 49.16916115
-  },
-  {
-   "event_id": 511,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "NEAR",
-   "volume_ratio": 0.467,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 49.111747573379425
-  },
-  {
-   "event_id": 144,
-   "stage": "volume",
-   "interval": "5m",
+   "interval": "1h",
    "setup": null,
    "coin": "UTK",
-   "volume_ratio": 0.491,
-   "required_volume_ratio": 1.0,
-   "near_miss_score": 49.107386138341596
-  },
-  {
-   "event_id": 428,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "BTC",
-   "volume_ratio": 0.466,
+   "volume_ratio": 0.593,
    "required_volume_ratio": 0.95,
-   "near_miss_score": 49.06806476154909
+   "near_miss_score": 62.42201636948092
   },
   {
-   "event_id": 195,
+   "event_id": 170,
    "stage": "volume",
    "interval": "5m",
    "setup": null,
-   "coin": "RLC",
-   "volume_ratio": 0.49,
+   "coin": "MAGIC",
+   "volume_ratio": 0.624,
    "required_volume_ratio": 1.0,
-   "near_miss_score": 49.03386197330502
-  },
-  {
-   "event_id": 377,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "KAVA",
-   "hour_quote_volume": 24383.53,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 48.767062693999996
-  },
-  {
-   "event_id": 479,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "GENIUS",
-   "hour_quote_volume": 24247.92,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 48.495847680000004
-  },
-  {
-   "event_id": 320,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "SNT",
-   "volume_ratio": 0.461,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 48.49179394502092
-  },
-  {
-   "event_id": 595,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "UNI",
-   "volume_ratio": 0.459,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 48.31621625608433
-  },
-  {
-   "event_id": 568,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "TST",
-   "hour_quote_volume": 24116.71,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 48.23342157
-  },
-  {
-   "event_id": 371,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "SOXLB",
-   "volume_ratio": 0.454,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 47.774400250825046
-  },
-  {
-   "event_id": 53,
-   "stage": "liquidity",
-   "interval": "5m",
-   "setup": null,
-   "coin": "SENT",
-   "hour_quote_volume": 23777.8,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 47.5555963
-  },
-  {
-   "event_id": 344,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "A",
-   "hour_quote_volume": 23750.34,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 47.50068662
-  },
-  {
-   "event_id": 337,
-   "stage": "liquidity",
-   "interval": "15m",
-   "setup": null,
-   "coin": "GMX",
-   "hour_quote_volume": 23621.17,
-   "required_hour_quote_volume": 50000.0,
-   "near_miss_score": 47.24233424
-  },
-  {
-   "event_id": 571,
-   "stage": "volume",
-   "interval": "15m",
-   "setup": null,
-   "coin": "S",
-   "volume_ratio": 0.448,
-   "required_volume_ratio": 0.95,
-   "near_miss_score": 47.138982170501244
+   "near_miss_score": 62.39962754404327
   }
  ],
  "near_miss_shadows": [],
  "deep_candidates": 300,
- "discovery_candidates": 469,
- "generated_at": "2026-10-14 10:48 UTC"
+ "discovery_candidates": 468,
+ "generated_at": "2026-10-14 11:05 UTC"
 }
