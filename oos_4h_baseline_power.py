@@ -57,6 +57,15 @@ def metrics(rows, cfg):
     rs = [x for x in (net_r(r, cfg) for r in closed) if x is not None]
     positives = [x for x in rs if x > 0]
     negatives = [x for x in rs if x <= 0]
+    win_rs = [x for r in closed if r.get("outcome") == "WIN" for x in [net_r(r, cfg)] if x is not None]
+    loss_rs = [x for r in closed if r.get("outcome") == "LOSS" for x in [net_r(r, cfg)] if x is not None]
+    avg_win_r = mean(win_rs) if win_rs else None
+    avg_loss_r = mean(loss_rs) if loss_rs else None
+    breakeven_win_rate = (
+        abs(avg_loss_r) / (avg_win_r + abs(avg_loss_r))
+        if avg_win_r is not None and avg_loss_r is not None and avg_win_r > 0 and avg_loss_r < 0
+        else None
+    )
     equity = peak = max_dd = 0.0
     streak = best_streak = 0
     for x in rs:
@@ -77,14 +86,35 @@ def metrics(rows, cfg):
         "wilson_95_lower_pct": round(wilson_lower(wins, len(closed)) * 100.0, 2) if closed else None,
         "expectancy_r_after_configured_cost_scenario": round(mean(rs), 4) if rs else None,
         "profit_factor": round(sum(positives) / abs(sum(negatives)), 3) if positives and negatives else None,
-        "average_win_r": round(mean(positives), 3) if positives else None,
-        "average_loss_r": round(mean(negatives), 3) if negatives else None,
+        "average_win_r": round(avg_win_r, 3) if avg_win_r is not None else None,
+        "average_loss_r": round(avg_loss_r, 3) if avg_loss_r is not None else None,
+        "cost_adjusted_breakeven_win_rate_pct": round(breakeven_win_rate * 100.0, 2) if breakeven_win_rate is not None else None,
         "max_losing_streak": best_streak,
         "max_drawdown_r": round(max_dd, 3),
         "average_hold_hours": round(mean(float(r.get("estimated_hold_hours", 0)) for r in closed), 2) if closed else None,
         "average_mfe_pct": round(mean(float(r.get("mfe_pct", 0)) for r in closed), 3) if closed else None,
         "average_mae_pct": round(mean(float(r.get("mae_pct", 0)) for r in closed), 3) if closed else None,
     }
+
+
+def decision_for(pooled_metrics, window_metrics):
+    """Classify research evidence without promoting a strategy to production."""
+    if pooled_metrics["closed"] < 100 or any(m["closed"] < 20 for m in window_metrics):
+        return "INSUFFICIENT SAMPLE"
+    if (
+        pooled_metrics["expectancy_r_after_configured_cost_scenario"] is None
+        or pooled_metrics["expectancy_r_after_configured_cost_scenario"] <= 0
+        or pooled_metrics["profit_factor"] is None
+        or pooled_metrics["profit_factor"] <= 1.0
+        or any(m["expectancy_r_after_configured_cost_scenario"] is None
+               or m["expectancy_r_after_configured_cost_scenario"] <= 0 for m in window_metrics)
+    ):
+        return "FAIL — NON-POSITIVE OR UNSTABLE EXPECTANCY"
+    breakeven_pct = pooled_metrics.get("cost_adjusted_breakeven_win_rate_pct")
+    wilson_pct = pooled_metrics.get("wilson_95_lower_pct")
+    if breakeven_pct is None or wilson_pct is None or wilson_pct <= breakeven_pct:
+        return "FAIL — WIN-RATE CONFIDENCE GATE"
+    return "RESEARCH PASS — NOT A PRODUCTION APPROVAL"
 
 
 def main():
@@ -114,6 +144,8 @@ def main():
         pooled.extend(rows)
         windows.append({"window": name, "start_bar": start, "end_bar": end, "symbols": len(all_rows), "metrics": metrics(rows, cfg)})
 
+    pooled_metrics = metrics(pooled, cfg)
+    window_metrics = [item["metrics"] for item in windows]
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "historical_only": True,
@@ -122,10 +154,10 @@ def main():
         "requested_bars": BARS,
         "holdout_start_utc": "2026-10-06T00:00:00Z",
         "windows": windows,
-        "pooled": metrics(pooled, cfg),
+        "pooled": pooled_metrics,
         "sample_rule": "pooled closed >=100 and >=20 closed per window; Wilson 95% lower bound must clear cost-implied breakeven; no single-window lift accepted.",
         "cost_model_note": "Expectancy/R metrics use configured Binance taker fee and slippage reserve as a scenario, not realized execution costs.",
-        "decision": "INSUFFICIENT SAMPLE" if metrics(pooled, cfg)["closed"] < 100 or any(x["metrics"]["closed"] < 20 for x in windows) else "RESEARCH ONLY — REVIEW PASS RULES",
+        "decision": decision_for(pooled_metrics, window_metrics),
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     import os
