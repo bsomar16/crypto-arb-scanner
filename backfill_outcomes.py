@@ -152,6 +152,14 @@ def main(argv=None) -> int:
     graded = load_json(args.outcomes, {}) or {}
     if not isinstance(graded, dict):
         graded = {}
+    # Resume support: accumulate on top of any previous dry-run output so the
+    # backlog can be graded in chunks without losing earlier work.
+    if not args.write and os.path.exists(args.out):
+        prev = load_json(args.out, {}) or {}
+        if isinstance(prev, dict):
+            merged_prev = dict(graded)
+            merged_prev.update(prev)
+            graded = merged_prev
 
     now = now_ms()
     todo = []
