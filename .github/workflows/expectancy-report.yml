@@ -1,6 +1,7 @@
 name: expectancy-report
 
-# On-demand only: no schedule, no push trigger. Read-only (upload artifact, never commits).
+# On-demand, read-only: never commits. Optionally backfills grades first so the
+# report runs on a wider sample than the (region-limited) live grader has managed.
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +13,10 @@ on:
         description: "Slippage per side, basis points"
         required: false
         default: "5"
+      backfill_limit:
+        description: "Grade up to N ungraded signals first (0 = skip)"
+        required: false
+        default: "0"
 
 jobs:
   report:
@@ -21,12 +26,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Backfill outcomes (optional)
+        if: ${{ inputs.backfill_limit != '0' }}
+        run: |
+          python backfill_outcomes.py \
+            --limit "${{ inputs.backfill_limit }}" \
+            --workers 8 \
+            --out state/signal_outcomes_backfill.json
       - name: Expectancy / walk-forward report
         run: |
+          OUT=state/signal_outcomes.json
+          if [ -f state/signal_outcomes_backfill.json ]; then
+            OUT=state/signal_outcomes_backfill.json
+            echo "using backfilled outcomes"
+          fi
           python expectancy_report.py \
+            --outcomes "$OUT" \
             --fee-bps "${{ inputs.fee_bps }}" \
             --slippage-bps "${{ inputs.slippage_bps }}" \
-            --folds 4 \
+            --calibrate --min-n 30 --folds 4 \
             --json-out state/expectancy_report.json | tee expectancy_report.txt
       - name: Upload report
         uses: actions/upload-artifact@v4
@@ -35,4 +53,5 @@ jobs:
           path: |
             expectancy_report.txt
             state/expectancy_report.json
+            state/signal_outcomes_backfill.json
           if-no-files-found: warn

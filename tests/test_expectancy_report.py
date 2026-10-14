@@ -65,3 +65,55 @@ class LoadRowsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _mk(mfe, mae, ts, **kw):
+    row = {"id": f"{ts}-{mfe}-{mae}", "mfe": mfe, "mae": mae, "ts": ts}
+    row.update(kw)
+    return row
+
+
+class FoldPositiveTests(unittest.TestCase):
+    def test_all_winners_are_positive_in_every_fold(self):
+        rows = [_mk(9.0, -0.5, f"2026-01-{d:02d}T00:00:00+00:00") for d in range(1, 9)]
+        pos, tot = er.fold_positive(rows, 5.0, 5.0, 0.0, 4)
+        self.assertEqual((pos, tot), (4, 4))
+
+
+class CalibrateTests(unittest.TestCase):
+    def test_ignores_groups_below_min_n(self):
+        rows = [_mk(9.0, -0.5, f"2026-01-{d:02d}T00:00:00+00:00", setup_type="TINY") for d in range(1, 4)]
+        cal = er.calibrate(rows, ["setup_type"], [1.0, 5.0], [1.0, 5.0], 0.0, min_n=10, folds=2, need_pos=1)
+        self.assertEqual(cal, [])
+
+    def test_picks_the_highest_expectancy_cell(self):
+        # losers only: no cell should be positive, and it still returns the best one
+        rows = [_mk(0.5, -9.0, f"2026-01-{d:02d}T00:00:00+00:00", setup_type="LOSERS") for d in range(1, 9)]
+        cal = er.calibrate(rows, ["setup_type"], [1.0, 5.0], [1.0, 5.0], 0.0, min_n=4, folds=2, need_pos=1)
+        self.assertEqual(len(cal), 1)
+        self.assertFalse(cal[0]["stable"])
+
+    def test_stable_requires_positive_folds(self):
+        rows = [_mk(9.0, -0.5, f"2026-01-{d:02d}T00:00:00+00:00", setup_type="GOOD") for d in range(1, 9)]
+        cal = er.calibrate(rows, ["setup_type"], [5.0], [5.0], 0.0, min_n=4, folds=4, need_pos=3)
+        self.assertTrue(cal[0]["stable"])
+        self.assertEqual(cal[0]["fold_pos"], 4)
+
+
+class FilteredUniverseTests(unittest.TestCase):
+    def test_weights_expectancy_by_group_size(self):
+        rows = ([_mk(9.0, -0.5, f"2026-01-{d:02d}T00:00:00+00:00", setup_type="A") for d in range(1, 5)]
+                + [_mk(0.5, -9.0, f"2026-02-{d:02d}T00:00:00+00:00", setup_type="B") for d in range(1, 3)])
+        cal = [
+            {"key": "setup_type", "group": "A", "n": 4, "expectancy_pct": 5.0, "stable": True},
+            {"key": "setup_type", "group": "B", "n": 2, "expectancy_pct": -5.0, "stable": False},
+        ]
+        fu = er.filtered_universe(rows, cal, 0.0)
+        self.assertEqual(fu["groups"], 1)
+        self.assertEqual(fu["signals"], 4)
+        self.assertAlmostEqual(fu["expectancy_pct"], 5.0, places=3)
+
+    def test_no_stable_groups(self):
+        fu = er.filtered_universe([], [], 0.0)
+        self.assertEqual(fu["groups"], 0)
+        self.assertIsNone(fu["expectancy_pct"])

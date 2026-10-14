@@ -192,6 +192,79 @@ def _breakdown_table(rows: list[dict]) -> list[list]:
     return out
 
 
+CALIBRATE_KEYS_DEFAULT = ("setup_type", "interval", "expansion_state")
+
+
+def _grouped(rows: list[dict], key: str) -> dict:
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        groups[str(r.get(key) or "UNKNOWN")].append(r)
+    return groups
+
+
+def fold_positive(rows: list[dict], target: float, stop: float, cost: float, folds: int):
+    """How many time folds the band is positive in (overfit guard)."""
+    wf = walk_forward(rows, folds, target, stop, cost)
+    if not wf:
+        return 0, 0
+    return sum(1 for f in wf if (f["expectancy_pct"] or 0) > 0), len(wf)
+
+
+def calibrate(rows: list[dict], keys, targets: list[float], stops: list[float], cost: float,
+              min_n: int, folds: int, need_pos: int) -> list[dict]:
+    """Best (target, stop) band per group, guarded by sample size and fold consistency."""
+    out: list[dict] = []
+    for key in keys:
+        for group, rs in _grouped(rows, key).items():
+            if len(rs) < min_n:
+                continue
+            best = None
+            for t in targets:
+                for s in stops:
+                    st = stats(policy_pnls(rs, t, s), cost)
+                    if st["expectancy_pct"] is None:
+                        continue
+                    if best is None or st["expectancy_pct"] > best[0]["expectancy_pct"]:
+                        best = (st, t, s)
+            if best is None:
+                continue
+            st, t, s = best
+            pos, tot = fold_positive(rs, t, s, cost, folds)
+            rec = {"key": key, "group": group, "n": len(rs), "target": t, "stop": s,
+                   "fold_pos": pos, "fold_n": tot}
+            rec.update(st)
+            rec["stable"] = bool(rec["expectancy_pct"] > 0 and pos >= need_pos)
+            out.append(rec)
+    out.sort(key=lambda d: -d["expectancy_pct"])
+    return out
+
+
+def filtered_universe(rows: list[dict], cal: list[dict], cost: float):
+    """Aggregate expectancy if you only traded the stable groups (band-weighted)."""
+    stable = [c for c in cal if c["stable"]]
+    if not stable:
+        return {"groups": 0, "signals": 0, "share_pct": 0.0, "expectancy_pct": None}
+    ids_by_key = {}
+    for c in stable:
+        ids_by_key[(c["key"], c["group"])] = c
+    kept, weighted_num, weighted_den = set(), 0.0, 0
+    for r in rows:
+        for (key, group), c in ids_by_key.items():
+            if str(r.get(key) or "UNKNOWN") == group:
+                kept.add(r["id"])
+                break
+    n_total = len(rows)
+    for c in stable:
+        weighted_num += c["expectancy_pct"] * c["n"]
+        weighted_den += c["n"]
+    return {
+        "groups": len(stable),
+        "signals": len(kept),
+        "share_pct": round(len(kept) / n_total * 100.0, 1) if n_total else 0.0,
+        "expectancy_pct": round(weighted_num / weighted_den, 3) if weighted_den else None,
+    }
+
+
 def build_report(rows: list[dict], args) -> dict:
     cost = cost_pct(args.fee_bps, args.slippage_bps)
     report = {
@@ -210,6 +283,11 @@ def build_report(rows: list[dict], args) -> dict:
     }
     for key in ("interval", "setup_type", "strategy_family", "trend_4h", "expansion_state"):
         report[f"by_{key}"] = breakdown(rows, key, CONFIGURED_TARGET_PCT, CONFIGURED_STOP_PCT, cost)
+    if args.calibrate:
+        cal = calibrate(rows, args.calibrate_keys, args.targets, args.stops, cost,
+                        args.min_n, args.folds, args.fold_min)
+        report["calibration"] = cal
+        report["filtered_universe"] = filtered_universe(rows, cal, cost)
     return report
 
 
@@ -223,6 +301,11 @@ def main(argv=None) -> int:
     ap.add_argument("--targets", type=float, nargs="+", default=[1, 2, 3, 5, 10])
     ap.add_argument("--stops", type=float, nargs="+", default=[1, 2, 3, 5])
     ap.add_argument("--json-out", default=None)
+    ap.add_argument("--calibrate", action="store_true",
+                    help="pick the best (target, stop) band per group, guarded by min-n and folds")
+    ap.add_argument("--calibrate-keys", nargs="+", default=list(CALIBRATE_KEYS_DEFAULT))
+    ap.add_argument("--min-n", type=int, default=30, help="minimum signals to calibrate a group")
+    ap.add_argument("--fold-min", type=int, default=3, help="folds that must be positive to be stable")
     args = ap.parse_args(argv)
 
     try:
@@ -252,6 +335,21 @@ def main(argv=None) -> int:
                        "n/a" if f["profit_factor"] is None else f"{f['profit_factor']:.2f}"])
         _print_table("WALK-FORWARD (time folds, configured policy)", wf)
 
+    if args.calibrate and report.get("calibration") is not None:
+        cal = report["calibration"]
+        lines = [["key", "group", "n", "band", "exp%", "win%", "PF", "folds+", "stable"]]
+        for c in cal:
+            lines.append([c["key"], c["group"], c["n"], f"+{c['target']:g}/-{c['stop']:g}",
+                          "n/a" if c["expectancy_pct"] is None else f"{c['expectancy_pct']:+.2f}",
+                          "n/a" if c["win_pct"] is None else f"{c['win_pct']:.1f}",
+                          "n/a" if c["profit_factor"] is None else f"{c['profit_factor']:.2f}",
+                          f"{c['fold_pos']}/{c['fold_n']}", "yes" if c["stable"] else ""])
+        _print_table(f"CALIBRATION (min_n={args.min_n}, need >= {args.fold_min} positive folds)",
+                     lines)
+        fu = report["filtered_universe"]
+        exp = "n/a" if fu["expectancy_pct"] is None else f"{fu['expectancy_pct']:+.2f}%/trade"
+        print(f"\nFILTERED UNIVERSE: {fu['groups']} stable group(s), {fu['signals']} signals "
+              f"({fu['share_pct']}% of all), band-weighted expectancy {exp}")
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as fh:
             json.dump(report, fh, indent=1, sort_keys=True)
