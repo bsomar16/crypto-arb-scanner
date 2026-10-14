@@ -72,6 +72,8 @@ def load_rows(history_path: str, outcomes_path: str) -> list[dict]:
             "mae": float(outcome["mae_pct"]),
             "graded_outcome": outcome.get("outcome"),
             "bars_held": outcome.get("bars_held"),
+            "entry": _f(sig.get("entry")),
+            "exit_price": _f(outcome.get("exit_price")),
         })
     return rows
 
@@ -115,6 +117,24 @@ def stats(pnls: list[float], cost: float) -> dict:
     }
 
 
+def bootstrap_ci(pnls: list[float], cost: float, iters: int = 300, ci: float = 0.95,
+                 seed: int = 20260101):
+    """Percentile bootstrap CI for mean expectancy (deterministic via fixed seed).
+
+    A positive point estimate is not evidence: with a fat-tailed loss spike (every stop
+    is -stop%) the sampling error is large, so the guard must be the LOWER bound.
+    """
+    n = len(pnls)
+    if n < 2:
+        return (None, None)
+    import random
+    rnd = random.Random(seed)
+    means = sorted(sum(rnd.choices(pnls, k=n)) / n - cost for _ in range(max(50, int(iters))))
+    lo = means[int((1.0 - ci) / 2.0 * len(means))]
+    hi = means[min(len(means) - 1, int((1.0 + ci) / 2.0 * len(means)) - 1)]
+    return (round(lo, 3), round(hi, 3))
+
+
 def policy_pnls(rows: list[dict], target_pct: float, stop_pct: float) -> list[float]:
     return [simulate(r["mfe"], r["mae"], target_pct, stop_pct) for r in rows]
 
@@ -124,6 +144,33 @@ def unresolved_pct(rows: list[dict], target_pct: float, stop_pct: float) -> floa
         return 0.0
     n = sum(1 for r in rows if r["mae"] > -abs(stop_pct) and r["mfe"] < abs(target_pct))
     return round(n / len(rows) * 100.0, 1)
+
+
+def realized_pnls(rows: list[dict]) -> list[float]:
+    """Realized pnl%% per trade from the RECORDED exit price vs entry.
+
+    This is the ground truth: the grader exits at each signal's own stop/target, so a
+    fixed-band simulation over MFE/MAE is only a scenario tool and will disagree with
+    what actually happened.
+    """
+    out = []
+    for r in rows:
+        entry, ex = r.get("entry"), r.get("exit_price")
+        if not entry or not ex or entry <= 0:
+            continue
+        out.append((ex / entry - 1.0) * 100.0)
+    return out
+
+
+def realized_stats(rows: list[dict], cost: float) -> dict:
+    pnls = realized_pnls(rows)
+    if not pnls:
+        return {"n": 0, "expectancy_pct": None}
+    st = stats(pnls, cost)
+    st["n"] = len(pnls)
+    st["graded"] = {k: sum(1 for r in rows if r.get("graded_outcome") == k)
+                    for k in ("WIN", "LOSS", "EXPIRED")}
+    return st
 
 
 def grid(rows: list[dict], targets: list[float], stops: list[float], cost: float) -> list[list]:
@@ -211,7 +258,8 @@ def fold_positive(rows: list[dict], target: float, stop: float, cost: float, fol
 
 
 def calibrate(rows: list[dict], keys, targets: list[float], stops: list[float], cost: float,
-              min_n: int, folds: int, need_pos: int) -> list[dict]:
+              min_n: int, folds: int, need_pos: int, ci_iters: int = 300,
+              ci_level: float = 0.95) -> list[dict]:
     """Best (target, stop) band per group, guarded by sample size and fold consistency."""
     out: list[dict] = []
     for key in keys:
@@ -229,11 +277,15 @@ def calibrate(rows: list[dict], keys, targets: list[float], stops: list[float], 
             if best is None:
                 continue
             st, t, s = best
+            pnls = policy_pnls(rs, t, s)
             pos, tot = fold_positive(rs, t, s, cost, folds)
+            lo, hi = bootstrap_ci(pnls, cost, ci_iters, ci_level)
             rec = {"key": key, "group": group, "n": len(rs), "target": t, "stop": s,
-                   "fold_pos": pos, "fold_n": tot}
+                   "fold_pos": pos, "fold_n": tot, "ci_lo": lo, "ci_hi": hi}
             rec.update(st)
-            rec["stable"] = bool(rec["expectancy_pct"] > 0 and pos >= need_pos)
+            # Statistical guard: the CI lower bound must clear zero. Fold consistency is
+            # kept as a secondary gate so a single lucky period cannot pass on its own.
+            rec["stable"] = bool(lo is not None and lo > 0 and pos >= need_pos)
             out.append(rec)
     out.sort(key=lambda d: -d["expectancy_pct"])
     return out
@@ -276,6 +328,7 @@ def build_report(rows: list[dict], args) -> dict:
             "fee_bps_per_side": args.fee_bps,
             "slippage_bps_per_side": args.slippage_bps,
         },
+        "realized": realized_stats(rows, cost),
         "configured_policy": stats(policy_pnls(rows, CONFIGURED_TARGET_PCT, CONFIGURED_STOP_PCT), cost),
         "configured_unresolved_pct": unresolved_pct(rows, CONFIGURED_TARGET_PCT, CONFIGURED_STOP_PCT),
         "grid_expectancy_pct": grid(rows, args.targets, args.stops, cost),
@@ -285,7 +338,8 @@ def build_report(rows: list[dict], args) -> dict:
         report[f"by_{key}"] = breakdown(rows, key, CONFIGURED_TARGET_PCT, CONFIGURED_STOP_PCT, cost)
     if args.calibrate:
         cal = calibrate(rows, args.calibrate_keys, args.targets, args.stops, cost,
-                        args.min_n, args.folds, args.fold_min)
+                        args.min_n, args.folds, args.fold_min,
+                        ci_iters=args.bootstrap_iters, ci_level=args.ci)
         report["calibration"] = cal
         report["filtered_universe"] = filtered_universe(rows, cal, cost)
     return report
@@ -306,6 +360,8 @@ def main(argv=None) -> int:
     ap.add_argument("--calibrate-keys", nargs="+", default=list(CALIBRATE_KEYS_DEFAULT))
     ap.add_argument("--min-n", type=int, default=30, help="minimum signals to calibrate a group")
     ap.add_argument("--fold-min", type=int, default=3, help="folds that must be positive to be stable")
+    ap.add_argument("--bootstrap-iters", type=int, default=300, help="bootstrap resamples for the CI")
+    ap.add_argument("--ci", type=float, default=0.95, help="confidence level for the expectancy CI")
     args = ap.parse_args(argv)
 
     try:
@@ -319,7 +375,12 @@ def main(argv=None) -> int:
 
     report = build_report(rows, args)
     conf = report["configured_policy"]
+    rz = report["realized"]
     print(f"graded signals: {report['n_signals']}   round-trip cost: {report['cost_pct_round_trip']:.2f}%")
+    print(f"REALIZED (ground truth, from recorded exits): expectancy {rz['expectancy_pct']:+.3f}%/trade   "
+          f"win {rz['win_pct']}%   PF {rz['profit_factor']}   {rz['graded']}")
+    print("  ^ this is the number that matters. The policy grid below is a SCENARIO simulation\n"
+          "    over MFE/MAE and will disagree (it ignores each signal's own stop/target).")
     print(f"configured policy (+5% / -5%): expectancy {conf['expectancy_pct']:+.2f}%/trade   "
           f"win {conf['win_pct']}%   PF {conf['profit_factor']}   unresolved {report['configured_unresolved_pct']}%")
     print("\nassumptions: " + "; ".join(f"{k}={v}" for k, v in report["assumptions"].items()))
@@ -337,10 +398,13 @@ def main(argv=None) -> int:
 
     if args.calibrate and report.get("calibration") is not None:
         cal = report["calibration"]
-        lines = [["key", "group", "n", "band", "exp%", "win%", "PF", "folds+", "stable"]]
+        lines = [["key", "group", "n", "band", "exp%", "95% CI", "win%", "PF", "folds+", "stable"]]
         for c in cal:
+            ci = ("n/a" if c.get("ci_lo") is None
+                  else f"{c['ci_lo']:+.2f}..{c['ci_hi']:+.2f}")
             lines.append([c["key"], c["group"], c["n"], f"+{c['target']:g}/-{c['stop']:g}",
                           "n/a" if c["expectancy_pct"] is None else f"{c['expectancy_pct']:+.2f}",
+                          ci,
                           "n/a" if c["win_pct"] is None else f"{c['win_pct']:.1f}",
                           "n/a" if c["profit_factor"] is None else f"{c['profit_factor']:.2f}",
                           f"{c['fold_pos']}/{c['fold_n']}", "yes" if c["stable"] else ""])
