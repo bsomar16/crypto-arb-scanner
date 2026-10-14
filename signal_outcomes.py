@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 
 import signal_history
 
-BINANCE = "https://api.binance.com"
+BINANCE = "https://data-api.binance.vision"
 STATE_PATH = "state/signal_outcomes.json"
 REFRESH_PATH = "state/signal_outcomes_refresh.json"
 MILESTONES = (5, 10, 20, 30, 50, 80)
