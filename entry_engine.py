@@ -62,6 +62,10 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
     if require_retest and (retest is None or confirm is None):
         return None
     if confirm is None:
+        if retest is None:
+            # No retest observed and none required (require_retest=False):
+            # there is nothing to derive a confirmation candle from.
+            return None
         confirm = {"index": retest["index"], "open": opens[retest["index"]], "high": highs[retest["index"]],
                    "low": lows[retest["index"]], "close": closes[retest["index"]],
                    "body_strength": _body_strength(opens[retest["index"]], highs[retest["index"]],

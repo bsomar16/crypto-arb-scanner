@@ -1,6 +1,6 @@
 import unittest
 
-from entry_engine import entry_diagnostics
+from entry_engine import entry_diagnostics, evaluate_entry
 
 
 class EntryDiagnosticsTests(unittest.TestCase):
@@ -60,3 +60,26 @@ class EntryDiagnosticsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EntryEngineGuardTests(unittest.TestCase):
+    def test_no_retest_observed_and_not_required_returns_none_without_raising(self):
+        """require_retest=False with no observable retest must return None, not crash."""
+        n = 70
+        closes = [100.0] * n; highs = [100.0] * n; lows = [100.0] * n; opens = [100.0] * n
+        for i in (67, 68, 69):
+            closes[i] = 103.0; highs[i] = 103.0; opens[i] = 102.0
+        lows[67] = 100.0
+        lows[68] = lows[69] = 102.0   # price never returns to the broken level
+        out = evaluate_entry(closes, highs, lows, opens, "1h", atr=1.0,
+                             require_retest=False, require_sweep=False)
+        self.assertIsNone(out)
+
+    def test_require_retest_true_still_gates(self):
+        n = 70
+        closes = [100.0] * n; highs = [100.0] * n; lows = [100.0] * n; opens = [100.0] * n
+        for i in (67, 68, 69):
+            closes[i] = 103.0; highs[i] = 103.0; opens[i] = 102.0
+        lows[67] = 100.0; lows[68] = lows[69] = 102.0
+        self.assertIsNone(evaluate_entry(closes, highs, lows, opens, "1h", atr=1.0,
+                                        require_retest=True, require_sweep=False))
