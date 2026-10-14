@@ -9,22 +9,15 @@ import concurrent.futures
 import json
 import os
 import sys
-import time
 from argparse import ArgumentParser
 from datetime import datetime, timezone
 
-from botutil import esc, telegram_msg, load_json, save_json, fmt_price, env_float, env_int, log, set_json_logs
+from botutil import esc, telegram_msg, load_json, save_json, fmt_price, log, set_json_logs
 from signal_audit import SignalAudit
 from markets import fetch_binance_24h, crypto_quote
-from signals import analyze_coin_daily, intraday_signal
-import sentiment
-import portfolio as portfolio_mod
+from signals import intraday_signal
 import alerts as alerts_mod
-import backtest as backtest_mod
-import store as store_mod
 import positions as positions_mod
-import exposure as exposure_mod
-from realtime import BinanceKlineCache
 import signal_outcomes
 import component_quality
 import outcome_attribution
@@ -32,7 +25,6 @@ import signal_history
 import market_regime
 import signal_lifecycle
 import abt_strategy
-import validation as validation_mod
 import multi_exchange
 import shadow_trading
 
@@ -846,129 +838,19 @@ def run_buy(token, chat_id, realtime_cache=None):
     return True
 
 
-def run_realtime(token, chat_id):
-    """Run a long-lived closed-candle confirmation monitor."""
-    cfg = load_cfg()
-    if not bool(cfg.get("realtime_kline_enabled", True)):
-        log("[REALTIME] disabled by config")
-        return False
-    intervals = [i for i in cfg.get("realtime_kline_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
-    if not intervals:
-        intervals = ["5m", "15m", "1h"]
-    cache = None
-    last_discovery = 0.0
-    scan_interval = max(15, int(cfg.get("realtime_scan_interval_seconds", 60)))
-    refresh_interval = max(300, int(cfg.get("realtime_discovery_refresh_seconds", 900)))
-    try:
-        while True:
-            now = time.time()
-            if cache is None or now - last_discovery >= refresh_interval:
-                t24 = fetch_binance_24h()
-                q = crypto_quote(t24)
-                star = {str(w).upper() for w in cfg.get("watchlist", [])}
-                star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
-                monitored, _ = _candidate_universe(cfg, q, star, t24=t24)
-                monitored = set(monitored[:int(cfg.get("realtime_kline_max_symbols", 100))])
-                if cache is not None:
-                    cache.stop()
-                cache = BinanceKlineCache(monitored, intervals=intervals, max_bars=int(cfg.get("realtime_kline_max_bars", 120)))
-                cache.start()
-                last_discovery = now
-                log(f"[REALTIME] monitoring {len(monitored)} symbols across {len(intervals)} intervals")
-            run_buy(token, chat_id, realtime_cache=cache)
-            time.sleep(scan_interval)
-    except KeyboardInterrupt:
-        log("[REALTIME] stopped")
-        return True
-    finally:
-        if cache is not None:
-            cache.stop()
+MODES = ["buy"]
 
-def run_daily(token, chat_id):
-    cfg = load_cfg(); fng, fngc = sentiment.fear_greed(); btc_dom, eth_dom, total_mcap = sentiment.btc_dominance(); fng_nudge = (fng - 50) / 50 * 3.0 if fng is not None else 0.0
-    t24 = fetch_binance_24h(); q = crypto_quote(t24); pool = [sym for sym, qv in sorted(q.items(), key=lambda kv: -kv[1]) if qv >= cfg.get("min_daily_qv", 1500000)]; top = pool[:int(cfg.get("daily_scan_top", 80))]
-    star = {str(w).upper() for w in cfg.get("watchlist", [])}; star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
-    for e in sorted(star - set(top)):
-        if q.get(e, 0) >= int(cfg.get("min_daily_qv", 1500000)) * 0.5: top.append(e)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex: res = [r for r in ex.map(lambda c: analyze_coin_daily(c, fng_nudge), top) if r]
-    res = [r for r in res if r["rating"] in ("BUY", "STRONG BUY")]; res.sort(key=lambda r: -r["score"]); res = res[:int(cfg.get("daily_top_n", 20))]
-    for r in res:
-        try: store_mod.daily_log(r["coin"], r["score"], r["rating"], r["price"], r["chg"], r["rsi"], r["vol_x"], r.get("qv"))
-        except Exception as e: log("DAILY", "daily_log error:", e)
-    # Daily report is informational; it must not create trade entries or consume the BUY daily budget.
-    news_targets = {r["coin"] for r in res[:int(cfg.get("daily_news_top", 8))]} | {"BTC", "ETH"} | {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", [])}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex: nn = dict(zip(news_targets, ex.map(lambda s: sentiment.news_score(s), news_targets)))
-    news = {k: v for k, v in nn.items() if v and v[0] not in ("?", "No news")}; holdings_rows = portfolio_mod.portfolio_rows(cfg.get("holdings", [])); fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
-    sb = [r for r in res if r["rating"] == "STRONG BUY"]; b = [r for r in res if r["rating"] == "BUY"]; lines = [f"📈 <b>CRYPTO DAILY REPORT</b> · {now_s()}"]
-    mkt = f"🌐 Binance · {len(top)} crypto assets scanned (volume > ${cfg.get('min_daily_qv', 1500000)/1e6:.1f}M)"
-    if fng is not None: mkt = f"🌀 Fear&Greed <b>{fng}</b> ({esc(fngc)}) · {mkt}"
-    if btc_dom: mkt += f" · BTC dom {btc_dom:.1f}%"
-    if total_mcap: mkt += f" · MCap ${total_mcap/1e12:.2f}T"
-    lines += [mkt, ""]
-    def row(i, r, badge):
-        ns = ""
-        if r["coin"] in news: ns = f" · {esc(news[r['coin']][0])}"
-        star_flag = " ⭐" if r["coin"] in star else ""; lines.append(f"{i:>2}. {badge} <b>{esc(r['coin'])}</b>{star_flag} {fmt_price(r['price'])} RSI {r['rsi']:.0f} vol×{r['vol_x']:.1f} {r['chg']:+.1f}% score {r['score']:.0f}{ns}")
-    lines.append(f"🔥 <b>STRONG BUY ({len(sb)})</b>")
-    for i, r in enumerate(sb, 1): row(i, r, "🟩")
-    lines.append(""); lines.append(f"👍 <b>BUY ({len(b)})</b>")
-    for i, r in enumerate(b, len(sb)+1): row(i, r, "🟨")
-    if holdings_rows: lines.extend(["", *portfolio_mod.format_portfolio(holdings_rows)])
-    if fired_alerts: lines.extend(["", "🔔 <b>PRICE ALERTS</b>", *fired_alerts[:6]])
-    lines.extend(["", "━━━━━━━━━━━━━━━━━━━━", f"{len(sb)} strong, {len(b)} buy across {len(pool)} crypto assets. Signals only — verify before trading."])
-    telegram_msg(token, chat_id, "\n".join(lines)); return True
-
-def run_price(token, chat_id):
-    cfg = load_cfg(); fired, _ = alerts_mod.check_price_alerts(cfg)
-    if not fired: log("[PRICE] no alerts"); return False
-    telegram_msg(token, chat_id, "\n".join([f"🔔 <b>PRICE ALERTS</b> · {now_s()}", "", *fired[:10]])); return True
-
-def run_backtest(token, chat_id):
-    text = backtest_mod.run_backtest(load_cfg()); telegram_msg(token, chat_id, text); return True
-
-def run_validate(token, chat_id):
-    report = validation_mod.run(load_cfg())
-    text = validation_mod.format_report(report)
-    telegram_msg(token, chat_id, text)
-    return True
-
-def run_portfolio(token, chat_id):
-    cfg = load_cfg(); rows = portfolio_mod.portfolio_rows(cfg.get("holdings", [])); telegram_msg(token, chat_id, "\n".join([f"💰 <b>CRYPTO PORTFOLIO</b> · {now_s()}", *portfolio_mod.format_portfolio(rows)])); return True
-
-def run_check(token, chat_id):
-    cfg = load_cfg(); sent = 0
-    try: sent = positions_mod.check_positions(token, chat_id, cfg)
-    except Exception as e: log("CHECK", "positions error:", e)
-    return sent > 0
-
-def run_report(fmt):
-    text = store_mod.build_report_text()
-    try:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open("state/report.html", "w", encoding="utf-8") as f: f.write(store_mod.build_report_html())
-    except Exception as e: log("REPORT", "html write error:", e)
-    print(text); return text
-
-MODES = ["daily", "buy", "realtime", "price", "backtest", "validate", "portfolio", "check", "report", "all"]
 
 def main():
-    ap = ArgumentParser(); ap.add_argument("--mode", choices=MODES, default="buy"); ap.add_argument("--all", action="store_true")
-    ap.add_argument("--report-format", choices=["text", "html"], default="text"); ap.add_argument("--json-logs", action="store_true")
+    ap = ArgumentParser(); ap.add_argument("--mode", choices=MODES, default="buy")
+    ap.add_argument("--json-logs", action="store_true")
     args = ap.parse_args()
     if args.json_logs: set_json_logs(True)
     token = os.environ.get("TELEGRAM_BOT_TOKEN", ""); chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    mode = "all" if args.all else args.mode
-    if mode == "report": run_report(args.report_format); return
-    if not token or not chat_id: print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"); sys.exit(1)
+    if not token or not chat_id:
+        print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"); sys.exit(1)
     os.makedirs(STATE_DIR, exist_ok=True)
-    if mode == "all": run_daily(token, chat_id); run_buy(token, chat_id)
-    elif mode == "daily": run_daily(token, chat_id)
-    elif mode == "buy": run_buy(token, chat_id)
-    elif mode == "realtime": run_realtime(token, chat_id)
-    elif mode == "price": run_price(token, chat_id)
-    elif mode == "backtest": run_backtest(token, chat_id)
-    elif mode == "validate": run_validate(token, chat_id)
-    elif mode == "portfolio": run_portfolio(token, chat_id)
-    elif mode == "check": run_check(token, chat_id)
+    run_buy(token, chat_id)
+
 
 if __name__ == "__main__": main()
