@@ -97,6 +97,14 @@ def metrics(rows, cfg):
     }
 
 
+def metrics_by_symbol(rows_by_symbol, cfg):
+    """Per-symbol attribution; descriptive only, never used to select live symbols."""
+    return {
+        symbol: metrics(rows, cfg)
+        for symbol, rows in sorted(rows_by_symbol.items())
+    }
+
+
 def decision_for(pooled_metrics, window_metrics):
     """Classify research evidence without promoting a strategy to production."""
     if pooled_metrics["closed"] < 100 or any(m["closed"] < 20 for m in window_metrics):
@@ -132,8 +140,10 @@ def main():
 
     windows = []
     pooled = []
+    pooled_by_symbol = {symbol: [] for symbol in all_rows}
     for name, start, end in WINDOWS:
         rows = []
+        window_by_symbol = {}
         for symbol, (history, trend) in all_rows.items():
             batch = replay_symbol(
                 symbol, INTERVAL, history, trend, start, end,
@@ -141,8 +151,17 @@ def main():
                 entry_policy={"require_retest": True, "require_sweep": False, "allow_early_retest": False},
             )
             rows.extend(batch)
+            window_by_symbol[symbol] = batch
+            pooled_by_symbol[symbol].extend(batch)
         pooled.extend(rows)
-        windows.append({"window": name, "start_bar": start, "end_bar": end, "symbols": len(all_rows), "metrics": metrics(rows, cfg)})
+        windows.append({
+            "window": name,
+            "start_bar": start,
+            "end_bar": end,
+            "symbols": len(all_rows),
+            "metrics": metrics(rows, cfg),
+            "by_symbol": metrics_by_symbol(window_by_symbol, cfg),
+        })
 
     pooled_metrics = metrics(pooled, cfg)
     window_metrics = [item["metrics"] for item in windows]
@@ -155,6 +174,8 @@ def main():
         "holdout_start_utc": "2026-10-06T00:00:00Z",
         "windows": windows,
         "pooled": pooled_metrics,
+        "by_symbol": metrics_by_symbol(pooled_by_symbol, cfg),
+        "asset_attribution_note": "Per-symbol historical attribution is diagnostic only. Do not infer future asset exclusions from this same holdout or use these results as a production filter.",
         "sample_rule": "pooled closed >=100 and >=20 closed per window; Wilson 95% lower bound must clear cost-implied breakeven; no single-window lift accepted.",
         "cost_model_note": "Expectancy/R metrics use configured Binance taker fee and slippage reserve as a scenario, not realized execution costs.",
         "decision": decision_for(pooled_metrics, window_metrics),
