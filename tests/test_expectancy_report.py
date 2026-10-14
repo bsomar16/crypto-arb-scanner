@@ -117,3 +117,46 @@ class FilteredUniverseTests(unittest.TestCase):
         fu = er.filtered_universe([], [], 0.0)
         self.assertEqual(fu["groups"], 0)
         self.assertIsNone(fu["expectancy_pct"])
+
+
+class RealizedTests(unittest.TestCase):
+    def test_pnl_comes_from_recorded_exit_not_excursions(self):
+        rows = [{"entry": 100.0, "exit_price": 97.0, "mfe": 9.0, "mae": -9.0}]
+        self.assertAlmostEqual(er.realized_pnls(rows)[0], -3.0, places=6)
+
+    def test_rows_without_exit_are_skipped(self):
+        rows = [{"entry": 100.0, "exit_price": None}, {"entry": None, "exit_price": 90.0}]
+        self.assertEqual(er.realized_pnls(rows), [])
+
+    def test_realized_stats_is_net_of_cost(self):
+        rows = [{"entry": 100.0, "exit_price": 110.0, "graded_outcome": "WIN"},
+                {"entry": 100.0, "exit_price": 90.0, "graded_outcome": "LOSS"}]
+        st = er.realized_stats(rows, 0.30)
+        self.assertEqual(st["n"], 2)
+        self.assertAlmostEqual(st["expectancy_pct"], -0.3, places=3)   # mean 0 minus cost
+        self.assertEqual(st["graded"], {"WIN": 1, "LOSS": 1, "EXPIRED": 0})
+
+    def test_empty_is_not_a_crash(self):
+        self.assertEqual(er.realized_stats([], 0.3)["n"], 0)
+
+
+class BootstrapTests(unittest.TestCase):
+    def test_ci_brackets_the_mean_and_is_deterministic(self):
+        pnls = [5.0] * 50 + [-5.0] * 100 + [0.0] * 50
+        lo1, hi1 = er.bootstrap_ci(pnls, 0.0, iters=300)
+        lo2, hi2 = er.bootstrap_ci(pnls, 0.0, iters=300)
+        self.assertEqual((lo1, hi1), (lo2, hi2))          # fixed seed
+        mean = sum(pnls) / len(pnls)
+        self.assertLessEqual(lo1, mean)
+        self.assertGreaterEqual(hi1, mean)
+
+    def test_positive_edge_has_positive_lower_bound(self):
+        lo, hi = er.bootstrap_ci([5.0] * 200, 0.0, iters=200)
+        self.assertGreater(lo, 0.0)
+
+    def test_flat_edge_has_lower_bound_at_or_below_zero(self):
+        lo, _ = er.bootstrap_ci([5.0, -5.0] * 100, 0.0, iters=300)
+        self.assertLessEqual(lo, 0.0)
+
+    def test_tiny_sample_returns_none(self):
+        self.assertEqual(er.bootstrap_ci([1.0], 0.0), (None, None))
