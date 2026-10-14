@@ -1,0 +1,38 @@
+name: expectancy-report
+
+# On-demand only: no schedule, no push trigger. Read-only (upload artifact, never commits).
+on:
+  workflow_dispatch:
+    inputs:
+      fee_bps:
+        description: "Fee per side, basis points"
+        required: false
+        default: "10"
+      slippage_bps:
+        description: "Slippage per side, basis points"
+        required: false
+        default: "5"
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Expectancy / walk-forward report
+        run: |
+          python expectancy_report.py \
+            --fee-bps "${{ inputs.fee_bps }}" \
+            --slippage-bps "${{ inputs.slippage_bps }}" \
+            --folds 4 \
+            --json-out state/expectancy_report.json | tee expectancy_report.txt
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: expectancy-report
+          path: |
+            expectancy_report.txt
+            state/expectancy_report.json
+          if-no-files-found: warn
