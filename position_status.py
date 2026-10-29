@@ -158,15 +158,18 @@ def _emit_event(token, chat_id, pos, event, message, notifications):
             persisted_sent = persisted.setdefault(pid, {})
             local_sent = notifications.setdefault(pid, {})
             if persisted_sent.get(event) or local_sent.get(event):
-                notifications.clear()
-                notifications.update(persisted)
+                for key, values in persisted.items():
+                    if isinstance(values, dict):
+                        notifications.setdefault(key, {}).update(values)
                 return False
             if not _send(token, chat_id, message):
                 return False
             persisted_sent[event] = True
             _save_notifications(persisted)
-            notifications.clear()
-            notifications.update(persisted)
+            for key, values in persisted.items():
+                if isinstance(values, dict):
+                    notifications.setdefault(key, {}).update(values)
+            notifications.setdefault(pid, {})[event] = True
             return True
         finally:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
