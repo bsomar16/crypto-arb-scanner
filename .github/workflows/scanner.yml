@@ -35,6 +35,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Refresh authoritative trade state before tracking
+        run: |
+          git fetch origin main
+          git restore --source=origin/main --worktree -- \
+            state/positions.json \
+            state/position_notifications.json \
+            state/position_status.json
       - name: Run trade tracking/status cycle
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
