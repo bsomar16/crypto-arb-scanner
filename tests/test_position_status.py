@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -75,6 +76,28 @@ class PositionStatusTests(unittest.TestCase):
         sender.assert_called_once()
         saver.assert_called_once()
         self.assertTrue(notifications["notify-once"]["tp1"])
+
+    def test_stale_notification_snapshots_cannot_repeat_same_event(self):
+        pos = self._position()
+        pos["position_id"] = "parallel-zkp-trade"
+        pos["coin"] = "ZKP"
+        pos["notification_enabled"] = True
+        pos["notification_version"] = 2
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(position_status, "NOTIFICATION_FILE", os.path.join(tmp, "notifications.json")), \
+             patch.object(position_status, "_send", return_value=True) as sender:
+            # Simulate two workers that loaded state before either worker sent.
+            first_snapshot = {}
+            second_stale_snapshot = {}
+            self.assertTrue(position_status._emit_event(
+                "token", "chat", pos, "tp1", "ZKP TP1", first_snapshot
+            ))
+            self.assertFalse(position_status._emit_event(
+                "token", "chat", pos, "tp1", "ZKP TP1", second_stale_snapshot
+            ))
+
+        sender.assert_called_once()
 
     def test_stopped_out_format_marks_targets_closed(self):
         pos = self._position()
