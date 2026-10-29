@@ -2,6 +2,7 @@
 """Run one position-tracking cycle with lifecycle-only Telegram trade status."""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from datetime import datetime, timezone
@@ -144,14 +145,34 @@ def _emit_event(token, chat_id, pos, event, message, notifications):
     pid = str(pos.get("position_id", "") or "")
     if not pid:
         return False
-    sent = notifications.setdefault(pid, {})
-    if sent.get(event):
-        return False
-    if _send(token, chat_id, message):
-        sent[event] = True
-        _save_notifications(notifications)
-        return True
-    return False
+
+    # Multiple scheduler/container instances can process the same position at
+    # once. Serialize the check-send-save sequence and re-read state under the
+    # lock so stale in-memory snapshots cannot send the same lifecycle event.
+    lock_path = NOTIFICATION_FILE + ".lock"
+    os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
+    with open(lock_path, "a", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            persisted = _load_notifications()
+            persisted_sent = persisted.setdefault(pid, {})
+            local_sent = notifications.setdefault(pid, {})
+            if persisted_sent.get(event) or local_sent.get(event):
+                for key, values in persisted.items():
+                    if isinstance(values, dict):
+                        notifications.setdefault(key, {}).update(values)
+                return False
+            if not _send(token, chat_id, message):
+                return False
+            persisted_sent[event] = True
+            _save_notifications(persisted)
+            for key, values in persisted.items():
+                if isinstance(values, dict):
+                    notifications.setdefault(key, {}).update(values)
+            notifications.setdefault(pid, {})[event] = True
+            return True
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def run_cycle(token, chat_id, cfg):
