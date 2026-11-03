@@ -61,13 +61,14 @@ def _state(rows):
             "macd": macd, "sig": sig, "hist": hist, "rsi": float(ind.rsi(close, 14) or 50)}
 
 
-def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0):
+def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=None):
     """Return a scanner-compatible BUY signal or None; no short-side path exists."""
     if interval not in INTERVALS:
         return None
     cfg = cfg or {}
     try:
-        rows = _candles(str(coin).upper(), interval)
+        fetch = candle_provider or _candles
+        rows = fetch(str(coin).upper(), interval)
         s = _state(rows)
         if not s:
             return None
@@ -88,11 +89,11 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0):
         htf = HTF_MAP[interval]
         htf_ok, htf_state = interval == "1w", "SKIPPED" if interval == "1w" else "UNAVAILABLE"
         if htf:
-            hs = _state(_candles(str(coin).upper(), htf, 220))
+            hs = _state(fetch(str(coin).upper(), htf, 220))
             if hs:
                 htf_ok = hs["close"] > hs["e20"][-1] > hs["e50"][-1]
                 htf_state = "BULLISH" if htf_ok else "NOT_BULLISH"
-        bs = _state(_candles("BTC", interval, 220))
+        bs = _state(fetch("BTC", interval, 220))
         btc_ok = bool(bs and bs["close"] > bs["e20"][-1] > bs["e50"][-1])
         c2 = (8 if htf_ok else 0) + (7 if btc_ok else 0)
 
