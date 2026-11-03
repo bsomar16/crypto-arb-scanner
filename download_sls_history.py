@@ -57,6 +57,20 @@ def _parse_kline(row):
     }
 
 
+def _candle_close_ms(open_ms, interval):
+    """Return the exclusive UTC close boundary for a Binance candle."""
+    if interval == "1M":
+        start = dt.datetime.fromtimestamp(open_ms / 1000, tz=dt.timezone.utc)
+        if start.month == 12:
+            end = start.replace(year=start.year + 1, month=1, day=1)
+        else:
+            end = start.replace(month=start.month + 1, day=1)
+        return int(end.timestamp() * 1000)
+    units = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000,
+             "4h": 14_400_000, "1d": 86_400_000, "1w": 604_800_000}
+    return open_ms + units[interval]
+
+
 def _download_pair(symbol, interval, start_ms, end_ms, fetch_json=_http_json, pause=0.05):
     """Fetch [start_ms, end_ms) with Binance's 1000-row pagination."""
     rows = []
@@ -118,8 +132,12 @@ def download_dataset(symbols, intervals, start_ms, end_ms, output,
             if interval not in INTERVALS:
                 raise ValueError(f"Unsupported interval: {interval}")
             existing = by_interval.setdefault(interval, [])
-            existing_by_time = {int(row["t"]): row for row in existing
-                                if start_ms <= int(row["t"]) < end_ms}
+            now_ms = int(time.time() * 1000)
+            existing_by_time = {
+                int(row["t"]): row for row in existing
+                if start_ms <= int(row["t"]) < end_ms
+                and _candle_close_ms(int(row["t"]), interval) <= now_ms
+            }
             # Resume from the last saved open time; overlapping one candle is
             # harmless and protects against an interrupted final write.
             cursor = max(start_ms, max(existing_by_time, default=start_ms - 1))
