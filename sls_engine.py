@@ -26,6 +26,15 @@ def _safe(v):
     return v is not None
 
 
+def _delayed_highest(values, length, delay, index):
+    """Pine ta.highest(values, length)[delay] at the requested bar."""
+    end = index - delay
+    start = end - length + 1
+    if start < 0 or end < 0:
+        return None
+    return max(values[start:end + 1])
+
+
 def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
                     sensitivity="Balanced", min_score=None):
     """Evaluate every closed candle in order; return only a newly triggered BUY.
@@ -107,7 +116,6 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     last_high=highs[-1][1] if highs else None
     swing_len=50 if big else 30
     discount=bool(last_low is not None and last_high is not None and price<(last_low+last_high)/2)
-    res20=max(h[i-20:i]) if i>=20 else None
     bos=False; bos_bars=[]
     for k in range(max(1,i-10),i+1):
         prior_highs=[x[1] for x in highs if x[0] < k]
@@ -174,7 +182,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     vol3=_sma(v,3,i); vol10=_sma(v,10,i)
     c4=(3 if rvz>=1 else 0)+(2 if rvz>=1.5 else 0)+(3 if green else 0)+(3 if vol3 and vol10 and vol3>vol10 else 0)+(2 if green3>=2 else 0)+(2 if up_share>.5 else 0)
     # C5
-    c5=(4 if (res20 is not None and price>res20) or bos else 0)+(3 if hl else 0)+(2 if hh else 0)
+    c5=(4 if (max(h[max(0,i-19):i+1]) is not None and price>max(h[max(0,i-19):i+1])) or bos else 0)+(3 if hl else 0)+(2 if hh else 0)
     c5+=(2 if min(c[i-4:i+1])>e50[i] else 0)+(2 if near_demand else 0)+(1 if in_discount else 0)+(1 if recent_sweep else 0)
     # C6 divergence points
     c6={3:6,2:4,1:2}.get(divergence_state,0)+(2 if div_vol else 0)+(2 if div_support else 0)
@@ -183,8 +191,12 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     ext_pts=4 if ext_atr<=1.5 else 2 if ext_atr<=2.25 else 0
     rr_valid=stop>0 and stop_pct<=max_stop_pct and rr1>=1.5
     rr_pts=4 if rr_valid and rr1>=1.5 else 1 if rr_valid else 0
-    resistance=max(h[i-20:i]) if i>=20 else None
-    room_pts=(2 if resistance is not None and resistance>price and (resistance-price)/(price-stop)>=1.5 else 0 if resistance is not None and resistance>price else 1) if rr_valid else 0
+    # Pine swingHiGlobal = ta.highest(high, swingLen)[6]. The six-bar
+    # offset is intentional: exclude the most recent six candles from the
+    # resistance reference to avoid using a still-forming local swing.
+    resistance=_delayed_highest(h,swing_len,6,i)
+    room_rr=(resistance-price)/(price-stop) if resistance is not None and price>stop else None
+    room_pts=(2 if room_rr is not None and room_rr>=1.5 else 0) if resistance is not None else (1 if rr_valid else 0)
     c7=ext_pts+rr_pts+room_pts
     # C8 independent confluence count
     liq_ok=sum(q[max(0,i-19):i+1])>=turnover_floor
