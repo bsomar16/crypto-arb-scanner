@@ -71,5 +71,5 @@ def register_signal(state, signal):
     return True
 
 
-def active_coins(state):
-    return {p["coin"] for p in state.values() if p.get("status")=="open"}
+def active_keys(state):
+    return {k for k,p in state.items() if p.get("status")=="open"}
