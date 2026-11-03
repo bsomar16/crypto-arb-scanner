@@ -94,6 +94,19 @@ class SlsBacktestTests(unittest.TestCase):
         self.assertEqual(len(rows), 200)
         self.assertEqual(rows[-1]["t"], 199 * 300000)
 
+
+    def test_provider_allows_50_monthly_bars_for_htf_confirmation(self):
+        start = int(datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+        rows = []
+        current = start
+        for _ in range(55):
+            rows.append({"t": current, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "q": 1})
+            current = sls_backtest._candle_close_ms(current, "1M")
+        data = sls_backtest._normalise_dataset({"candles": {"ETH": {"1M": rows}}})
+        asof = sls_backtest._candle_close_ms(rows[49]["t"], "1M")
+        visible = sls_backtest._provider(data, asof)("ETH", "1M")
+        self.assertEqual(len(visible), 50)
+
     def test_stop_has_priority_when_stop_and_target_touch_same_candle(self):
         signal = {"entry": 100, "stop": 95, "t1": 107.5, "t2": 112.5, "t3": 120}
         rows = [
