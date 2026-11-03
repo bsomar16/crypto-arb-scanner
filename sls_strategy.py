@@ -66,8 +66,8 @@ def _structural_potential(price, atr, highs, theoretical_target, lookback=120):
     """Estimate upside to nearest confirmed overhead supply; not a probability forecast."""
     start = max(0, len(highs) - lookback)
     pivots = _pivot_highs(highs[start:], 3, 3)
-    resistance = next((level for _, level in reversed(pivots)
-                       if level > price + 0.5 * atr), None)
+    overhead = [level for _, level in pivots if level > price + 0.5 * atr]
+    resistance = min(overhead) if overhead else None
     if resistance is None:
         return theoretical_target, (theoretical_target / price - 1.0) * 100.0, "ATR_TP3_FALLBACK"
     target = min(theoretical_target, resistance - 0.25 * atr)
