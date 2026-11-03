@@ -174,11 +174,14 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
         swept=next((level for level in equal_lows if l[k] < level[1] and c[k] > level[1]),None)
         if swept is not None and k-last_sweep>=10:
             sweeps.append((k,swept[1])); last_sweep=k
-        if len(low_pivots)>=2:
+        # A divergence is a one-time event on the bar that confirms its
+        # second pivot. Do not re-arm the same pivot pair on every later bar:
+        # doing so continually resets its age and defeats the 60-bar expiry.
+        if len(low_pivots)>=2 and low_pivots[-1][0] + pivot_len == k:
             p1,v1=low_pivots[-2]; p2,v2=low_pivots[-1]
             if 5<=p2-p1<=60 and v2<v1 and rsi[p2] is not None and rsi[p1] is not None and rsi[p2]>rsi[p1]:
                 divergence_state=2 if mh[p2] is not None and mh[p1] is not None and mh[p2]>mh[p1] else 1
-                div_price=v2; div_swing=max(h[max(0,p2-50):p2+1]); div_index=p2
+                div_price=v2; div_swing=max(h[max(0,p2-50):p2+1]); div_index=k
                 rvz=(v[p2]/(_sma(v,20,p2) or v[p2])) if p2>=20 else 0
                 div_vol=rvz>=1; div_support=abs(v2-(e200[p2] or v2))<=2*(atrs[p2] or 0)
         if divergence_state and div_index is not None:
