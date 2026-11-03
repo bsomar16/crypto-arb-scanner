@@ -271,16 +271,18 @@ def _signal_message(r):
     reasons = ", ".join(r.get("reasons", [])[:5])
     bp = r.get("bullish_potential", {}) or {}
     cc = r.get("confidence_components", {}) or {}
-    is_abt = str(r.get("strategy", "")).upper() == "ABT"
+    strategy = str(r.get("strategy", "")).upper()
+    is_abt = strategy == "ABT"
+    is_sls = strategy == "SLS" or family.upper() == "SLS"
     if is_abt:
         tier = str(r.get("strategy_family", "ABT"))
         bp_score = float(r.get("confidence_score", r.get("score", 0)) or 0)
     else:
-        tier = bp.get("tier", "STANDARD")
-        bp_score = float(bp.get("score", 0) or 0)
+        tier = "SLS" if is_sls else bp.get("tier", "STANDARD")
+        bp_score = float(r.get("score", bp.get("score", 0)) or 0)
     action = str(r.get("signal_action", "BUY") or "BUY").upper()
-    header = "🟡 <b>EARLY ABT SETUP</b>" if action == "WATCH" else "🟢 <b>CONFIRMED BUY SIGNAL</b>"
-    action_line = "👀 <b>Action: WATCH</b> · Await ABT* / ABT confirmation" if action == "WATCH" else "🎯 <b>Action: BUY</b>"
+    header = "🟡 <b>EARLY ABT SETUP</b>" if action == "WATCH" else ("🟢 <b>SLS SPOT BUY SIGNAL</b>" if is_sls else "🟢 <b>CONFIRMED BUY SIGNAL</b>")
+    action_line = "👀 <b>Action: WATCH</b> · Await ABT* / ABT confirmation" if action == "WATCH" else ("🎯 <b>Action: SPOT BUY · Strategy: SLS</b>" if is_sls else "🎯 <b>Action: BUY</b>")
     cc = r.get("confidence_components", {}) or {}
     return [
         header,
@@ -292,6 +294,7 @@ def _signal_message(r):
         f"⏳ <b>TP1:</b> {fmt_price(r['t1'])}",
         f"⏳ <b>TP2:</b> {fmt_price(r['t2'])}",
         f"⏳ <b>TP3:</b> {fmt_price(r['t3'])}",
+        *([f"⏳ <b>TP4:</b> {fmt_price(r['t4'])}", f"⏳ <b>TP5:</b> {fmt_price(r['t5'])}"] if is_sls and r.get("t4") is not None and r.get("t5") is not None else []),
         f"📈 <b>Modelled potential:</b> +{float(r.get('potential_pct', 0.0)):.1f}% · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
         (f"🧠 ABT confidence: <b>{bp_score:.0f}/100</b> · Structure {float(cc.get('structure', 0)):.0f} · MTF {float(cc.get('mtf', 0)):.0f} · Vol {float(cc.get('volume', 0)):.0f} · Momentum {float(cc.get('momentum', 0)):.0f} · OB {float(cc.get('order_block', 0)):.0f} · Regime {float(cc.get('regime', 0)):.0f}"
          if is_abt else f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100"),

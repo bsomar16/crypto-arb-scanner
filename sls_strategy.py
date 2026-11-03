@@ -200,15 +200,17 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
 
         risk = price - stop
         ladder = [price + risk * r for r in (1.5, 2.5, 4, 6, 8)]
-        t1, t2, t3 = ladder[:3]
+        t1, t2, t3, t4, t5 = ladder
         potential = (t3 / price - 1) * 100
         return {
             "coin": str(coin).upper(), "interval": interval, "strategy": "SLS",
+            "signal_source": "SLS", "signal_engine": "Spot Long Signal Engine",
             "strategy_id": f"sls_{interval}", "strategy_family": "SLS",
             "trade_horizon": "Scalp" if interval in ("5m", "15m") else "Medium" if interval in ("1h", "4h") else "Long",
             "setup_type": "BREAKOUT" if breakout else "TREND_PULLBACK",
             "signal_action": "BUY", "candle_open_time": rows[-1]["t"],
-            "price": price, "entry": price, "stop": stop, "t1": t1, "t2": t2, "t3": t3, "target": t3,
+            "price": price, "entry": price, "stop": stop,
+            "t1": t1, "t2": t2, "t3": t3, "t4": t4, "t5": t5, "target": t3,
             "potential_pct": round(potential, 2), "risk_pct": round(risk_pct, 2),
             "rr": round(potential / risk_pct, 2) if risk_pct else 0,
             "atr": atr, "score": round(score, 1), "st": round(score, 1),
