@@ -159,7 +159,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
         if k>=1 and c[k-1]<o[k-1] and c[k]>o[k] and (atrs[k] or 0)>0:
             body=abs(c[k]-o[k])
             rv=v[k]/_sma(v,20,k) if (_sma(v,20,k) or 0)>0 else 0
-            prior_bos=any(x>=k-10 for x in bos_bars)
+            prior_bos=any(k-10<=x<=k for x in bos_bars)
             if body>=.8*atrs[k] and rv>=1 and (c[k]>h[k-1] or prior_bos) and k-last_ob>=3:
                 obs.append({"top":h[k-1],"bottom":l[k-1],"born":k}); last_ob=k
         obs=[z for z in obs if c[k]>=z["bottom"]][-5:]
