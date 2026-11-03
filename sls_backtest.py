@@ -64,6 +64,56 @@ def _candle_close_ms(open_ms, interval):
     return int(end.timestamp() * 1000)
 
 
+def _dataset_quality(data):
+    """Summarise per-symbol candle coverage and internal gaps."""
+    quality = {}
+    for symbol, by_interval in data.items():
+        quality[symbol] = {}
+        for interval, rows in by_interval.items():
+            missing = 0
+            gaps = []
+            if interval in INTERVAL_MS:
+                for previous, current in zip(rows, rows[1:]):
+                    expected = _candle_close_ms(previous["t"], interval)
+                    gap_count = 0
+                    while expected < current["t"]:
+                        gap_count += 1
+                        expected = _candle_close_ms(expected, interval)
+                    if gap_count:
+                        missing += gap_count
+                        if len(gaps) < 20:
+                            gaps.append({
+                                "after_open_ms": previous["t"],
+                                "before_open_ms": current["t"],
+                                "missing_candles": gap_count,
+                            })
+            observed = len(rows)
+            total_span = observed + missing
+            quality[symbol][interval] = {
+                "candles": observed,
+                "first_open_ms": rows[0]["t"] if rows else None,
+                "last_open_ms": rows[-1]["t"] if rows else None,
+                "internal_missing_candles": missing,
+                "coverage_pct": round(observed / total_span * 100, 3) if total_span else None,
+                "gaps_truncated": missing > sum(g["missing_candles"] for g in gaps),
+                "gaps": gaps,
+            }
+    btc = quality.get("BTC", {})
+    benchmark = {
+        interval: {
+            "candles": btc.get(interval, {}).get("candles", 0),
+            "available_for_primary_ema200": btc.get(interval, {}).get("candles", 0) >= 200,
+            "available_for_htf_ema50": btc.get(interval, {}).get("candles", 0) >= 50,
+        }
+        for interval in sls_strategy.INTERVALS
+    }
+    return {
+        "scope": "observed internal gaps only; leading/trailing coverage requires requested date bounds",
+        "by_symbol_interval": quality,
+        "btc_benchmark": benchmark,
+    }
+
+
 def _provider(data, asof_ms):
     def fetch(symbol, interval, limit=240):
         if interval not in INTERVAL_MS:
@@ -81,12 +131,21 @@ def _evaluate_outcome(signal, rows, index, horizon, fee_rate, slippage_rate):
     end = min(len(rows), index + 1 + max(1, horizon))
     future = rows[index + 1:end]
     if not future:
-        return {"outcome": "CENSORED", "bars": 0, "hits": hits, "net_return_pct": None}
+        return {"outcome": "CENSORED", "bars": 0, "hits": hits,
+                "execution_entry": None, "net_return_pct": None}
+    # A confirmed close-time signal cannot assume a fill at that same close.
+    # Model a market entry at the next candle open; signal stop/targets remain
+    # the alert's original absolute levels.
+    entry = float(future[0]["o"])
     exit_price = None
     outcome = None
     bars = 0
     for bars, candle in enumerate(future, 1):
         low, high = candle["l"], candle["h"]
+        if bars == 1 and entry <= stop:
+            # A gap through the stop is filled at the worse opening price.
+            outcome, exit_price = "STOP", entry
+            break
         # Conservative intrabar rule: stop wins if stop and any target touch
         # in the same candle because their order cannot be inferred from OHLC.
         if low <= stop:
@@ -111,6 +170,7 @@ def _evaluate_outcome(signal, rows, index, horizon, fee_rate, slippage_rate):
         effective_exit = exit_price * (1.0 - fee_rate - slippage_rate)
         net = (effective_exit / effective_entry - 1.0) * 100.0
     return {"outcome": outcome, "bars": bars, "hits": hits,
+            "execution_entry": round(entry, 10),
             "net_return_pct": None if net is None else round(net, 5)}
 
 
@@ -122,6 +182,10 @@ def _stats(records):
               for key in ("TP3", "STOP", "EXPIRED", "CENSORED")}
     denom = len(resolved)
     decisive = counts["TP3"] + counts["STOP"]
+    wins = [value for value in scored if value > 0]
+    losses = [value for value in scored if value < 0]
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
     return {
         "signals": n, **counts,
         "tp3_vs_stop_win_rate_pct": round(counts["TP3"] / decisive * 100, 2) if decisive else None,
@@ -131,6 +195,10 @@ def _stats(records):
         "tp3_hit_rate_pct": round(sum(r["hits"][2] for r in resolved) / denom * 100, 2) if denom else None,
         "resolved_net_return_avg_pct": round(sum(scored) / len(scored), 4) if scored else None,
         "resolved_net_return_sum_pct": round(sum(scored), 4) if scored else None,
+        "expectancy_per_resolved_signal_pct": round(sum(scored) / len(scored), 4) if scored else None,
+        "average_win_pct": round(sum(wins) / len(wins), 4) if wins else None,
+        "average_loss_pct": round(sum(losses) / len(losses), 4) if losses else None,
+        "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else (None if not gross_profit else "INF"),
         "resolved_samples": len(scored),
     }
 
@@ -141,8 +209,8 @@ def _global_temporal_split(records, train_fraction, horizons=None):
         return None, [], [], []
     timestamps = sorted({int(row["timestamp"]) for row in records})
     if len(timestamps) < 2:
-        # With no distinct boundary, every observation belongs to the OOS
-        # partition. Nothing is a training label, so nothing can be purged.
+        # No temporal boundary exists: keep the sample OOS and do not label
+        # it as purged training data.
         return timestamps[0], [], list(records), []
     cutoff_index = min(len(timestamps) - 1, max(1, math.ceil(len(timestamps) * train_fraction)))
     cutoff = timestamps[cutoff_index]
@@ -220,6 +288,9 @@ def run_replay(dataset, sensitivity="Balanced", fee_rate=0.001, slippage_rate=0.
         purged_by_interval[row["interval"]].append(row)
     report = {
         "method": "causal_asof_closed_candles_global_temporal_split_purged",
+        "signal_timing": "confirmed_closed_candle",
+        "execution_model": "next_candle_open_stop_gap_aware_stop_first_intrabar",
+        "dataset_quality": _dataset_quality(data),
         "sensitivity": sensitivity,
         "fees_per_side_pct": round(fee_rate * 100, 5),
         "slippage_per_side_pct": round(slippage_rate * 100, 5),
