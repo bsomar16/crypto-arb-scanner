@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+import sls_position_store
 from sls_position_store import advance_position, register_signal, active_keys
 
 
@@ -65,6 +67,24 @@ class SlsPositionStoreTests(unittest.TestCase):
         row={"t":2000,"h":target,"l":p["stop"]+1}
         self.assertEqual([e["event"] for e in advance_position(state,"ETH","1h",[row])],["TP1"])
         self.assertEqual(advance_position(state,"ETH","1h",[{"t":3000,"h":target,"l":p["stop"]+1}]),[])
+
+
+    def test_state_save_and_reload_round_trip(self):
+        state={}; register_signal(state,self.signal())
+        persisted={}
+        def fake_save(path,data):
+            self.assertEqual(path,"state/sls_positions.json")
+            persisted.update(data)
+        def fake_load(path,default):
+            self.assertEqual(path,"state/sls_positions.json")
+            return persisted
+        with patch.object(sls_position_store,"save_json",side_effect=fake_save), \
+             patch.object(sls_position_store,"load_json",side_effect=fake_load):
+            sls_position_store.save_state(state)
+            restored=sls_position_store.load_state()
+        self.assertEqual(restored["ETH:1h"]["status"],"open")
+        self.assertEqual(restored["ETH:1h"]["last_bar_open"],1000)
+        self.assertEqual(restored["ETH:1h"]["signal_source"],"SLS")
 
 
 if __name__=="__main__":
