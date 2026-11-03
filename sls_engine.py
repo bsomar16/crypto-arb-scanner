@@ -35,6 +35,29 @@ def _delayed_highest(values, length, delay, index):
     return max(values[start:end + 1])
 
 
+def _chronological_bos(opens, closes, confirmed_highs, pivot_len):
+    """Return bullish BOS bars using only pivots confirmed by each bar.
+
+    A pivot's price is not available to Pine until its right-side confirmation
+    bars have elapsed. Keeping that timing explicit prevents historical
+    breakout detection from reading a future-confirmed pivot.
+    """
+    known = []
+    events = []
+    last_bos = -10_000
+    by_confirmation = {}
+    for pivot_index, price in confirmed_highs:
+        by_confirmation.setdefault(pivot_index + pivot_len, []).append((pivot_index, price))
+    for bar in range(len(closes)):
+        known.extend(by_confirmation.get(bar, ()))
+        if not known:
+            continue
+        if closes[bar] > known[-1][1] and closes[bar] > opens[bar] and bar - last_bos >= 5:
+            events.append(bar)
+            last_bos = bar
+    return events
+
+
 def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
                     sensitivity="Balanced", min_score=None):
     """Evaluate every closed candle in order; return only a newly triggered BUY.
@@ -117,11 +140,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     swing_len=50 if big else 30
     res20=max(h[i-20:i]) if i>=20 else None
     discount=bool(last_low is not None and last_high is not None and price<(last_low+last_high)/2)
-    bos=False; bos_bars=[]
-    for k in range(max(1,i-10),i+1):
-        prior_highs=[x[1] for x in highs if x[0] < k]
-        if prior_highs and c[k] > max(prior_highs):
-            if c[k]>o[k] and (not bos_bars or k-bos_bars[-1]>=5): bos_bars.append(k)
+    bos_bars=_chronological_bos(o,c,highs,pivot_len)
     bos=bool(bos_bars and i-bos_bars[-1]<=10)
 
     # Stateful OB/FVG zones rebuilt chronologically from closed candles.
