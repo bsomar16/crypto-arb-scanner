@@ -61,6 +61,7 @@ def _download_pair(symbol, interval, start_ms, end_ms, fetch_json=_http_json, pa
     """Fetch [start_ms, end_ms) with Binance's 1000-row pagination."""
     rows = []
     cursor = start_ms
+    now_ms = int(time.time() * 1000)
     while cursor < end_ms:
         query = urlencode({
             "symbol": symbol, "interval": interval, "startTime": cursor,
@@ -71,7 +72,10 @@ def _download_pair(symbol, interval, start_ms, end_ms, fetch_json=_http_json, pa
             raise RuntimeError(f"Unexpected Binance kline response for {symbol} {interval}: {payload}")
         if not payload:
             break
-        batch = [_parse_kline(row) for row in payload if start_ms <= int(row[0]) < end_ms]
+        # Binance includes the currently forming candle; exclude it so the
+        # persisted replay dataset is closed-candle-only.
+        batch = [_parse_kline(row) for row in payload
+                 if start_ms <= int(row[0]) < end_ms and int(row[6]) < now_ms]
         rows.extend(batch)
         last_open = int(payload[-1][0])
         next_cursor = last_open + 1
@@ -114,7 +118,9 @@ def download_dataset(symbols, intervals, start_ms, end_ms, output,
             if interval not in INTERVALS:
                 raise ValueError(f"Unsupported interval: {interval}")
             existing = by_interval.setdefault(interval, [])
-            existing_by_time = {int(row["t"]): row for row in existing}
+            now_ms = int(time.time() * 1000)
+            existing_by_time = {int(row["t"]): row for row in existing
+                                if int(row["t"]) < end_ms}
             # Resume from the last saved open time; overlapping one candle is
             # harmless and protects against an interrupted final write.
             cursor = max(start_ms, max(existing_by_time, default=start_ms - 1))
