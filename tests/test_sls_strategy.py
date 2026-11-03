@@ -21,6 +21,25 @@ class SlsStrategyTests(unittest.TestCase):
         pivots = sls_strategy._pivot_lows(values, left=2, right=2)
         self.assertEqual([p[0] for p in pivots], [2, 8])
 
+    def test_pivot_highs_are_confirmed(self):
+        values = [1, 2, 3, 2, 1, 2, 4, 2, 1]
+        self.assertEqual(sls_strategy._pivot_highs(values, 2, 2), [(2, 3), (6, 4)])
+
+    def test_structural_potential_uses_nearest_confirmed_resistance(self):
+        highs = [10, 11, 12, 11, 10, 11, 13, 11, 10, 12, 14, 12, 11]
+        target, pct, reference = sls_strategy._structural_potential(10.5, 1.0, highs, 20.0)
+        self.assertEqual(reference, "CONFIRMED_SWING_HIGH")
+        self.assertAlmostEqual(target, 12.75)
+        self.assertAlmostEqual(pct, (12.75 / 10.5 - 1) * 100)
+
+    def test_structural_potential_falls_back_to_atr_target(self):
+        target, pct, reference = sls_strategy._structural_potential(
+            100, 2, [99, 100, 101, 100, 99], 112
+        )
+        self.assertEqual(reference, "ATR_TP3_FALLBACK")
+        self.assertEqual(target, 112)
+        self.assertAlmostEqual(pct, 12.0)
+
 
 
     def test_htf_trend_state_uses_pine_ema_series_with_50_candles(self):

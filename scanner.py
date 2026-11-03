@@ -295,7 +295,9 @@ def _signal_message(r):
         f"⏳ <b>TP2:</b> {fmt_price(r['t2'])}",
         f"⏳ <b>TP3:</b> {fmt_price(r['t3'])}",
         *([f"⏳ <b>TP4:</b> {fmt_price(r['t4'])}", f"⏳ <b>TP5:</b> {fmt_price(r['t5'])}"] if is_sls and r.get("t4") is not None and r.get("t5") is not None else []),
-        f"📈 <b>Modelled potential:</b> +{float(r.get('potential_pct', 0.0)):.1f}% · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
+        f"📈 <b>Modelled potential:</b> +{float(r.get('modelled_potential_pct', r.get('potential_pct', 0.0))):.1f}% · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
+        (f"🎯 <b>TP3 theoretical upside:</b> +{float(r.get('theoretical_tp3_potential_pct', r.get('potential_pct', 0.0))):.1f}%"
+         if is_sls and r.get("modelled_potential_pct") is not None else ""),
         (f"🧠 ABT confidence: <b>{bp_score:.0f}/100</b> · Structure {float(cc.get('structure', 0)):.0f} · MTF {float(cc.get('mtf', 0)):.0f} · Vol {float(cc.get('volume', 0)):.0f} · Momentum {float(cc.get('momentum', 0)):.0f} · OB {float(cc.get('order_block', 0)):.0f} · Regime {float(cc.get('regime', 0)):.0f}"
          if is_abt else f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100"),
 
