@@ -62,7 +62,7 @@ The replay uses one global chronological split across symbols and timeframes. Si
 
 - Signals are evaluated only after the signal candle has closed.
 - Historical execution is modelled at the next candle open, not the signal candle close.
-- A gap through the stop is filled at the worse opening price.
+- If the next open is already at/beyond the stop or first target, the setup is marked `INVALIDATED` and excluded from trade-return and win-rate denominators; it is not counted as a fill.
 - If a stop and target are both touched inside one OHLC candle, the stop is assumed to occur first.
 - TP1/TP2/TP3 hit rates are reach statistics. The current replay does not model partial exits or a portfolio allocation ladder.
 - Expired trades are marked using the final close in their horizon. Insufficient future history is censored and excluded from resolved outcome denominators.
