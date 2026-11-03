@@ -134,12 +134,12 @@ class SlsBacktestTests(unittest.TestCase):
         signal = {"entry": 100, "stop": 95, "t1": 107.5, "t2": 112.5, "t3": 120}
         rows = [
             {"t": 0, "o": 100, "h": 100, "l": 100, "c": 100},
-            {"t": 1, "o": 110, "h": 121, "l": 109, "c": 120},
+            {"t": 1, "o": 105, "h": 121, "l": 104, "c": 120},
         ]
         result = sls_backtest._evaluate_outcome(signal, rows, 0, 1, 0, 0)
-        self.assertEqual(result["execution_entry"], 110)
+        self.assertEqual(result["execution_entry"], 105)
         self.assertEqual(result["outcome"], "TP3")
-        self.assertAlmostEqual(result["net_return_pct"], (120 / 110 - 1) * 100, places=4)
+        self.assertAlmostEqual(result["net_return_pct"], (120 / 105 - 1) * 100, places=4)
 
     def test_gap_through_stop_is_filled_at_worse_next_open(self):
         signal = {"entry": 100, "stop": 95, "t1": 107.5, "t2": 112.5, "t3": 120}
