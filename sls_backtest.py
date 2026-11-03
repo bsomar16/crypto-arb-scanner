@@ -108,8 +108,11 @@ def _stats(records):
     counts = {key: sum(r["outcome"] == key for r in records)
               for key in ("TP3", "STOP", "EXPIRED", "CENSORED")}
     denom = len(resolved)
+    decisive = counts["TP3"] + counts["STOP"]
     return {
         "signals": n, **counts,
+        "tp3_vs_stop_win_rate_pct": round(counts["TP3"] / decisive * 100, 2) if decisive else None,
+        "stop_rate_pct": round(counts["STOP"] / decisive * 100, 2) if decisive else None,
         "tp1_hit_rate_pct": round(sum(r["hits"][0] for r in resolved) / denom * 100, 2) if denom else None,
         "tp2_hit_rate_pct": round(sum(r["hits"][1] for r in resolved) / denom * 100, 2) if denom else None,
         "tp3_hit_rate_pct": round(sum(r["hits"][2] for r in resolved) / denom * 100, 2) if denom else None,
