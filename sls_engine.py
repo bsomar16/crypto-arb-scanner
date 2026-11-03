@@ -35,6 +35,11 @@ def _delayed_highest(values, length, delay, index):
     return max(values[start:end + 1])
 
 
+def _is_new_confirmed_pivot(pivot_index, pivot_len, bar_index):
+    """True only on the bar when a right-confirmed pivot becomes available."""
+    return pivot_index + pivot_len == bar_index
+
+
 def _chronological_bos(opens, closes, confirmed_highs, pivot_len):
     """Return bullish BOS bars using only pivots confirmed by each bar.
 
@@ -166,7 +171,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
         fvgs=[z for z in fvgs if c[k]>=z["bottom"]][-4:]
         # Confirmed SSL levels: 0.35 ATR proximity, five retained, 50-bar expiry.
         # Pair consecutive confirmed pivot lows; compare pivot prices, not later candle lows.
-        if len(low_pivots) >= 2 and low_pivots[-1][0] + pivot_len == k:
+        if len(low_pivots) >= 2 and _is_new_confirmed_pivot(low_pivots[-1][0], pivot_len, k):
             (p1,v1),(p2,v2)=low_pivots[-2],low_pivots[-1]
             if p2-p1 <= 50 and abs(v2-v1) <= 0.35*(atrs[k] or 0):
                 equal_lows.append((p2,(v1+v2)/2.0))
