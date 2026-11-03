@@ -71,6 +71,38 @@ def _candle_close_ms(open_ms, interval):
     return open_ms + units[interval]
 
 
+def _next_candle_open_ms(open_ms, interval):
+    """Return the next expected Binance candle open, including calendar months."""
+    if interval == "1M":
+        start = dt.datetime.fromtimestamp(open_ms / 1000, tz=dt.timezone.utc)
+        if start.month == 12:
+            next_open = start.replace(year=start.year + 1, month=1, day=1)
+        else:
+            next_open = start.replace(month=start.month + 1, day=1)
+        return int(next_open.timestamp() * 1000)
+    units = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000,
+             "4h": 14_400_000, "1d": 86_400_000, "1w": 604_800_000}
+    return open_ms + units[interval]
+
+
+def _missing_ranges(start_ms, end_ms, existing_times, interval):
+    """Find leading, interior and trailing gaps in a saved candle range."""
+    times = sorted({int(value) for value in existing_times
+                    if start_ms <= int(value) < end_ms})
+    if not times:
+        return [(start_ms, end_ms)] if start_ms < end_ms else []
+    gaps = []
+    if start_ms < times[0]:
+        gaps.append((start_ms, times[0]))
+    for previous, current in zip(times, times[1:]):
+        expected = _next_candle_open_ms(previous, interval)
+        if expected < current:
+            gaps.append((expected, current))
+    tail = _next_candle_open_ms(times[-1], interval)
+    if tail < end_ms:
+        gaps.append((tail, end_ms))
+    return gaps
+
 def _download_pair(symbol, interval, start_ms, end_ms, fetch_json=_http_json, pause=0.05):
     """Fetch [start_ms, end_ms) with Binance's 1000-row pagination."""
     rows = []
@@ -138,13 +170,15 @@ def download_dataset(symbols, intervals, start_ms, end_ms, output,
                 if start_ms <= int(row["t"]) < end_ms
                 and _candle_close_ms(int(row["t"]), interval) <= now_ms
             }
-            # Resume from the last saved open time; overlapping one candle is
-            # harmless and protects against an interrupted final write.
-            cursor = max(start_ms, max(existing_by_time, default=start_ms - 1))
-            fetch_start = max(start_ms, cursor)
-            fetched = _download_pair(pair, interval, fetch_start, end_ms, fetch_json, pause)
-            for row in fetched:
-                existing_by_time[row["t"]] = row
+            # Backfill every missing segment, not just the tail. A file can
+            # have an apparently recent last candle while containing older gaps.
+            gaps = _missing_ranges(start_ms, end_ms, existing_by_time, interval)
+            for gap_start, gap_end in gaps:
+                fetched = _download_pair(
+                    pair, interval, gap_start, gap_end, fetch_json, pause
+                )
+                for row in fetched:
+                    existing_by_time[row["t"]] = row
             by_interval[interval] = [existing_by_time[t] for t in sorted(existing_by_time)
                                      if start_ms <= t < end_ms]
             path.parent.mkdir(parents=True, exist_ok=True)
