@@ -21,6 +21,29 @@ class SlsStrategyTests(unittest.TestCase):
         pivots = sls_strategy._pivot_lows(values, left=2, right=2)
         self.assertEqual([p[0] for p in pivots], [2, 8])
 
+
+    def test_live_candle_parser_keeps_latest_closed_row_and_drops_forming_row(self):
+        raw = [
+            [0, "1", "2", "0.5", "1.5", "10", 99, "15"],
+            [100, "1.5", "2", "1", "1.8", "12", 199, "20"],
+        ]
+        rows = sls_strategy._parse_closed_candles(raw, now_ms=150)
+        self.assertEqual([row["t"] for row in rows], [0])
+        self.assertEqual(rows[0]["q"], 15.0)
+
+    def test_wilder_atr_uses_rma_not_rolling_sma(self):
+        highs = [11, 12, 12, 13]
+        lows = [9, 10, 9, 11]
+        closes = [10, 11, 10, 12]
+        self.assertAlmostEqual(
+            sls_strategy._wilder_atr(highs, lows, closes, period=2), 2.75
+        )
+
+    def test_wilder_atr_requires_seed_history(self):
+        self.assertIsNone(
+            sls_strategy._wilder_atr([2, 3], [0, 1], [1, 2], period=2)
+        )
+
     def test_unknown_timeframe_fails_closed_without_fetch(self):
         with patch.object(sls_strategy, "_candles") as fetch:
             self.assertIsNone(sls_strategy.evaluate_sls_coin("ETH", "2h", {}))
