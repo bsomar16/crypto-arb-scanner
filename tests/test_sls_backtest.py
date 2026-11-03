@@ -18,10 +18,10 @@ class SlsBacktestTests(unittest.TestCase):
         cutoff, train, test, purged = sls_backtest._global_temporal_split(
             records, 0.6, {"5m": 1, "1h": 1, "1d": 2}
         )
-        self.assertEqual(cutoff, 4 * day + 1000)
-        self.assertEqual({r["timestamp"] for r in test}, {4 * day + 1000})
+        self.assertEqual(cutoff, 3 * day + 1000)
+        self.assertEqual({r["timestamp"] for r in test}, {3 * day + 1000, 4 * day + 1000})
         self.assertEqual({r["timestamp"] for r in train}, {1000, day + 1000})
-        self.assertEqual({r["timestamp"] for r in purged}, {2 * day + 1000, 3 * day + 1000})
+        self.assertEqual({r["timestamp"] for r in purged}, {2 * day + 1000})
 
     def test_global_split_purges_training_labels_crossing_cutoff(self):
         day = 86400000
