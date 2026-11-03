@@ -15,7 +15,7 @@ The scanner now routes SLS evaluation through `sls_engine.py`, using the Pine-co
 - The original Pine source file is not committed in this repository, so the port is based on the supplied rule specification. Input defaults not included in that specification (notably `sepReq`, exact pivot selection details and any Pine-specific NA/tie semantics) must be checked against the original script.
 - Added `sls_position.py` as a deterministic long-only lifecycle component: entry lock, stop-first intrabar ordering, independent TP1–TP5 events, all-target close, and timeout. It is not yet persisted or wired into the live scanner across process restarts or historical batches.
 - The C8 RR confluence interpretation and C7 resistance-room calculation need fixture comparison against Pine output.
-- The strategy needs executable CI evidence and exported TradingView fixtures before parity can be claimed.
+- CI compilation and unit tests now pass on the current PR head; exported TradingView fixtures are still required before parity can be claimed.
 - No win-rate, profitability, or expected-return claim is made.
 
 ## Required parity acceptance
@@ -29,6 +29,6 @@ The scanner now routes SLS evaluation through `sls_engine.py`, using the Pine-co
 - `sls_position_store.py` persists SLS-only positions in `state/sls_positions.json`.
 - `scanner.py` advances each open position using newly closed candles, records TP1-TP5, gives STOP priority, enforces the configured bar lifetime, and suppresses repeated BUY candidates for the same coin/timeframe while the position remains open.
 - State is research/outcome tracking only; no order placement or exchange execution is performed.
-- The deployment must retain the `state/` directory between scheduled runs. If the workflow does not persist this file (for example via a durable volume or state artifact), lifecycle state and the lock reset on the next run.
+- The repository's scheduled scanner workflow commits bot state with `git add -A` and pushes it to `main`; its pre-scan restore explicitly names only the three legacy position files and does not overwrite `state/sls_positions.json`. This is the intended cross-run persistence path when running from `main`.
 - TP/STOP events are logged and persisted; this integration does not send exit Telegram alerts.
-- Tests cover registration/locking, stop priority, target progression, and duplicate candle replay. Execution is pending CI.
+- Tests cover registration/locking, stop priority, target progression, and duplicate candle replay. The latest SLS-specific and general test workflows have completed successfully.
