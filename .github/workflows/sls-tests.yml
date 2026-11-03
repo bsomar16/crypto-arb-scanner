@@ -1,0 +1,27 @@
+name: SLS Python tests
+
+on:
+  pull_request:
+    paths:
+      - "sls_*.py"
+      - "tests/test_sls_*.py"
+      - ".github/workflows/sls-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "sls_*.py"
+      - "tests/test_sls_*.py"
+      - ".github/workflows/sls-tests.yml"
+
+jobs:
+  sls-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile SLS modules
+        run: python -m py_compile sls_engine.py sls_strategy.py sls_pine_math.py sls_position.py
+      - name: Run SLS unit tests
+        run: python -m unittest discover -s tests -p "test_sls_*.py" -v
