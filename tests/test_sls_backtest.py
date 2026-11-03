@@ -6,33 +6,38 @@ import sls_backtest
 class SlsBacktestTests(unittest.TestCase):
 
     def test_global_split_keeps_same_timestamp_in_same_partition(self):
+        day = 86400000
         records = [
             {"coin": "ETH", "interval": "5m", "timestamp": 1000, "outcome": "TP3", "hits": [1, 1, 1], "net_return_pct": 1},
             {"coin": "BTC", "interval": "1h", "timestamp": 1000, "outcome": "STOP", "hits": [0, 0, 0], "net_return_pct": -1},
-            {"coin": "ETH", "interval": "5m", "timestamp": 2000, "outcome": "TP3", "hits": [1, 1, 1], "net_return_pct": 1},
-            {"coin": "BTC", "interval": "1h", "timestamp": 3000, "outcome": "STOP", "hits": [0, 0, 0], "net_return_pct": -1},
-            {"coin": "ETH", "interval": "5m", "timestamp": 4000, "outcome": "TP3", "hits": [1, 1, 1], "net_return_pct": 1},
+            {"coin": "ETH", "interval": "5m", "timestamp": day + 1000, "outcome": "TP3", "hits": [1, 1, 1], "net_return_pct": 1},
+            {"coin": "BTC", "interval": "1d", "timestamp": 2 * day + 1000, "outcome": "STOP", "hits": [0, 0, 0], "net_return_pct": -1},
+            {"coin": "ETH", "interval": "5m", "timestamp": 3 * day + 1000, "outcome": "TP3", "hits": [1, 1, 1], "net_return_pct": 1},
+            {"coin": "ETH", "interval": "5m", "timestamp": 4 * day + 1000, "outcome": "TP3", "hits": [1, 1, 1], "net_return_pct": 1},
         ]
-        cutoff, train, test, purged = sls_backtest._global_temporal_split(records, 0.6, {"5m": 1, "1h": 1})
-        self.assertEqual(cutoff, 3000)
-        self.assertEqual({r["timestamp"] for r in test}, {3000, 4000})
-        self.assertEqual({r["timestamp"] for r in train}, {1000})
-        self.assertEqual({r["timestamp"] for r in purged}, {2000})
+        cutoff, train, test, purged = sls_backtest._global_temporal_split(
+            records, 0.6, {"5m": 1, "1h": 1, "1d": 2}
+        )
+        self.assertEqual(cutoff, 4 * day + 1000)
+        self.assertEqual({r["timestamp"] for r in test}, {4 * day + 1000})
+        self.assertEqual({r["timestamp"] for r in train}, {1000, day + 1000})
+        self.assertEqual({r["timestamp"] for r in purged}, {2 * day + 1000, 3 * day + 1000})
 
     def test_global_split_purges_training_labels_crossing_cutoff(self):
+        day = 86400000
         records = [
             {"interval": "1d", "timestamp": 0},
-            {"interval": "1d", "timestamp": 86400000},
-            {"interval": "1d", "timestamp": 2 * 86400000},
-            {"interval": "1d", "timestamp": 3 * 86400000},
+            {"interval": "1d", "timestamp": day},
+            {"interval": "1d", "timestamp": 2 * day},
+            {"interval": "1d", "timestamp": 3 * day},
         ]
         cutoff, train, test, purged = sls_backtest._global_temporal_split(
             records, 0.5, {"1d": 2}
         )
-        self.assertEqual(cutoff, 2 * 86400000)
-        self.assertEqual([r["timestamp"] for r in train], [])
-        self.assertEqual([r["timestamp"] for r in purged], [0, 86400000])
-        self.assertEqual([r["timestamp"] for r in test], [2 * 86400000, 3 * 86400000])
+        self.assertEqual(cutoff, 2 * day)
+        self.assertEqual([r["timestamp"] for r in train], [0])
+        self.assertEqual([r["timestamp"] for r in purged], [day])
+        self.assertEqual([r["timestamp"] for r in test], [2 * day, 3 * day])
 
     def test_provider_exposes_only_fully_closed_candles(self):
         dataset = {"candles": {"ETH": {"5m": [
