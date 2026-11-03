@@ -92,7 +92,7 @@ def _asof_closed(rows, primary_close_ms, interval):
             if _interval_close_ms(int(row["t"]), interval) <= primary_close_ms]
 
 
-def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=None):
+def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=None, error_logger=None):
     """Evaluate SLS on closed Binance Spot candles; emits SLS-attributed BUY only."""
     if interval not in INTERVALS:
         return None
@@ -123,7 +123,7 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
         # Pine buyEvent is a rising edge, not a persistent qualifying state.
         # Compare against the prior closed bar with historically available
         # HTF and BTC context only.
-        if len(rows) >= 206:
+        if len(rows) >= 2:
             prev_close = _interval_close_ms(int(rows[-2]["t"]), interval)
             prev_htf = _asof_closed(raw_htf, prev_close, htf) if htf else None
             prev_btc = _asof_closed(raw_btc, prev_close, benchmark_interval)
@@ -153,6 +153,13 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
         result["mtf_1h"] = result["mtf_1d"] = result["mtf_1w"] = "N/A"
         result["estimated_hold_min_hours"] = result["estimated_hold_max_hours"] = None
         return result
-    except Exception:
-        # Isolate SLS failures; existing strategy evaluation must continue.
+    except Exception as exc:
+        # Isolate SLS failures; make evaluation faults observable without
+        # allowing a single symbol/timeframe to stop the broader scan.
+        if error_logger is not None:
+            try:
+                detail = str(exc).replace("\\n", " ")[:240]
+                error_logger(f"evaluation failed for {str(coin).upper()} {interval}: {type(exc).__name__}: {detail}")
+            except Exception:
+                pass
         return None
