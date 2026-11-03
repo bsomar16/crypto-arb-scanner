@@ -39,6 +39,17 @@ class SlsBacktestTests(unittest.TestCase):
         self.assertEqual([r["timestamp"] for r in purged], [day])
         self.assertEqual([r["timestamp"] for r in test], [2 * day, 3 * day])
 
+    def test_single_timestamp_is_oos_without_false_purging(self):
+        records = [
+            {"interval": "5m", "timestamp": 123456},
+            {"interval": "1h", "timestamp": 123456},
+        ]
+        cutoff, train, test, purged = sls_backtest._global_temporal_split(records, 0.7)
+        self.assertEqual(cutoff, 123456)
+        self.assertEqual(train, [])
+        self.assertEqual(test, records)
+        self.assertEqual(purged, [])
+
     def test_provider_exposes_only_fully_closed_candles(self):
         dataset = {"candles": {"ETH": {"5m": [
             {"t": i * 300000, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "q": 1}
