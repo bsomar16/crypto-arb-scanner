@@ -50,5 +50,13 @@ class SlsStrategyTests(unittest.TestCase):
             self.assertIsNone(sls_strategy.evaluate_sls_coin("ETH", "1w", {"sls_min_score": 0}))
 
 
+    def test_ema200_state_requires_200_closed_candles(self):
+        rows = [{"t": i, "o": 100 + i, "h": 101 + i, "l": 99 + i,
+                 "c": 100 + i, "v": 1000, "q": 100000}
+                for i in range(200)]
+        self.assertIsNone(sls_strategy._state(rows[:199]))
+        self.assertIsNotNone(sls_strategy._state(rows))
+
+
 if __name__ == "__main__":
     unittest.main()
