@@ -45,7 +45,7 @@ class SlsScannerIntegrationTests(unittest.TestCase):
                  "c": 101, "v": 1000, "q": 101000} for i in range(206)]
         htf = [{"t": i * 3_600_000, "o": 100, "h": 102, "l": 99,
                 "c": 101, "v": 1000, "q": 101000} for i in range(260)]
-        signal = {"strategy": "SLS", "signal_action": "BUY", "entry": 101,
+        signal = {"strategy": "SLS", "signal_source": "SLS", "signal_engine": "Spot Long Signal Engine", "signal_action": "BUY", "entry": 101,
                   "t3": 105, "score": 90, "sls_threshold": 86,
                   "sls_regime": "R_BULL", "sls_benchmark": "B_SUP",
                   "sls_components": {"c5": 4}, "sls_gates": {},
