@@ -118,9 +118,8 @@ def download_dataset(symbols, intervals, start_ms, end_ms, output,
             if interval not in INTERVALS:
                 raise ValueError(f"Unsupported interval: {interval}")
             existing = by_interval.setdefault(interval, [])
-            now_ms = int(time.time() * 1000)
             existing_by_time = {int(row["t"]): row for row in existing
-                                if int(row["t"]) < end_ms}
+                                if start_ms <= int(row["t"]) < end_ms}
             # Resume from the last saved open time; overlapping one candle is
             # harmless and protects against an interrupted final write.
             cursor = max(start_ms, max(existing_by_time, default=start_ms - 1))
