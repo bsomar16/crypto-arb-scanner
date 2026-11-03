@@ -2,6 +2,7 @@
 from threading import RLock
 import time
 from sls_pine_math import pine_atr, pine_ema, pine_macd, pine_rsi
+from sls_engine import evaluate_series
 from botutil import http_json
 
 INTERVALS = ("5m", "15m", "1h", "4h", "1d", "1w")
@@ -63,138 +64,102 @@ def _state(rows, min_history=200):
     if not rows or len(rows) < min_history:
         return None
     close = [x["c"] for x in rows]
-    e20, e50, e200 = pine_ema(close, 20), pine_ema(close, 50), pine_ema(close, 200)
+    e20, e50 = pine_ema(close, 20), pine_ema(close, 50)
+    # Do not expose EMA200 as a usable HTF feature before 200 closed candles.
+    e200 = pine_ema(close, 200) if len(close) >= 200 else [None] * len(close)
     macd, sig, hist = pine_macd(close, 12, 26, 9)
     rsi = pine_rsi(close, 14)
-    if any(x is None for x in (e20[-1], e50[-1], e200[-1], macd[-1], sig[-1], hist[-1], rsi[-1])):
+    if any(x is None for x in (e20[-1], e50[-1], macd[-1], sig[-1], hist[-1], rsi[-1])):
         return None
-    return {"close": close[-1], "closes": close, "e20": e20, "e50": e50, "e200": e200,
+    return {"close": close[-1], "closes": close, "e20": e20, "e50": e50,
+            "e200": e200 if len(close) >= 200 else None,
             "macd": macd, "sig": sig, "hist": hist, "rsi": rsi[-1], "rsi_series": rsi}
 
 
-def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=None):
-    """Return a scanner-compatible BUY signal or None; no short-side path exists."""
+def _interval_close_ms(open_ms, interval):
+    if interval == "1M":
+        import datetime as dt
+        start = dt.datetime.fromtimestamp(open_ms / 1000, tz=dt.timezone.utc)
+        end = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(month=start.month + 1, day=1)
+        return int(end.timestamp() * 1000)
+    units = {"5m":300000,"15m":900000,"1h":3600000,"4h":14400000,"1d":86400000,"1w":604800000}
+    return open_ms + units[interval]
+
+
+def _asof_closed(rows, primary_close_ms, interval):
+    """Only expose HTF bars that had fully closed by the primary close."""
+    return [row for row in (rows or [])
+            if _interval_close_ms(int(row["t"]), interval) <= primary_close_ms]
+
+
+def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=None, error_logger=None):
+    """Evaluate SLS on closed Binance Spot candles; emits SLS-attributed BUY only."""
     if interval not in INTERVALS:
         return None
     cfg = cfg or {}
     try:
         fetch = candle_provider or _candles
-        rows = fetch(str(coin).upper(), interval)
-        s = _state(rows)
-        if not s:
+        symbol = str(coin).upper()
+        rows = fetch(symbol, interval)
+        if not rows or len(rows) < 205:
             return None
-        close, high, low = s["closes"], [x["h"] for x in rows], [x["l"] for x in rows]
-        opn, vol, qvol = [x["o"] for x in rows], [x["v"] for x in rows], [x["q"] for x in rows]
-        price = close[-1]
-        atr_value = _wilder_atr(high, low, close)\n        atr = float(atr_value) if atr_value is not None else 0.0
-        if atr <= 0 or price <= 0:
-            return None
-
-        # C1: EMA alignment, price position, slope and RSI (20 points).
-        c1 = (8 if s["e20"][-1] > s["e50"][-1] > s["e200"][-1] else 0)
-        c1 += 5 if price > s["e20"][-1] > s["e50"][-1] else 0
-        c1 += 4 if s["e20"][-1] > s["e20"][-4] else 0
-        c1 += 3 if 48 <= s["rsi"] <= 68 else 1 if 42 <= s["rsi"] < 48 else 0
-
-        # C2: previous closed HTF candle and BTC benchmark (15 points).
+        primary_close = _interval_close_ms(int(rows[-1]["t"]), interval)
         htf = HTF_MAP[interval]
-        htf_ok, htf_state = interval == "1w", "SKIPPED" if interval == "1w" else "UNAVAILABLE"
+        htf_rows = None
         if htf:
-            hs = _state(fetch(str(coin).upper(), htf, 220), min_history=50)
-            if hs:
-                htf_ok = hs["close"] > hs["e20"][-1] > hs["e50"][-1]
-                htf_state = "BULLISH" if htf_ok else "NOT_BULLISH"
-        bs = _state(fetch("BTC", interval, 220), min_history=50)
-        btc_ok = bool(bs and bs["close"] > bs["e20"][-1] > bs["e50"][-1])
-        c2 = (8 if htf_ok else 0) + (7 if btc_ok else 0)
-
-        # C3: MACD, histogram slope and price ROC (15 points).
-        c3 = (5 if s["macd"][-1] > s["sig"][-1] else 0)
-        c3 += 4 if s["hist"][-1] > s["hist"][-2] else 0
-        c3 += 3 if close[-1] > close[-11] else 0
-        c3 += 3 if close[-1] > close[-4] else 0
-
-        # C4: relative volume, bullish candle body and volume pressure (15).
-        base = sum(vol[-22:-2]) / 20
-        vol_x = (sum(vol[-2:]) / 2) / base if base > 0 else 0
-        body = abs(close[-1] - opn[-1]) / max(high[-1] - low[-1], 1e-12)
-        green = close[-1] > opn[-1]
-        c4 = min(7, vol_x * 3.5) + (4 if green and body >= .45 else 0)
-        c4 += 4 if close[-1] > close[-2] and vol[-1] >= vol[-2] else 0
-        c4 = min(15, c4)
-
-        # C5: confirmed structure proxies: breakout, higher lows, discount, sweep.
-        prior_high = max(high[-21:-1])
-        breakout = price > prior_high
-        pivots = _pivot_lows(low)
-        higher_lows = len(pivots) >= 2 and pivots[-1][1] > pivots[-2][1]
-        discount = price <= s["e20"][-1] * 1.015
-        prior_low = min(low[-10:-1])
-        sweep = low[-1] < prior_low and price > prior_low
-        c5 = (5 if breakout else 0) + (4 if higher_lows else 0) + (3 if discount else 0) + (3 if sweep else 0)
-
-        # C6: bullish RSI divergence from confirmed swing lows (10).
-        rsi_values = _rsi_series(close, 14)
-        lp = _pivot_lows(low)
-        divergence = (
-            len(lp) >= 2
-            and lp[-1][1] < lp[-2][1]
-            and rsi_values[lp[-1][0]] > rsi_values[lp[-2][0]] + 2
-        )
-        c6 = 10 if divergence else 0
-
-        # C7: extension guard, ATR stop and upside room (10).
-        extension = (price - s["e20"][-1]) / atr
-        extension_ok = extension <= 2.5
-        stop = price - 1.5 * atr
-        risk_pct = (price - stop) / price * 100
-        room_pct = (max(prior_high, price + 3 * atr) / price - 1) * 100
-        c7 = (4 if extension_ok else 0) + (3 if risk_pct <= 8 else 0) + (3 if room_pct >= 3 * risk_pct else 0)
-
-        # C8: independent confluence (10).
-        c8 = sum((2.5 if flag else 0) for flag in (breakout, higher_lows, htf_ok, vol_x >= 1.2))
-        score = min(100.0, c1+c2+c3+c4+c5+c6+c7+c8)
+            raw_htf = fetch(symbol, htf, 240)
+            htf_rows = _asof_closed(raw_htf, primary_close, htf)
+        # Pine benchmark is evaluated on the same HTF context as the symbol.
+        benchmark_interval = htf or interval
+        raw_btc = fetch("BTC", benchmark_interval, 260)
+        btc_rows = _asof_closed(raw_btc, primary_close, benchmark_interval)
         mode = str(cfg.get("sls_sensitivity", "Balanced")).title()
-        threshold = float(cfg.get("sls_min_score", THRESHOLDS.get(mode, 86)))
-        turnover = sum(qvol[-20:])
-        liquidity_floor = 150000 if interval in ("5m", "15m", "1h", "4h") else 3000000
-
-        # All gates are mandatory; absent BTC/HTF data fails closed.
-        if not (score >= threshold and htf_ok and btc_ok and turnover >= liquidity_floor
-                and extension_ok and green):
+        result = evaluate_series(
+            rows, interval, htf_rows=htf_rows, btc_rows=btc_rows,
+            sensitivity=mode, min_score=cfg.get("sls_min_score"),
+        )
+        if not result:
             return None
-
-        risk = price - stop
-        ladder = [price + risk * r for r in (1.5, 2.5, 4, 6, 8)]
-        t1, t2, t3, t4, t5 = ladder
-        potential = (t3 / price - 1) * 100
-        return {
-            "coin": str(coin).upper(), "interval": interval, "strategy": "SLS",
-            "signal_source": "SLS", "signal_engine": "Spot Long Signal Engine",
-            "strategy_id": f"sls_{interval}", "strategy_family": "SLS",
-            "trade_horizon": "Scalp" if interval in ("5m", "15m") else "Medium" if interval in ("1h", "4h") else "Long",
-            "setup_type": "BREAKOUT" if breakout else "TREND_PULLBACK",
-            "signal_action": "BUY", "candle_open_time": rows[-1]["t"],
-            "price": price, "entry": price, "stop": stop,
-            "t1": t1, "t2": t2, "t3": t3, "t4": t4, "t5": t5, "target": t3,
-            "potential_pct": round(potential, 2), "risk_pct": round(risk_pct, 2),
-            "rr": round(potential / risk_pct, 2) if risk_pct else 0,
-            "atr": atr, "score": round(score, 1), "st": round(score, 1),
-            "rsi": round(s["rsi"], 1), "vol_x": round(vol_x, 2), "chg24": float(chg24 or 0),
-            "entry_quality": round(score, 1), "expansion_score": round(score, 1),
-            "entry_trigger": "SLS_CONFIRMED_CLOSED_CANDLE", "bos_level": prior_high,
-            "reasons": [f"SLS score {score:.1f}/100 (threshold {threshold:.0f})",
-                        f"HTF {htf or 'none'}: {htf_state}", "BTC benchmark bullish",
-                        f"volume x{vol_x:.2f}", "ATR stop 1.5x; targets 1.5R/2.5R/4R/6R/8R"],
-            "trend_4h": htf_state, "trend_interval": htf or interval,
-            "mtf_1h": "N/A", "mtf_1d": "N/A", "mtf_1w": "N/A",
-            "sls_components": {"c1": c1, "c2": c2, "c3": c3, "c4": c4,
-                               "c5": c5, "c6": c6, "c7": c7, "c8": c8},
-            "sls_sensitivity": mode, "sls_threshold": threshold,
-            "sls_htf": htf, "sls_btc_confirmed": btc_ok, "sls_quote_turnover_20": turnover,
-            "estimated_hold_min_hours": None, "estimated_hold_max_hours": None,
-            "risk_reward_ladder": ladder, "bullish_potential": {"tier": "SLS", "score": score},
-        }
-    except Exception:
-        # Isolate SLS failures; existing strategy evaluation must continue.
+        # Pine buyEvent is a rising edge, not a persistent qualifying state.
+        # Compare against the prior closed bar with historically available
+        # HTF and BTC context only.
+        if len(rows) >= 2:
+            prev_close = _interval_close_ms(int(rows[-2]["t"]), interval)
+            prev_htf = _asof_closed(raw_htf, prev_close, htf) if htf else None
+            prev_btc = _asof_closed(raw_btc, prev_close, benchmark_interval)
+            prev_signal = evaluate_series(
+                rows[:-1], interval, htf_rows=prev_htf, btc_rows=prev_btc,
+                sensitivity=mode, min_score=cfg.get("sls_min_score"))
+            if prev_signal:
+                return None
+        result["coin"] = symbol
+        result["strategy_id"] = f"sls_{interval}"
+        result["trade_horizon"] = "Scalp" if interval in ("5m","15m") else "Medium" if interval in ("1h","4h") else "Long"
+        result["setup_type"] = "BREAKOUT" if result.get("sls_components",{}).get("c5",0)>=4 else "TREND_PULLBACK"
+        result["potential_pct"] = round((result["t3"]/result["entry"]-1)*100,2)
+        result["chg24"] = float(chg24 or 0)
+        result["entry_quality"] = result["score"]
+        result["expansion_score"] = result["score"]
+        result["reasons"] = [
+            f"SLS score {result['score']:.1f}/100 (threshold {result['sls_threshold']:.0f})",
+            f"Regime {result.get('sls_regime')}; BTC {result.get('sls_benchmark')}",
+            "Closed-candle Pine-rule evaluation; SPOT BUY only",
+            "ATR stop 1.5x; targets 1.5R/2.5R/4R/6R/8R",
+        ]
+        result["sls_htf"] = htf
+        result["sls_btc_confirmed"] = result.get("sls_benchmark") != "B_NA"
+        result["trend_4h"] = result.get("sls_regime")
+        result["trend_interval"] = htf or interval
+        result["mtf_1h"] = result["mtf_1d"] = result["mtf_1w"] = "N/A"
+        result["estimated_hold_min_hours"] = result["estimated_hold_max_hours"] = None
+        return result
+    except Exception as exc:
+        # Isolate SLS failures; make evaluation faults observable without
+        # allowing a single symbol/timeframe to stop the broader scan.
+        if error_logger is not None:
+            try:
+                detail = str(exc).replace("\\n", " ")[:240]
+                error_logger(f"evaluation failed for {str(coin).upper()} {interval}: {type(exc).__name__}: {detail}")
+            except Exception:
+                pass
         return None

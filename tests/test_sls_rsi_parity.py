@@ -26,11 +26,11 @@ class SlsRsiParityTests(unittest.TestCase):
         values = [float(i + 1) for i in range(20)]
         result = sls_strategy._rsi_series(values, 14)
         self.assertEqual(len(result), len(values))
-        self.assertEqual(result[:14], [50.0] * 14)
+        self.assertEqual(result[:14], [None] * 14)
         self.assertEqual(result[14], 100.0)
 
-    def test_insufficient_history_keeps_neutral_seed(self):
-        self.assertEqual(sls_strategy._rsi_series([1, 2, 3], 14), [50.0, 50.0, 50.0])
+    def test_insufficient_history_remains_na_like_pine(self):
+        self.assertEqual(sls_strategy._rsi_series([1, 2, 3], 14), [None, None, None])
 
 
 if __name__ == "__main__":
