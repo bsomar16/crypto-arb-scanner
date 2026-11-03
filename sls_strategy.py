@@ -86,7 +86,8 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
         close, high, low = s["closes"], [x["h"] for x in rows], [x["l"] for x in rows]
         opn, vol, qvol = [x["o"] for x in rows], [x["v"] for x in rows], [x["q"] for x in rows]
         price = close[-1]
-        atr_value = _wilder_atr(high, low, close)\n        atr = float(atr_value) if atr_value is not None else 0.0
+        atr_value = _wilder_atr(high, low, close)
+        atr = float(atr_value) if atr_value is not None else 0.0
         if atr <= 0 or price <= 0:
             return None
 
