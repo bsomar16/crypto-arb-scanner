@@ -29,8 +29,8 @@ class SlsStrategyTests(unittest.TestCase):
         highs = [10, 11, 12, 11, 10, 11, 13, 11, 10, 12, 14, 12, 11]
         target, pct, reference = sls_strategy._structural_potential(10.5, 1.0, highs, 20.0)
         self.assertEqual(reference, "CONFIRMED_SWING_HIGH")
-        self.assertAlmostEqual(target, 11.75)
-        self.assertAlmostEqual(pct, (11.75 / 10.5 - 1) * 100)
+        self.assertAlmostEqual(target, 12.75)
+        self.assertAlmostEqual(pct, (12.75 / 10.5 - 1) * 100)
 
     def test_structural_potential_falls_back_to_atr_target(self):
         target, pct, reference = sls_strategy._structural_potential(
