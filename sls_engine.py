@@ -177,7 +177,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
                 # Age liquidity levels from their confirmation bar, not
                 # the historical pivot bar (which was not yet knowable).
                 equal_lows.append((k,(v1+v2)/2.0))
-        equal_lows=[x for x in equal_lows if k-x[0] <= 50][-5:]
+        equal_lows=[x for x in equal_lows if k-x[0] <= 50][-5:]  # age from confirmation bar
         swept=next((level for level in equal_lows if l[k] < level[1] and c[k] > level[1]),None)
         if swept is not None and k-last_sweep>=10:
             sweeps.append((k,swept[1])); last_sweep=k
