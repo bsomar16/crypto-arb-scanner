@@ -645,7 +645,10 @@ def run_buy(token, chat_id, realtime_cache=None):
         # SLS is an independent SPOT BUY strategy. It never mutates standard/ABT
         # signals and shares the existing downstream dedupe and Telegram path.
         if bool(cfg.get("sls_enabled", True)):
-            sls = sls_strategy.evaluate_sls_coin(\n                sym, interval=interval, cfg=cfg, chg24=chg.get(sym, 0.0),\n                error_logger=lambda message: log("SLS", message),\n            )
+            sls = sls_strategy.evaluate_sls_coin(
+                sym, interval=interval, cfg=cfg, chg24=chg.get(sym, 0.0),
+                error_logger=lambda message: log("SLS", message),
+            )
             if sls:
                 results.append(sls)
         return results
