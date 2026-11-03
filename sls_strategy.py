@@ -64,7 +64,9 @@ def _state(rows, min_history=200):
     if not rows or len(rows) < min_history:
         return None
     close = [x["c"] for x in rows]
-    e20, e50, e200 = pine_ema(close, 20), pine_ema(close, 50), pine_ema(close, 200)
+    e20, e50 = pine_ema(close, 20), pine_ema(close, 50)
+    # Do not expose EMA200 as a usable HTF feature before 200 closed candles.
+    e200 = pine_ema(close, 200) if len(close) >= 200 else [None] * len(close)
     macd, sig, hist = pine_macd(close, 12, 26, 9)
     rsi = pine_rsi(close, 14)
     if any(x is None for x in (e20[-1], e50[-1], e200[-1], macd[-1], sig[-1], hist[-1], rsi[-1])):
