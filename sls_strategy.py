@@ -52,6 +52,29 @@ def _pivot_lows(values, left=2, right=2):
             result.append((p, x))
     return result
 
+def _pivot_highs(values, left=3, right=3):
+    """Return confirmed swing highs only; right-side bars prevent look-ahead."""
+    result = []
+    for p in range(left, len(values) - right):
+        x = values[p]
+        if all(x > values[j] for j in range(p-left, p)) and all(x >= values[j] for j in range(p+1, p+right+1)):
+            result.append((p, x))
+    return result
+
+
+def _structural_potential(price, atr, highs, theoretical_target, lookback=120):
+    """Estimate upside to nearest confirmed overhead supply; not a probability forecast."""
+    start = max(0, len(highs) - lookback)
+    pivots = _pivot_highs(highs[start:], 3, 3)
+    resistance = next((level for _, level in reversed(pivots)
+                       if level > price + 0.5 * atr), None)
+    if resistance is None:
+        return theoretical_target, (theoretical_target / price - 1.0) * 100.0, "ATR_TP3_FALLBACK"
+    target = min(theoretical_target, resistance - 0.25 * atr)
+    if target <= price:
+        return theoretical_target, (theoretical_target / price - 1.0) * 100.0, "ATR_TP3_FALLBACK"
+    return target, (target / price - 1.0) * 100.0, "CONFIRMED_SWING_HIGH"
+
 
 def _rsi_series(values, period=14):
     """Pine RSI series; warm-up bars remain None rather than neutral 50."""
@@ -169,6 +192,9 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
         ladder = [price + risk * r for r in (1.5, 2.5, 4, 6, 8)]
         t1, t2, t3, t4, t5 = ladder
         potential = (t3 / price - 1) * 100
+        modelled_target, modelled_potential, potential_reference = _structural_potential(
+            price, atr, high[-120:], t3
+        )
         return {
             "coin": str(coin).upper(), "interval": interval, "strategy": "SLS",
             "signal_source": "SLS", "signal_engine": "Spot Long Signal Engine",
@@ -178,7 +204,10 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
             "signal_action": "BUY", "candle_open_time": rows[-1]["t"],
             "price": price, "entry": price, "stop": stop,
             "t1": t1, "t2": t2, "t3": t3, "t4": t4, "t5": t5, "target": t3,
-            "potential_pct": round(potential, 2), "risk_pct": round(risk_pct, 2),
+            "potential_pct": round(potential, 2), "theoretical_tp3_potential_pct": round(potential, 2),
+            "modelled_potential_pct": round(modelled_potential, 2),
+            "modelled_potential_target": modelled_target, "potential_reference": potential_reference,
+            "risk_pct": round(risk_pct, 2),
             "rr": round(potential / risk_pct, 2) if risk_pct else 0,
             "atr": atr, "score": round(score, 1), "st": round(score, 1),
             "rsi": round(s["rsi"], 1), "vol_x": round(vol_x, 2), "chg24": float(chg24 or 0),
