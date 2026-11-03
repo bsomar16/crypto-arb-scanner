@@ -1,7 +1,7 @@
 """Native, long-only TradingView SLS port for Binance SPOT candles."""
 from threading import RLock
 import time
-import indicators as ind
+from sls_pine_math import pine_atr, pine_ema, pine_macd, pine_rsi
 from botutil import http_json
 
 INTERVALS = ("5m", "15m", "1h", "4h", "1d", "1w")
@@ -20,22 +20,9 @@ def _parse_closed_candles(raw, now_ms):
 
 
 def _wilder_atr(highs, lows, closes, period=14):
-    """Pine ta.atr-style Wilder RMA of true range, seeded by an SMA."""
-    if period <= 0 or len(closes) < period + 1:
-        return None
-    true_ranges = []
-    for i in range(1, len(closes)):
-        true_ranges.append(max(
-            highs[i] - lows[i],
-            abs(highs[i] - closes[i - 1]),
-            abs(lows[i] - closes[i - 1]),
-        ))
-    if len(true_ranges) < period:
-        return None
-    value = sum(true_ranges[:period]) / period
-    for current in true_ranges[period:]:
-        value = (value * (period - 1) + current) / period
-    return value
+    """Return the latest Pine ta.atr-compatible Wilder ATR value."""
+    values = pine_atr(highs, lows, closes, period)
+    return values[-1] if values else None
 
 def _candles(symbol, interval, limit=240):
     key = (symbol, interval, limit)
@@ -67,43 +54,22 @@ def _pivot_lows(values, left=2, right=2):
 
 
 def _rsi_series(values, period=14):
-    """Wilder RSI aligned to candle indices, matching indicators.rsi()."""
-    out = [50.0] * len(values)
-    if len(values) <= period:
-        return out
-    changes = [values[i] - values[i - 1] for i in range(1, len(values))]
-    avg_gain = sum(max(change, 0.0) for change in changes[:period]) / period
-    avg_loss = sum(max(-change, 0.0) for change in changes[:period]) / period
-
-    def rsi_value(gain, loss):
-        # Keep parity with indicators.rsi(), which returns 100 when loss is zero.
-        if loss == 0:
-            return 100.0
-        return 100.0 - 100.0 / (1.0 + gain / loss)
-
-    out[period] = rsi_value(avg_gain, avg_loss)
-    for index in range(period + 1, len(values)):
-        change = changes[index - 1]
-        avg_gain = (avg_gain * (period - 1) + max(change, 0.0)) / period
-        avg_loss = (avg_loss * (period - 1) + max(-change, 0.0)) / period
-        out[index] = rsi_value(avg_gain, avg_loss)
-    return out
+    """Pine RSI series; warm-up bars remain None rather than neutral 50."""
+    return pine_rsi(values, period)
 
 
 def _state(rows, min_history=200):
-    """Build trend state; the primary chart requires EMA200 history.
-
-    HTF/BTC confirmation only consumes EMA20/EMA50, so those contexts need
-    50 bars rather than an unnecessary 200-bar EMA200 history requirement.
-    """
+    """Build indicator series with Pine-compatible initialization/warm-up."""
     if not rows or len(rows) < min_history:
         return None
     close = [x["c"] for x in rows]
-    e20, e50 = ind.ema(close, 20), ind.ema(close, 50)
-    e200 = ind.ema(close, 200) if len(close) >= 200 else None
-    macd, sig, hist = ind.macd(close)
+    e20, e50, e200 = pine_ema(close, 20), pine_ema(close, 50), pine_ema(close, 200)
+    macd, sig, hist = pine_macd(close, 12, 26, 9)
+    rsi = pine_rsi(close, 14)
+    if any(x is None for x in (e20[-1], e50[-1], e200[-1], macd[-1], sig[-1], hist[-1], rsi[-1])):
+        return None
     return {"close": close[-1], "closes": close, "e20": e20, "e50": e50, "e200": e200,
-            "macd": macd, "sig": sig, "hist": hist, "rsi": float(ind.rsi(close, 14) or 50)}
+            "macd": macd, "sig": sig, "hist": hist, "rsi": rsi[-1], "rsi_series": rsi}
 
 
 def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=None):
@@ -120,7 +86,7 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
         close, high, low = s["closes"], [x["h"] for x in rows], [x["l"] for x in rows]
         opn, vol, qvol = [x["o"] for x in rows], [x["v"] for x in rows], [x["q"] for x in rows]
         price = close[-1]
-        atr = float(_wilder_atr(high, low, close) or 0)
+        atr_value = _wilder_atr(high, low, close)\n        atr = float(atr_value) if atr_value is not None else 0.0
         if atr <= 0 or price <= 0:
             return None
 
