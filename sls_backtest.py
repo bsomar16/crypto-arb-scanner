@@ -64,6 +64,56 @@ def _candle_close_ms(open_ms, interval):
     return int(end.timestamp() * 1000)
 
 
+def _dataset_quality(data):
+    """Summarise per-symbol candle coverage and internal gaps."""
+    quality = {}
+    for symbol, by_interval in data.items():
+        quality[symbol] = {}
+        for interval, rows in by_interval.items():
+            missing = 0
+            gaps = []
+            if interval in INTERVAL_MS:
+                for previous, current in zip(rows, rows[1:]):
+                    expected = _candle_close_ms(previous["t"], interval)
+                    gap_count = 0
+                    while expected < current["t"]:
+                        gap_count += 1
+                        expected = _candle_close_ms(expected, interval)
+                    if gap_count:
+                        missing += gap_count
+                        if len(gaps) < 20:
+                            gaps.append({
+                                "after_open_ms": previous["t"],
+                                "before_open_ms": current["t"],
+                                "missing_candles": gap_count,
+                            })
+            observed = len(rows)
+            total_span = observed + missing
+            quality[symbol][interval] = {
+                "candles": observed,
+                "first_open_ms": rows[0]["t"] if rows else None,
+                "last_open_ms": rows[-1]["t"] if rows else None,
+                "internal_missing_candles": missing,
+                "coverage_pct": round(observed / total_span * 100, 3) if total_span else None,
+                "gaps_truncated": missing > sum(g["missing_candles"] for g in gaps),
+                "gaps": gaps,
+            }
+    btc = quality.get("BTC", {})
+    benchmark = {
+        interval: {
+            "candles": btc.get(interval, {}).get("candles", 0),
+            "available_for_primary_ema200": btc.get(interval, {}).get("candles", 0) >= 200,
+            "available_for_htf_ema50": btc.get(interval, {}).get("candles", 0) >= 50,
+        }
+        for interval in sls_strategy.INTERVALS
+    }
+    return {
+        "scope": "observed internal gaps only; leading/trailing coverage requires requested date bounds",
+        "by_symbol_interval": quality,
+        "btc_benchmark": benchmark,
+    }
+
+
 def _provider(data, asof_ms):
     def fetch(symbol, interval, limit=240):
         if interval not in INTERVAL_MS:
@@ -238,6 +288,9 @@ def run_replay(dataset, sensitivity="Balanced", fee_rate=0.001, slippage_rate=0.
         purged_by_interval[row["interval"]].append(row)
     report = {
         "method": "causal_asof_closed_candles_global_temporal_split_purged",
+        "signal_timing": "confirmed_closed_candle",
+        "execution_model": "next_candle_open_stop_gap_aware_stop_first_intrabar",
+        "dataset_quality": _dataset_quality(data),
         "sensitivity": sensitivity,
         "fees_per_side_pct": round(fee_rate * 100, 5),
         "slippage_per_side_pct": round(slippage_rate * 100, 5),
