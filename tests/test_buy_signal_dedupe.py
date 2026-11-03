@@ -26,6 +26,48 @@ class BuySignalDedupeTests(unittest.TestCase):
         self.assertEqual(fresh[0]["interval"], "15m")
         self.assertIn("GALA", updates)
 
+
+    def test_sls_keeps_independent_signals_for_each_timeframe(self):
+        hits = [
+            {**self._signal(interval=interval, score=score),
+             "strategy": "SLS", "strategy_family": "SLS",
+             "entry_trigger": "SLS_CONFIRMED_CLOSED_CANDLE",
+             "bos_level": 1.0}
+            for interval, score in (("5m", 70), ("15m", 82), ("1h", 75))
+        ]
+        fresh, updates = scanner._dedupe_buy_signals(
+            hits, {}, 1000, active_coins=set()
+        )
+        self.assertEqual({row["interval"] for row in fresh}, {"5m", "15m", "1h"})
+        self.assertEqual(
+            set(updates),
+            {"GALA|SLS|5m", "GALA|SLS|15m", "GALA|SLS|1h"},
+        )
+
+    def test_sls_timeframe_is_part_of_notification_identity(self):
+        base = {
+            **self._signal(interval="5m"), "strategy": "SLS",
+            "strategy_family": "SLS", "entry_trigger": "SLS_CONFIRMED_CLOSED_CANDLE",
+            "bos_level": 1.0,
+        }
+        other = {**base, "interval": "15m"}
+        self.assertNotEqual(
+            scanner._buy_signal_identity(base),
+            scanner._buy_signal_identity(other),
+        )
+
+    def test_sls_keys_survive_state_migration(self):
+        state = {
+            "GALA|SLS|5m": {"ts": 100},
+            "GALA|SLS|15m": {"ts": 200},
+            "GALA|15m": {"ts": 150},
+        }
+        migrated, changed = scanner._migrate_fired_signal_state(state)
+        self.assertTrue(changed)
+        self.assertEqual(migrated["GALA|SLS|5m"]["ts"], 100)
+        self.assertEqual(migrated["GALA|SLS|15m"]["ts"], 200)
+        self.assertEqual(migrated["GALA"]["ts"], 150)
+
     def test_previous_signal_is_not_repeated(self):
         hits = [self._signal()]
         fired = {
