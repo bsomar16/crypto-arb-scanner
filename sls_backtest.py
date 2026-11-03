@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import calendar
+import datetime
 import math
 from collections import defaultdict
 from pathlib import Path
@@ -49,16 +51,27 @@ def _normalise_dataset(payload):
     return data
 
 
+def _candle_close_ms(open_ms, interval):
+    """Exact UTC close boundary; monthly candles use calendar months."""
+    if interval != "1M":
+        duration = INTERVAL_MS.get(interval)
+        return open_ms + duration if duration is not None else None
+    start = datetime.datetime.fromtimestamp(open_ms / 1000, tz=datetime.timezone.utc)
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1, day=1)
+    else:
+        end = start.replace(month=start.month + 1, day=1)
+    return int(end.timestamp() * 1000)
+
+
 def _provider(data, asof_ms):
     def fetch(symbol, interval, limit=240):
-        duration = INTERVAL_MS.get(interval)
-        if duration is None:
+        if interval not in INTERVAL_MS:
             return None
         rows = data.get(str(symbol).upper(), {}).get(interval, [])
-        closed = [r for r in rows if r["t"] + duration <= asof_ms]
+        closed = [r for r in rows if _candle_close_ms(r["t"], interval) <= asof_ms]
         return closed[-limit:] if len(closed) >= 200 else None
     return fetch
-
 
 def _evaluate_outcome(signal, rows, index, horizon, fee_rate, slippage_rate):
     entry = float(signal["entry"])
