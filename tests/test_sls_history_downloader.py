@@ -41,6 +41,18 @@ class SlsHistoryDownloaderTests(unittest.TestCase):
         self.assertEqual(first_start, 0)
         self.assertEqual(second_start, (downloader.LIMIT - 1) * 300000 + 1)
 
+    def test_download_pair_excludes_still_forming_candle(self):
+        from unittest.mock import patch
+
+        forming = kline(900000)
+        forming[6] = 1299999  # close time is still in the future
+        with patch.object(downloader.time, "time", return_value=1000):
+            rows = downloader._download_pair(
+                "ETHUSDT", "5m", 0, 1500000,
+                fetch_json=lambda url: [forming], pause=0
+            )
+        self.assertEqual(rows, [])
+
     def test_download_dataset_adds_btc_and_writes_replay_schema(self):
         def fake_fetch(url):
             if url.endswith("/api/v3/exchangeInfo"):
