@@ -135,9 +135,20 @@ class SlsBacktestTests(unittest.TestCase):
             {"t": 1, "o": 90, "h": 100, "l": 89, "c": 95},
         ]
         result = sls_backtest._evaluate_outcome(signal, rows, 0, 1, 0, 0)
-        self.assertEqual(result["outcome"], "STOP")
+        self.assertEqual(result["outcome"], "INVALIDATED")
         self.assertEqual(result["execution_entry"], 90)
-        self.assertEqual(result["net_return_pct"], 0.0)
+        self.assertIsNone(result["net_return_pct"])
+
+
+    def test_gap_above_first_target_invalidates_stale_entry(self):
+        signal = {"entry": 100, "stop": 95, "t1": 107.5, "t2": 112.5, "t3": 120}
+        rows = [
+            {"t": 0, "o": 100, "h": 100, "l": 100, "c": 100},
+            {"t": 1, "o": 108, "h": 121, "l": 107, "c": 120},
+        ]
+        result = sls_backtest._evaluate_outcome(signal, rows, 0, 1, 0, 0)
+        self.assertEqual(result["outcome"], "INVALIDATED")
+        self.assertIsNone(result["net_return_pct"])
 
     def test_stats_report_expectancy_and_profit_factor(self):
         records = [
