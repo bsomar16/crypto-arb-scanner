@@ -109,6 +109,68 @@ class SlsHistoryDownloaderTests(unittest.TestCase):
             self.assertEqual(saved["BTC"]["5m"], [])
             self.assertEqual(saved["ETH"]["5m"], [])
 
+
+    def test_missing_ranges_detects_leading_interior_and_trailing_gaps(self):
+        gaps = downloader._missing_ranges(
+            0, 1_500_000, [300_000, 900_000], "5m"
+        )
+        self.assertEqual(gaps, [
+            (0, 300_000),
+            (600_000, 900_000),
+            (1_200_000, 1_500_000),
+        ])
+
+    def test_missing_ranges_uses_calendar_month_boundaries(self):
+        jan = downloader._utc_ms("2024-01-01")
+        mar = downloader._utc_ms("2024-03-01")
+        apr = downloader._utc_ms("2024-04-01")
+        self.assertEqual(
+            downloader._missing_ranges(jan, apr, [jan, mar], "1M"),
+            [(downloader._utc_ms("2024-02-01"), mar)],
+        )
+
+    def test_resume_backfills_interior_hole_even_when_latest_candle_exists(self):
+        import json
+        from unittest.mock import patch
+
+        symbols = [
+            {"symbol": "BTCUSDT", "status": "TRADING", "quoteAsset": "USDT",
+             "isSpotTradingAllowed": True},
+            {"symbol": "ETHUSDT", "status": "TRADING", "quoteAsset": "USDT",
+             "isSpotTradingAllowed": True},
+        ]
+        saved = {"t": 0, "o": 9, "h": 11, "l": 8, "c": 10, "v": 100, "q": 900}
+        saved_late = {**saved, "t": 600_000}
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "candles.json"
+            output.write_text(json.dumps({"candles": {
+                "BTC": {"5m": [saved, saved_late]},
+                "ETH": {"5m": [saved, saved_late]},
+            }}), encoding="utf-8")
+            requests = []
+
+            def fake_fetch(url):
+                if url.endswith("/api/v3/exchangeInfo"):
+                    return {"symbols": symbols}
+                query = parse_qs(urlparse(url).query)
+                start = int(query["startTime"][0])
+                end = int(query["endTime"][0]) + 1
+                requests.append((start, end))
+                return [kline(start)] if start < end else []
+
+            with patch.object(downloader.time, "time", return_value=10_000):
+                downloader.download_dataset(
+                    ["ETH"], ["5m"], 0, 900_000, output,
+                    fetch_json=fake_fetch, pause=0
+                )
+            saved_data = json.loads(output.read_text(encoding="utf-8"))["candles"]
+            for coin in ("BTC", "ETH"):
+                self.assertEqual(
+                    [row["t"] for row in saved_data[coin]["5m"]],
+                    [0, 300_000, 600_000],
+                )
+            self.assertEqual([start for start, _ in requests], [300_000, 300_000])
+
     def test_rejects_non_spot_symbol(self):
         def fake_fetch(url):
             return {"symbols": []}
