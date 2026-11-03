@@ -26,6 +26,7 @@ import market_regime
 import signal_lifecycle
 import abt_strategy
 import sls_strategy
+import sls_position_store
 import multi_exchange
 import shadow_trading
 
@@ -653,6 +654,34 @@ def run_buy(token, chat_id, realtime_cache=None):
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
         hits = [r for batch in ex.map(scan, tasks) for r in (batch or [])]
 
+    # Persisted SLS-only outcome tracking. This is research state, not execution.
+    sls_state = sls_position_store.load_state()
+    sls_events = []
+    for position in list(sls_state.values()):
+        if position.get("status") != "open":
+            continue
+        try:
+            bars = sls_strategy._candles(position["coin"], position["interval"], 240)
+            if bars:
+                sls_events.extend(sls_position_store.advance_position(
+                    sls_state, position["coin"], position["interval"], bars
+                ))
+        except Exception as e:
+            log("SLS", f"position refresh failed for {position.get('coin')} {position.get('interval')}:", e)
+    if sls_events:
+        for event in sls_events:
+            log("SLS OUTCOME", event)
+    sls_position_store.save_state(sls_state)
+    sls_locked = sls_position_store.active_coins(sls_state)
+    if sls_locked:
+        before_sls_lock = len(hits)
+        hits = [r for r in hits if not (
+            str(r.get("strategy", "")).upper() == "SLS"
+            and str(r.get("coin", "")).upper() in sls_locked
+        )]
+        if len(hits) != before_sls_lock:
+            log("SLS", f"active-position lock suppressed {before_sls_lock-len(hits)} repeated BUY candidate(s)")
+
     fired, migrated_fired = _migrate_fired_signal_state(
         load_json("state/fired_signals.json", {}) or {}
     )
@@ -849,6 +878,15 @@ def run_buy(token, chat_id, realtime_cache=None):
         fired.update(updates)
     if updates or migrated_fired:
         save_json("state/fired_signals.json", fired)
+
+    # Start the SLS lifecycle only after the BUY notification was sent.
+    sls_opened = 0
+    for r in trade_selected:
+        if str(r.get("strategy", "")).upper() == "SLS":
+            sls_opened += int(sls_position_store.register_signal(sls_state, r))
+    if sls_opened:
+        sls_position_store.save_state(sls_state)
+        log("SLS", f"persistent SLS positions opened={sls_opened}")
 
     for r in trade_selected:
         try:
