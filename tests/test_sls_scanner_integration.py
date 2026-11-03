@@ -15,9 +15,9 @@ class SlsScannerIntegrationTests(unittest.TestCase):
 
     def test_strategy_contract_is_spot_buy_only(self):
         source = inspect.getsource(sls_engine.evaluate_series)
-        self.assertIn('"signal_action": "BUY"', source)
-        self.assertNotIn('"signal_action": "SELL"', source)
-        self.assertNotIn('"signal_action": "SHORT"', source)
+        self.assertIn('"signal_action":"BUY"', source)
+        self.assertNotIn('"signal_action":"SELL"', source)
+        self.assertNotIn('"signal_action":"SHORT"', source)
 
 
 if __name__ == "__main__":
