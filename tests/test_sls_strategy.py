@@ -23,14 +23,14 @@ class SlsStrategyTests(unittest.TestCase):
 
 
 
-    def test_htf_trend_state_needs_only_ema50_history(self):
+    def test_htf_trend_state_uses_pine_ema_series_with_50_candles(self):
         rows = [{"t": i, "o": 100 + i, "h": 101 + i, "l": 99 + i,
                  "c": 100 + i, "v": 1000, "q": 100000}
                 for i in range(50)]
         self.assertIsNone(sls_strategy._state(rows))
         state = sls_strategy._state(rows, min_history=50)
         self.assertIsNotNone(state)
-        self.assertIsNone(state["e200"])
+        self.assertIsNotNone(state["e200"][-1])
 
     def test_live_candle_parser_keeps_latest_closed_row_and_drops_forming_row(self):
         raw = [
