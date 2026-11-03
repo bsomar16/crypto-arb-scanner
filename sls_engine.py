@@ -174,7 +174,9 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
         if len(low_pivots) >= 2 and _is_new_confirmed_pivot(low_pivots[-1][0], pivot_len, k):
             (p1,v1),(p2,v2)=low_pivots[-2],low_pivots[-1]
             if p2-p1 <= 50 and abs(v2-v1) <= 0.35*(atrs[k] or 0):
-                equal_lows.append((p2,(v1+v2)/2.0))
+                # Age liquidity levels from their confirmation bar, not
+                # the historical pivot bar (which was not yet knowable).
+                equal_lows.append((k,(v1+v2)/2.0))
         equal_lows=[x for x in equal_lows if k-x[0] <= 50][-5:]
         swept=next((level for level in equal_lows if l[k] < level[1] and c[k] > level[1]),None)
         if swept is not None and k-last_sweep>=10:
@@ -192,7 +194,9 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
         if divergence_state and div_index is not None:
             if l[k]<div_price or k-div_index>60: divergence_state=0
             elif c[k]>div_swing and k-div_index<=60: divergence_state=3
-            if k==i and (v[k]/(_sma(v,20,k) or v[k]))>=1.3: div_vol=True
+            # Pine's volume confirmation is a persistent flag once any
+            # active divergence bar reaches the 1.3x relative-volume trigger.
+            if (v[k]/(_sma(v,20,k) or v[k]))>=1.3: div_vol=True
 
     recent_sweep=bool(sweeps and i-sweeps[-1][0]<=10)
     in_discount=discount
