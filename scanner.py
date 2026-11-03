@@ -40,7 +40,7 @@ DEFAULTS = {
     "min_daily_qv": 1500000,
     "buy_scan_top_n": 100,
     "buy_min_vol": 2000000,
-    "buy_intervals": ["5m", "15m", "1h"],
+    "buy_intervals": ["5m", "15m", "1h", "4h", "1d", "1w"],
     "buy_scan_every_minutes": 15,
     "buy_min_vol_x": 1.15,
     "buy_fast_top_n": 150,
