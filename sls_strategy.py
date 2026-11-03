@@ -49,7 +49,7 @@ def _candles(symbol, interval, limit=240):
         # Use exchange close timestamps: blindly dropping the final row can
         # discard a fully closed candle when the API response ends at a boundary.
         out = _parse_closed_candles(raw, int(time.time() * 1000))
-        value = out if len(out) >= 200 else None
+        value = out if len(out) >= 50 else None
     except Exception:
         value = None
     with _LOCK:
@@ -90,11 +90,17 @@ def _rsi_series(values, period=14):
     return out
 
 
-def _state(rows):
-    if not rows or len(rows) < 200:
+def _state(rows, min_history=200):
+    """Build trend state; the primary chart requires EMA200 history.
+
+    HTF/BTC confirmation only consumes EMA20/EMA50, so those contexts need
+    50 bars rather than an unnecessary 200-bar EMA200 history requirement.
+    """
+    if not rows or len(rows) < min_history:
         return None
     close = [x["c"] for x in rows]
-    e20, e50, e200 = ind.ema(close, 20), ind.ema(close, 50), ind.ema(close, 200)
+    e20, e50 = ind.ema(close, 20), ind.ema(close, 50)
+    e200 = ind.ema(close, 200) if len(close) >= 200 else None
     macd, sig, hist = ind.macd(close)
     return {"close": close[-1], "closes": close, "e20": e20, "e50": e50, "e200": e200,
             "macd": macd, "sig": sig, "hist": hist, "rsi": float(ind.rsi(close, 14) or 50)}
@@ -128,11 +134,11 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
         htf = HTF_MAP[interval]
         htf_ok, htf_state = interval == "1w", "SKIPPED" if interval == "1w" else "UNAVAILABLE"
         if htf:
-            hs = _state(fetch(str(coin).upper(), htf, 220))
+            hs = _state(fetch(str(coin).upper(), htf, 220), min_history=50)
             if hs:
                 htf_ok = hs["close"] > hs["e20"][-1] > hs["e50"][-1]
                 htf_state = "BULLISH" if htf_ok else "NOT_BULLISH"
-        bs = _state(fetch("BTC", interval, 220))
+        bs = _state(fetch("BTC", interval, 220), min_history=50)
         btc_ok = bool(bs and bs["close"] > bs["e20"][-1] > bs["e50"][-1])
         c2 = (8 if htf_ok else 0) + (7 if btc_ok else 0)
 
