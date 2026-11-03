@@ -672,12 +672,12 @@ def run_buy(token, chat_id, realtime_cache=None):
         for event in sls_events:
             log("SLS OUTCOME", event)
     sls_position_store.save_state(sls_state)
-    sls_locked = sls_position_store.active_coins(sls_state)
+    sls_locked = sls_position_store.active_keys(sls_state)
     if sls_locked:
         before_sls_lock = len(hits)
         hits = [r for r in hits if not (
             str(r.get("strategy", "")).upper() == "SLS"
-            and str(r.get("coin", "")).upper() in sls_locked
+            and sls_position_store.key(r.get("coin", ""), r.get("interval", "")) in sls_locked
         )]
         if len(hits) != before_sls_lock:
             log("SLS", f"active-position lock suppressed {before_sls_lock-len(hits)} repeated BUY candidate(s)")
