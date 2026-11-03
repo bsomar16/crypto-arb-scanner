@@ -7,6 +7,7 @@ Example:
 
 The end date is exclusive. The output uses the JSON schema consumed by
 sls_backtest.py and stores Binance open times in UTC milliseconds.
+The fetcher is injectable so CI can test pagination and persistence offline.
 """
 from __future__ import annotations
 
