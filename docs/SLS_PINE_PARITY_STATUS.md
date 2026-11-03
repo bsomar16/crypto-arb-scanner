@@ -13,7 +13,7 @@ The scanner now routes SLS evaluation through `sls_engine.py`, using the Pine-co
 
 ## Known parity limitations — do not treat as exact TradingView equivalence yet
 - The original Pine source file is not committed in this repository, so the port is based on the supplied rule specification. Input defaults not included in that specification (notably `sepReq`, exact pivot selection details and any Pine-specific NA/tie semantics) must be checked against the original script.
-- Stateful position lifecycle (entry lock, stop-first intrabar ordering, independent TP1–TP5 alerts, all-target close, and timeout) is not yet replayed bar-by-bar by the live scanner. This module currently evaluates a confirmed signal candidate, not a full Pine strategy position simulator.
+- Added `sls_position.py` as a deterministic long-only lifecycle component: entry lock, stop-first intrabar ordering, independent TP1–TP5 events, all-target close, and timeout. It is not yet persisted or wired into the live scanner across process restarts or historical batches.
 - The C8 RR confluence interpretation and C7 resistance-room calculation need fixture comparison against Pine output.
 - The strategy needs executable CI evidence and exported TradingView fixtures before parity can be claimed.
 - No win-rate, profitability, or expected-return claim is made.
