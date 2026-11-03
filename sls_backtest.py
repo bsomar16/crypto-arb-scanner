@@ -137,15 +137,16 @@ def _evaluate_outcome(signal, rows, index, horizon, fee_rate, slippage_rate):
     # Model a market entry at the next candle open; signal stop/targets remain
     # the alert's original absolute levels.
     entry = float(future[0]["o"])
+    # If price has already crossed the stop or first target before the order
+    # could be filled, the original risk/reward setup is no longer executable.
+    if entry <= stop or entry >= targets[0]:
+        return {"outcome": "INVALIDATED", "bars": 0, "hits": hits,
+                "execution_entry": round(entry, 10), "net_return_pct": None}
     exit_price = None
     outcome = None
     bars = 0
     for bars, candle in enumerate(future, 1):
         low, high = candle["l"], candle["h"]
-        if bars == 1 and entry <= stop:
-            # A gap through the stop is filled at the worse opening price.
-            outcome, exit_price = "STOP", entry
-            break
         # Conservative intrabar rule: stop wins if stop and any target touch
         # in the same candle because their order cannot be inferred from OHLC.
         if low <= stop:
@@ -175,11 +176,11 @@ def _evaluate_outcome(signal, rows, index, horizon, fee_rate, slippage_rate):
 
 
 def _stats(records):
-    resolved = [r for r in records if r["outcome"] != "CENSORED"]
+    resolved = [r for r in records if r["outcome"] not in ("CENSORED", "INVALIDATED")]
     n = len(records)
     scored = [r["net_return_pct"] for r in resolved if r["net_return_pct"] is not None]
     counts = {key: sum(r["outcome"] == key for r in records)
-              for key in ("TP3", "STOP", "EXPIRED", "CENSORED")}
+              for key in ("TP3", "STOP", "EXPIRED", "CENSORED", "INVALIDATED")}
     denom = len(resolved)
     decisive = counts["TP3"] + counts["STOP"]
     wins = [value for value in scored if value > 0]
@@ -222,7 +223,8 @@ def _global_temporal_split(records, train_fraction, horizons=None):
             test.append(row)
             continue
         interval = row["interval"]
-        label_end = timestamp + INTERVAL_MS[interval] * max(1, int(horizon_map[interval]))
+        label_bars = 1 if row.get("outcome") == "INVALIDATED" else max(1, int(horizon_map[interval]))
+        label_end = timestamp + INTERVAL_MS[interval] * label_bars
         if label_end <= cutoff:
             train.append(row)
         else:
