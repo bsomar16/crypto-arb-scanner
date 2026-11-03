@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""Download resumable Binance Spot candles for SLS historical replay.
+
+Example:
+  python download_sls_history.py --start 2024-01-01 --end 2025-01-01 \
+      --symbols BTC ETH SOL --output data/sls_candles.json
+
+The end date is exclusive. The output uses the JSON schema consumed by
+sls_backtest.py and stores Binance open times in UTC milliseconds.
+The fetcher is injectable so CI can test pagination and persistence offline.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import time
+from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+BASE_URL = "https://data-api.binance.vision"
+INTERVALS = ("5m", "15m", "1h", "4h", "1d", "1w", "1M")
+LIMIT = 1000
+
+
+def _utc_ms(value: str) -> int:
+    """Parse YYYY-MM-DD or ISO-8601 and return UTC epoch milliseconds."""
+    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return int(parsed.astimezone(dt.timezone.utc).timestamp() * 1000)
+
+
+def _http_json(url: str, timeout: int = 20):
+    request = Request(url, headers={"User-Agent": "crypto-arb-scanner-sls-research/1.0"})
+    with urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _spot_symbols(fetch_json=_http_json):
+    payload = fetch_json(f"{BASE_URL}/api/v3/exchangeInfo")
+    return {
+        item["symbol"]
+        for item in payload.get("symbols", [])
+        if item.get("status") == "TRADING"
+        and item.get("quoteAsset") == "USDT"
+        and item.get("isSpotTradingAllowed", False)
+    }
+
+
+def _parse_kline(row):
+    return {
+        "t": int(row[0]), "o": float(row[1]), "h": float(row[2]),
+        "l": float(row[3]), "c": float(row[4]), "v": float(row[5]),
+        "q": float(row[7]),
+    }
+
+
+def _candle_close_ms(open_ms, interval):
+    """Return the exclusive UTC close boundary for a Binance candle."""
+    if interval == "1M":
+        start = dt.datetime.fromtimestamp(open_ms / 1000, tz=dt.timezone.utc)
+        if start.month == 12:
+            end = start.replace(year=start.year + 1, month=1, day=1)
+        else:
+            end = start.replace(month=start.month + 1, day=1)
+        return int(end.timestamp() * 1000)
+    units = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000,
+             "4h": 14_400_000, "1d": 86_400_000, "1w": 604_800_000}
+    return open_ms + units[interval]
+
+
+def _next_candle_open_ms(open_ms, interval):
+    """Return the next expected Binance candle open, including calendar months."""
+    if interval == "1M":
+        start = dt.datetime.fromtimestamp(open_ms / 1000, tz=dt.timezone.utc)
+        if start.month == 12:
+            next_open = start.replace(year=start.year + 1, month=1, day=1)
+        else:
+            next_open = start.replace(month=start.month + 1, day=1)
+        return int(next_open.timestamp() * 1000)
+    units = {"5m": 300_000, "15m": 900_000, "1h": 3_600_000,
+             "4h": 14_400_000, "1d": 86_400_000, "1w": 604_800_000}
+    return open_ms + units[interval]
+
+
+def _missing_ranges(start_ms, end_ms, existing_times, interval):
+    """Find leading, interior and trailing gaps in a saved candle range."""
+    times = sorted({int(value) for value in existing_times
+                    if start_ms <= int(value) < end_ms})
+    if not times:
+        return [(start_ms, end_ms)] if start_ms < end_ms else []
+    gaps = []
+    if start_ms < times[0]:
+        gaps.append((start_ms, times[0]))
+    for previous, current in zip(times, times[1:]):
+        expected = _next_candle_open_ms(previous, interval)
+        if expected < current:
+            gaps.append((expected, current))
+    tail = _next_candle_open_ms(times[-1], interval)
+    if tail < end_ms:
+        gaps.append((tail, end_ms))
+    return gaps
+
+def _download_pair(symbol, interval, start_ms, end_ms, fetch_json=_http_json, pause=0.05):
+    """Fetch [start_ms, end_ms) with Binance's 1000-row pagination."""
+    rows = []
+    cursor = start_ms
+    now_ms = int(time.time() * 1000)
+    while cursor < end_ms:
+        query = urlencode({
+            "symbol": symbol, "interval": interval, "startTime": cursor,
+            "endTime": end_ms - 1, "limit": LIMIT,
+        })
+        payload = fetch_json(f"{BASE_URL}/api/v3/klines?{query}")
+        if not isinstance(payload, list):
+            raise RuntimeError(f"Unexpected Binance kline response for {symbol} {interval}: {payload}")
+        if not payload:
+            break
+        # Binance includes the currently forming candle; exclude it so the
+        # persisted replay dataset is closed-candle-only.
+        batch = [_parse_kline(row) for row in payload
+                 if start_ms <= int(row[0]) < end_ms and int(row[6]) < now_ms]
+        rows.extend(batch)
+        last_open = int(payload[-1][0])
+        next_cursor = last_open + 1
+        if next_cursor <= cursor:
+            raise RuntimeError(f"Binance pagination did not advance for {symbol} {interval}")
+        cursor = next_cursor
+        if len(payload) < LIMIT:
+            break
+        if pause:
+            time.sleep(pause)
+    unique = {row["t"]: row for row in rows}
+    return [unique[timestamp] for timestamp in sorted(unique)]
+
+
+def download_dataset(symbols, intervals, start_ms, end_ms, output,
+                     fetch_json=_http_json, pause=0.05):
+    if start_ms >= end_ms:
+        raise ValueError("start must be earlier than end")
+    valid_symbols = _spot_symbols(fetch_json)
+    normalised = []
+    for value in symbols:
+        symbol = value.upper()
+        pair = symbol if symbol.endswith("USDT") else symbol + "USDT"
+        if pair not in valid_symbols:
+            raise ValueError(f"{pair} is not an active Binance USDT Spot symbol")
+        if pair not in normalised:
+            normalised.append(pair)
+    if "BTCUSDT" not in normalised:
+        if "BTCUSDT" not in valid_symbols:
+            raise ValueError("BTCUSDT benchmark is not available on Binance Spot")
+        normalised.insert(0, "BTCUSDT")
+
+    path = Path(output)
+    payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"candles": {}}
+    candles = payload.setdefault("candles", {})
+    for pair in normalised:
+        coin = pair[:-4]
+        by_interval = candles.setdefault(coin, {})
+        for interval in intervals:
+            if interval not in INTERVALS:
+                raise ValueError(f"Unsupported interval: {interval}")
+            existing = by_interval.setdefault(interval, [])
+            now_ms = int(time.time() * 1000)
+            existing_by_time = {
+                int(row["t"]): row for row in existing
+                if start_ms <= int(row["t"]) < end_ms
+                and _candle_close_ms(int(row["t"]), interval) <= now_ms
+            }
+            # Backfill every missing segment, not just the tail. A file can
+            # have an apparently recent last candle while containing older gaps.
+            gaps = _missing_ranges(start_ms, end_ms, existing_by_time, interval)
+            for gap_start, gap_end in gaps:
+                fetched = _download_pair(
+                    pair, interval, gap_start, gap_end, fetch_json, pause
+                )
+                for row in fetched:
+                    existing_by_time[row["t"]] = row
+            by_interval[interval] = [existing_by_time[t] for t in sorted(existing_by_time)
+                                     if start_ms <= t < end_ms]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(path.suffix + ".tmp")
+            temp.write_text(json.dumps({"candles": candles}, separators=(",", ":")), encoding="utf-8")
+            temp.replace(path)
+    return {"symbols": [pair[:-4] for pair in normalised],
+            "intervals": list(intervals), "output": str(path)}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--start", required=True, help="UTC date/time; end is exclusive")
+    parser.add_argument("--end", required=True, help="UTC date/time; end is exclusive")
+    parser.add_argument("--symbols", nargs="+", help="base assets, e.g. BTC ETH SOL; default config backtest_symbols")
+    parser.add_argument("--intervals", nargs="+", default=list(INTERVALS),
+                        choices=list(INTERVALS), help="include HTF intervals (notably 1M)")
+    parser.add_argument("--output", default="data/sls_candles.json")
+    parser.add_argument("--pause", type=float, default=0.05, help="seconds between full pages")
+    args = parser.parse_args()
+    symbols = args.symbols
+    if not symbols:
+        config = json.loads(Path("config.json").read_text(encoding="utf-8"))
+        symbols = config.get("backtest_symbols") or config.get("watchlist", ["BTC"])
+    result = download_dataset(symbols, args.intervals, _utc_ms(args.start),
+                              _utc_ms(args.end), args.output, pause=max(0, args.pause))
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()
