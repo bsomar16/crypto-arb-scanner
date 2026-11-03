@@ -25,14 +25,21 @@ class SlsHistoryDownloaderTests(unittest.TestCase):
             query = parse_qs(urlparse(url).query)
             start = int(query["startTime"][0])
             if len(calls) == 1:
-                return [kline(start), kline(start + 300000)]
+                return [kline(i * 300000) for i in range(downloader.LIMIT)]
             return [kline(start)]
 
-        rows = downloader._download_pair("ETHUSDT", "5m", 0, 600000,
+        end_ms = downloader.LIMIT * 300000 + 300000
+        rows = downloader._download_pair("ETHUSDT", "5m", 0, end_ms,
                                          fetch_json=fake_fetch, pause=0)
-        self.assertEqual([row["t"] for row in rows], [0, 300000])
+        self.assertEqual(len(rows), downloader.LIMIT + 1)
+        self.assertEqual(rows[0]["t"], 0)
+        self.assertEqual(rows[-1]["t"], downloader.LIMIT * 300000 - 999)
         self.assertEqual(rows[0]["q"], 900.0)
-        self.assertEqual(len(calls), 1)  # short page terminates pagination
+        self.assertEqual(len(calls), 2)
+        first_start = int(parse_qs(urlparse(calls[0]).query)["startTime"][0])
+        second_start = int(parse_qs(urlparse(calls[1]).query)["startTime"][0])
+        self.assertEqual(first_start, 0)
+        self.assertEqual(second_start, (downloader.LIMIT - 1) * 300000 + 1)
 
     def test_download_dataset_adds_btc_and_writes_replay_schema(self):
         def fake_fetch(url):
