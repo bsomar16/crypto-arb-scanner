@@ -25,6 +25,7 @@ import signal_history
 import market_regime
 import signal_lifecycle
 import abt_strategy
+import sls_strategy
 import multi_exchange
 import shadow_trading
 
@@ -85,6 +86,8 @@ DEFAULTS = {
     "shadow_4h_structure_candidate_enabled": False,
     # Native TradingView Auto Breakout Toolkit family. Disabled by default until OOS validation.
     "abt_enabled": False,
+    "sls_enabled": True,
+    "sls_sensitivity": "Balanced",
     "abt_min_bars": 70,
     "abt_pivot_left": 5,
     "abt_pivot_right": 5,
@@ -598,6 +601,12 @@ def run_buy(token, chat_id, realtime_cache=None):
             abt = abt_strategy.evaluate_abt_coin(sym, interval=interval, cfg=cfg, chg24=chg.get(sym, 0.0))
             if abt:
                 results.append(abt)
+        # SLS is an independent SPOT BUY strategy. It never mutates standard/ABT
+        # signals and shares the existing downstream dedupe and Telegram path.
+        if bool(cfg.get("sls_enabled", True)):
+            sls = sls_strategy.evaluate_sls_coin(sym, interval=interval, cfg=cfg, chg24=chg.get(sym, 0.0))
+            if sls:
+                results.append(sls)
         return results
 
     workers = int(cfg.get("deep_scan_workers", 16))
