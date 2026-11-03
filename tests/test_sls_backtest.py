@@ -39,6 +39,18 @@ class SlsBacktestTests(unittest.TestCase):
         self.assertEqual([r["timestamp"] for r in purged], [day])
         self.assertEqual([r["timestamp"] for r in test], [2 * day, 3 * day])
 
+
+    def test_single_timestamp_is_oos_and_not_misreported_as_purged(self):
+        records = [
+            {"interval": "5m", "timestamp": 123456},
+            {"interval": "1h", "timestamp": 123456},
+        ]
+        cutoff, train, test, purged = sls_backtest._global_temporal_split(records, 0.7)
+        self.assertEqual(cutoff, 123456)
+        self.assertEqual(train, [])
+        self.assertEqual(test, records)
+        self.assertEqual(purged, [])
+
     def test_provider_exposes_only_fully_closed_candles(self):
         dataset = {"candles": {"ETH": {"5m": [
             {"t": i * 300000, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "q": 1}
@@ -71,6 +83,40 @@ class SlsBacktestTests(unittest.TestCase):
         self.assertEqual(result["outcome"], "TP3")
         self.assertEqual(result["hits"], [True, True, True])
         self.assertEqual(result["net_return_pct"], 20.0)
+
+
+    def test_execution_uses_next_candle_open_not_signal_close(self):
+        signal = {"entry": 100, "stop": 95, "t1": 107.5, "t2": 112.5, "t3": 120}
+        rows = [
+            {"t": 0, "o": 100, "h": 100, "l": 100, "c": 100},
+            {"t": 1, "o": 110, "h": 121, "l": 109, "c": 120},
+        ]
+        result = sls_backtest._evaluate_outcome(signal, rows, 0, 1, 0, 0)
+        self.assertEqual(result["execution_entry"], 110)
+        self.assertEqual(result["outcome"], "TP3")
+        self.assertAlmostEqual(result["net_return_pct"], (120 / 110 - 1) * 100, places=4)
+
+    def test_gap_through_stop_is_filled_at_worse_next_open(self):
+        signal = {"entry": 100, "stop": 95, "t1": 107.5, "t2": 112.5, "t3": 120}
+        rows = [
+            {"t": 0, "o": 100, "h": 100, "l": 100, "c": 100},
+            {"t": 1, "o": 90, "h": 100, "l": 89, "c": 95},
+        ]
+        result = sls_backtest._evaluate_outcome(signal, rows, 0, 1, 0, 0)
+        self.assertEqual(result["outcome"], "STOP")
+        self.assertEqual(result["execution_entry"], 90)
+        self.assertEqual(result["net_return_pct"], 0.0)
+
+    def test_stats_report_expectancy_and_profit_factor(self):
+        records = [
+            {"outcome": "TP3", "hits": [True, True, True], "net_return_pct": 10.0},
+            {"outcome": "STOP", "hits": [False, False, False], "net_return_pct": -5.0},
+            {"outcome": "CENSORED", "hits": [False, False, False], "net_return_pct": None},
+        ]
+        stats = sls_backtest._stats(records)
+        self.assertEqual(stats["expectancy_per_resolved_signal_pct"], 2.5)
+        self.assertEqual(stats["profit_factor"], 2.0)
+        self.assertEqual(stats["resolved_samples"], 2)
 
     def test_insufficient_future_is_censored_not_expired(self):
         signal = {"entry": 100, "stop": 95, "t1": 107.5, "t2": 112.5, "t3": 120}
