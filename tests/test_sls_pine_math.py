@@ -39,7 +39,7 @@ class PineMathTests(unittest.TestCase):
     def test_pivots_are_confirmed_and_use_asymmetric_tie_rule(self):
         values = [5, 4, 3, 4, 5, 6, 5, 4, 3, 4, 5]
         self.assertEqual(confirmed_pivots(values, 2, 2), [(2, 3.0), (8, 3.0)])
-        self.assertEqual(confirmed_pivots(values, 2, 2, low_pivot=False), [])
+        self.assertEqual(confirmed_pivots(values, 2, 2, low_pivot=False), [(5, 6.0)])
 
     def test_mismatched_ohlc_lengths_raise(self):
         with self.assertRaises(ValueError):
