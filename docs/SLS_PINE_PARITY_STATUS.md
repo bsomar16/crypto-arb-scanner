@@ -23,3 +23,12 @@ The scanner now routes SLS evaluation through `sls_engine.py`, using the Pine-co
 2. Compare each C1–C8 component, regime, mandatory gate, BUY event, stop and target to Python.
 3. Resolve every mismatch and retain regression fixtures.
 4. Run historical out-of-sample validation with fees, slippage, gaps and survivorship controls before publishing performance metrics.
+
+
+## Persistent position lifecycle update
+- `sls_position_store.py` persists SLS-only positions in `state/sls_positions.json`.
+- `scanner.py` advances each open position using newly closed candles, records TP1-TP5, gives STOP priority, enforces the configured bar lifetime, and suppresses repeated BUY candidates for the same coin/timeframe while the position remains open.
+- State is research/outcome tracking only; no order placement or exchange execution is performed.
+- The deployment must retain the `state/` directory between scheduled runs. If the workflow does not persist this file (for example via a durable volume or state artifact), lifecycle state and the lock reset on the next run.
+- TP/STOP events are logged and persisted; this integration does not send exit Telegram alerts.
+- Tests cover registration/locking, stop priority, target progression, and duplicate candle replay. Execution is pending CI.
