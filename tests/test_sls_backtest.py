@@ -51,6 +51,37 @@ class SlsBacktestTests(unittest.TestCase):
         self.assertEqual(test, records)
         self.assertEqual(purged, [])
 
+
+    def test_dataset_quality_reports_internal_fixed_interval_gaps(self):
+        rows = [
+            {"t": i * 300000, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "q": 1}
+            for i in (0, 1, 3, 4)
+        ]
+        data = sls_backtest._normalise_dataset({"candles": {"ETH": {"5m": rows}}})
+        quality = sls_backtest._dataset_quality(data)
+        item = quality["by_symbol_interval"]["ETH"]["5m"]
+        self.assertEqual(item["candles"], 4)
+        self.assertEqual(item["internal_missing_candles"], 1)
+        self.assertEqual(item["coverage_pct"], 80.0)
+        self.assertEqual(item["gaps"][0]["missing_candles"], 1)
+
+    def test_dataset_quality_handles_calendar_month_gaps(self):
+        jan = sls_backtest._candle_close_ms(
+            int(datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000),
+            "1M",
+        )
+        mar = int(datetime.datetime(2024, 3, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+        data = sls_backtest._normalise_dataset({"candles": {"BTC": {"1M": [
+            {"t": int(datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000),
+             "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "q": 1},
+            {"t": mar, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "q": 1},
+        ]}}})
+        quality = sls_backtest._dataset_quality(data)
+        item = quality["by_symbol_interval"]["BTC"]["1M"]
+        self.assertEqual(item["internal_missing_candles"], 1)
+        self.assertEqual(item["gaps"][0]["before_open_ms"], mar)
+        self.assertEqual(quality["btc_benchmark"]["5m"]["candles"], 0)
+
     def test_provider_exposes_only_fully_closed_candles(self):
         dataset = {"candles": {"ETH": {"5m": [
             {"t": i * 300000, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1, "q": 1}
