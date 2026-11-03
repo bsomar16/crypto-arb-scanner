@@ -318,6 +318,11 @@ def _buy_signal_identity(r):
     except (TypeError, ValueError):
         bos = "0"
     family = str(r.get("strategy_family", "") or "")
+    strategy = str(r.get("strategy", "") or "").upper()
+    if strategy == "SLS" or family.upper() == "SLS":
+        # SLS explicitly produces independent timeframe signals; keep each
+        # timeframe's notification identity separate.
+        return "|".join((coin, family, interval, setup, trigger, bos))
     return "|".join((coin, family, setup, trigger, bos))
 
 
@@ -444,19 +449,27 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
         coin = str(r.get("coin", "")).upper()
         if not coin:
             continue
-        current = best_by_coin.get(coin)
+        is_sls = str(r.get("strategy", "")).upper() == "SLS"
+        group_key = f"{coin}|SLS|{r.get('interval', '')}" if is_sls else coin
+        current = best_by_coin.get(group_key)
         if current is None or (r["score"], r["rr"], r["potential_pct"]) > (
             current["score"], current["rr"], current["potential_pct"]
         ):
-            best_by_coin[coin] = r
+            best_by_coin[group_key] = r
 
-    for coin, r in best_by_coin.items():
+    for group_key, r in best_by_coin.items():
+        coin = str(r.get("coin", "")).upper()
         if coin in active_coins:
             if audit is not None:
                 audit.reject("dedupe_active_position")
             continue
 
-        old = fired.get(coin, {})
+        old = fired.get(group_key)
+        if old is None and group_key != coin:
+            # Read the pre-timeframe-specific coin key during state migration.
+            old = fired.get(coin, {})
+        if old is None:
+            old = {}
         if not old:
             is_new_signal = True
         else:
@@ -508,7 +521,7 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
                 audit.reject("dedupe_unchanged")
             continue
 
-        updates[coin] = {
+        updates[group_key] = {
             "ts": now_ts,
             "entry": r["entry"],
             "score": r["score"],
