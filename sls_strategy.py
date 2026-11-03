@@ -41,13 +41,26 @@ def _pivot_lows(values, left=2, right=2):
 
 
 def _rsi_series(values, period=14):
-    """Rolling RSI values aligned to candle indices (no forward references)."""
+    """Wilder RSI aligned to candle indices, matching indicators.rsi()."""
     out = [50.0] * len(values)
-    for i in range(period, len(values)):
-        window = [values[j] - values[j-1] for j in range(i-period+1, i+1)]
-        gains = sum(max(x, 0.0) for x in window) / period
-        losses = sum(max(-x, 0.0) for x in window) / period
-        out[i] = 100.0 if losses == 0 and gains > 0 else 50.0 if losses == 0 else 100.0 - 100.0 / (1.0 + gains / losses)
+    if len(values) <= period:
+        return out
+    changes = [values[i] - values[i - 1] for i in range(1, len(values))]
+    avg_gain = sum(max(change, 0.0) for change in changes[:period]) / period
+    avg_loss = sum(max(-change, 0.0) for change in changes[:period]) / period
+
+    def rsi_value(gain, loss):
+        # Keep parity with indicators.rsi(), which returns 100 when loss is zero.
+        if loss == 0:
+            return 100.0
+        return 100.0 - 100.0 / (1.0 + gain / loss)
+
+    out[period] = rsi_value(avg_gain, avg_loss)
+    for index in range(period + 1, len(values)):
+        change = changes[index - 1]
+        avg_gain = (avg_gain * (period - 1) + max(change, 0.0)) / period
+        avg_loss = (avg_loss * (period - 1) + max(-change, 0.0)) / period
+        out[index] = rsi_value(avg_gain, avg_loss)
     return out
 
 
