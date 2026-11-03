@@ -189,12 +189,9 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     gates={"history":hist_ok,"score":score>=threshold,"regime":reg_ok,"benchmark":bench_ok,
            "liquidity":liq_ok,"extension":not ext_high,"risk_reward":rr_gate}
     confirmed=all(gates.values())
-    previous_confirmed=False
-    if i>0:
-        # Prevent duplicate BUY on a continuously true condition.
-        prev_score=max(0,min(100, (c1+c2+c3+c4+c5+c6+c7+c8)))
-        previous_confirmed=confirmed and prev_score>=threshold
-    buy=confirmed and not previous_confirmed
+    # Scanner performs timeframe/candle deduplication; this pure evaluator
+    # reports a qualifying confirmed bar and does not fabricate edge history.
+    buy=confirmed
     if not buy: return None
     risk=price-stop
     targets=[price+r*x for x in (1.5,2.5,4,6,8)]
