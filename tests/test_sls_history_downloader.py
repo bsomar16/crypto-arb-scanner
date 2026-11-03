@@ -77,6 +77,38 @@ class SlsHistoryDownloaderTests(unittest.TestCase):
             self.assertEqual(set(payload["candles"]), {"BTC", "ETH"})
             self.assertEqual(payload["candles"]["ETH"]["5m"][0]["q"], 900.0)
 
+    def test_resume_discards_previously_saved_forming_candles(self):
+        import json
+        from unittest.mock import patch
+
+        symbols = [
+            {"symbol": "BTCUSDT", "status": "TRADING", "quoteAsset": "USDT",
+             "isSpotTradingAllowed": True},
+            {"symbol": "ETHUSDT", "status": "TRADING", "quoteAsset": "USDT",
+             "isSpotTradingAllowed": True},
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "candles.json"
+            forming = {"t": 900000, "o": 9, "h": 11, "l": 8,
+                       "c": 10, "v": 100, "q": 900}
+            output.write_text(json.dumps({"candles": {
+                "BTC": {"5m": [forming]}, "ETH": {"5m": [forming]}
+            }}), encoding="utf-8")
+
+            def fake_fetch(url):
+                if url.endswith("/api/v3/exchangeInfo"):
+                    return {"symbols": symbols}
+                return []
+
+            with patch.object(downloader.time, "time", return_value=1000):
+                downloader.download_dataset(
+                    ["ETH"], ["5m"], 0, 1500000, output,
+                    fetch_json=fake_fetch, pause=0
+                )
+            saved = json.loads(output.read_text(encoding="utf-8"))["candles"]
+            self.assertEqual(saved["BTC"]["5m"], [])
+            self.assertEqual(saved["ETH"]["5m"], [])
+
     def test_rejects_non_spot_symbol(self):
         def fake_fetch(url):
             return {"symbols": []}
