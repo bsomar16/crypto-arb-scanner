@@ -141,7 +141,9 @@ def _global_temporal_split(records, train_fraction, horizons=None):
         return None, [], [], []
     timestamps = sorted({int(row["timestamp"]) for row in records})
     if len(timestamps) < 2:
-        return timestamps[0], [], list(records), list(records)
+        # With no distinct boundary, every observation belongs to the OOS
+        # partition. Nothing is a training label, so nothing can be purged.
+        return timestamps[0], [], list(records), []
     cutoff_index = min(len(timestamps) - 1, max(1, int(len(timestamps) * train_fraction)))
     cutoff = timestamps[cutoff_index]
     horizon_map = {**DEFAULT_HORIZON, **(horizons or {})}
