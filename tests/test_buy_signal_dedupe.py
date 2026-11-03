@@ -56,6 +56,18 @@ class BuySignalDedupeTests(unittest.TestCase):
             scanner._buy_signal_identity(other),
         )
 
+    def test_sls_keys_survive_state_migration(self):
+        state = {
+            "GALA|SLS|5m": {"ts": 100},
+            "GALA|SLS|15m": {"ts": 200},
+            "GALA|15m": {"ts": 150},
+        }
+        migrated, changed = scanner._migrate_fired_signal_state(state)
+        self.assertTrue(changed)
+        self.assertEqual(migrated["GALA|SLS|5m"]["ts"], 100)
+        self.assertEqual(migrated["GALA|SLS|15m"]["ts"], 200)
+        self.assertEqual(migrated["GALA"]["ts"], 150)
+
     def test_previous_signal_is_not_repeated(self):
         hits = [self._signal()]
         fired = {
