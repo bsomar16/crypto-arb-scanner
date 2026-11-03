@@ -120,7 +120,7 @@ def _provider(data, asof_ms):
             return None
         rows = data.get(str(symbol).upper(), {}).get(interval, [])
         closed = [r for r in rows if _candle_close_ms(r["t"], interval) <= asof_ms]
-        return closed[-limit:] if len(closed) >= 200 else None
+        return closed[-limit:] if len(closed) >= 50 else None
     return fetch
 
 def _evaluate_outcome(signal, rows, index, horizon, fee_rate, slippage_rate):
