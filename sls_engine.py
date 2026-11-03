@@ -61,6 +61,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     stop=price-1.5*atr; stop_pct=(price-stop)/price*100
     rr=3.0 # TP3 is 4R; Pine's C7 uses target room and stop risk. RR to TP1 = 1.5.
     rr1=1.5
+    rr2=2.5
 
     # Regime classifier
     sep_req=0.0025
@@ -134,8 +135,15 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
                 obs.append({"top":h[k-1],"bottom":l[k-1],"born":k}); last_ob=k
         obs=[z for z in obs if c[k]>=z["bottom"]][-5:]
         fvgs=[z for z in fvgs if c[k]>=z["bottom"]][-4:]
-        if k>=1 and l[k]<l[k-1] and c[k]>l[k-1] and k-last_sweep>=10:
-            sweeps.append((k,l[k-1])); last_sweep=k
+        # Confirmed SSL levels: 0.35 ATR proximity, five retained, 50-bar expiry.
+        for p_idx, p_val in low_pivots[-2:]:
+            if p_idx < k and k-p_idx <= 50 and abs(l[k]-p_val) <= 0.35*(atrs[k] or 0):
+                if not any(x[0] == p_idx for x in equal_lows):
+                    equal_lows.append((p_idx,p_val))
+        equal_lows=[x for x in equal_lows if k-x[0] <= 50][-5:]
+        swept=next((level for level in equal_lows if l[k] < level[1] and c[k] > level[1]),None)
+        if swept is not None and k-last_sweep>=10:
+            sweeps.append((k,swept[1])); last_sweep=k
         if len(low_pivots)>=2:
             p1,v1=low_pivots[-2]; p2,v2=low_pivots[-1]
             if 5<=p2-p1<=60 and v2<v1 and rsi[p2] is not None and rsi[p1] is not None and rsi[p2]>rsi[p1]:
@@ -179,7 +187,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     # C8 independent confluence count
     liq_ok=sum(q[max(0,i-19):i+1])>=turnover_floor
     conf=sum([regime in ("R_BULL","R_CONT"),htf_skip or (htf_above and htf_align),
-              btc_state=="B_SUP",divergence_state>=2,rvz>=1.5,hl,rr1>=2,
+              btc_state=="B_SUP",divergence_state>=2,rvz>=1.5,hl,rr2>=2,
               50<rsi[i]<75,not ext_high,liq_ok,bos,near_demand])
     c8=10 if conf>=10 else 8 if conf>=9 else 6 if conf>=8 else 4 if conf>=7 else 2 if conf>=6 else 0
     score=max(0,min(100,c1+c2+c3+c4+c5+c6+c7+c8))
