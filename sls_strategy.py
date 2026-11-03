@@ -69,9 +69,10 @@ def _state(rows, min_history=200):
     e200 = pine_ema(close, 200) if len(close) >= 200 else [None] * len(close)
     macd, sig, hist = pine_macd(close, 12, 26, 9)
     rsi = pine_rsi(close, 14)
-    if any(x is None for x in (e20[-1], e50[-1], e200[-1], macd[-1], sig[-1], hist[-1], rsi[-1])):
+    if any(x is None for x in (e20[-1], e50[-1], macd[-1], sig[-1], hist[-1], rsi[-1])):
         return None
-    return {"close": close[-1], "closes": close, "e20": e20, "e50": e50, "e200": e200,
+    return {"close": close[-1], "closes": close, "e20": e20, "e50": e50,
+            "e200": e200 if len(close) >= 200 else None,
             "macd": macd, "sig": sig, "hist": hist, "rsi": rsi[-1], "rsi_series": rsi}
 
 
