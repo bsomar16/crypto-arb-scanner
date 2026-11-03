@@ -115,6 +115,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     last_low=lows[-1][1] if lows else None
     last_high=highs[-1][1] if highs else None
     swing_len=50 if big else 30
+    res20=max(h[i-20:i]) if i>=20 else None
     discount=bool(last_low is not None and last_high is not None and price<(last_low+last_high)/2)
     bos=False; bos_bars=[]
     for k in range(max(1,i-10),i+1):
@@ -182,7 +183,7 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     vol3=_sma(v,3,i); vol10=_sma(v,10,i)
     c4=(3 if rvz>=1 else 0)+(2 if rvz>=1.5 else 0)+(3 if green else 0)+(3 if vol3 and vol10 and vol3>vol10 else 0)+(2 if green3>=2 else 0)+(2 if up_share>.5 else 0)
     # C5
-    c5=(4 if (max(h[max(0,i-19):i+1]) is not None and price>max(h[max(0,i-19):i+1])) or bos else 0)+(3 if hl else 0)+(2 if hh else 0)
+    c5=(4 if (res20 is not None and price>res20) or bos else 0)+(3 if hl else 0)+(2 if hh else 0)
     c5+=(2 if min(c[i-4:i+1])>e50[i] else 0)+(2 if near_demand else 0)+(1 if in_discount else 0)+(1 if recent_sweep else 0)
     # C6 divergence points
     c6={3:6,2:4,1:2}.get(divergence_state,0)+(2 if div_vol else 0)+(2 if div_support else 0)
