@@ -135,6 +135,31 @@ def _stats(records):
     }
 
 
+def _global_temporal_split(records, train_fraction, horizons=None):
+    """Split all symbols/timeframes at one timestamp and purge overlapping train labels."""
+    if not records:
+        return None, [], [], []
+    timestamps = sorted({int(row["timestamp"]) for row in records})
+    if len(timestamps) < 2:
+        return timestamps[0], [], list(records), list(records)
+    cutoff_index = min(len(timestamps) - 1, max(1, int(len(timestamps) * train_fraction)))
+    cutoff = timestamps[cutoff_index]
+    horizon_map = {**DEFAULT_HORIZON, **(horizons or {})}
+    train, test, purged = [], [], []
+    for row in records:
+        timestamp = int(row["timestamp"])
+        if timestamp >= cutoff:
+            test.append(row)
+            continue
+        interval = row["interval"]
+        label_end = timestamp + INTERVAL_MS[interval] * max(1, int(horizon_map[interval]))
+        if label_end <= cutoff:
+            train.append(row)
+        else:
+            purged.append(row)
+    return cutoff, train, test, purged
+
+
 def run_replay(dataset, sensitivity="Balanced", fee_rate=0.001, slippage_rate=0.0005,
                train_fraction=0.7, horizons=None):
     if not 0.5 <= train_fraction < 1.0:
@@ -179,21 +204,37 @@ def run_replay(dataset, sensitivity="Balanced", fee_rate=0.001, slippage_rate=0.
     grouped = defaultdict(list)
     for row in records:
         grouped[row["interval"]].append(row)
+    global_cutoff, global_train, global_test, global_purged = _global_temporal_split(
+        records, train_fraction, horizons
+    )
+    train_by_interval = defaultdict(list)
+    test_by_interval = defaultdict(list)
+    purged_by_interval = defaultdict(list)
+    for row in global_train:
+        train_by_interval[row["interval"]].append(row)
+    for row in global_test:
+        test_by_interval[row["interval"]].append(row)
+    for row in global_purged:
+        purged_by_interval[row["interval"]].append(row)
     report = {
-        "method": "causal_asof_closed_candles",
+        "method": "causal_asof_closed_candles_global_temporal_split_purged",
         "sensitivity": sensitivity,
         "fees_per_side_pct": round(fee_rate * 100, 5),
         "slippage_per_side_pct": round(slippage_rate * 100, 5),
         "train_fraction": train_fraction,
+        "global_oos_start_ms": global_cutoff,
+        "purged_train_signals": len(global_purged),
         "by_interval": {},
         "signal_count": len(records),
     }
     for interval in sls_strategy.INTERVALS:
         items = sorted(grouped[interval], key=lambda x: x["timestamp"])
-        cutoff_index = int(len(items) * train_fraction)
-        train, test = items[:cutoff_index], items[cutoff_index:]
+        train = sorted(train_by_interval[interval], key=lambda x: x["timestamp"])
+        test = sorted(test_by_interval[interval], key=lambda x: x["timestamp"])
+        purged = purged_by_interval[interval]
         report["by_interval"][interval] = {
             "all": _stats(items), "train": _stats(train), "out_of_sample": _stats(test),
+            "purged_train_signals": len(purged),
             "oos_start_ms": test[0]["timestamp"] if test else None,
         }
     report["records"] = records
