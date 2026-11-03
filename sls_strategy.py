@@ -23,7 +23,7 @@ def _candles(symbol, interval, limit=240):
         rows = raw[:-1]
         out = [{"t": int(k[0]), "o": float(k[1]), "h": float(k[2]), "l": float(k[3]),
                 "c": float(k[4]), "v": float(k[5]), "q": float(k[7])} for k in rows]
-        value = out if len(out) >= 70 else None
+        value = out if len(out) >= 200 else None
     except Exception:
         value = None
     with _LOCK:
@@ -52,7 +52,7 @@ def _rsi_series(values, period=14):
 
 
 def _state(rows):
-    if not rows or len(rows) < 60:
+    if not rows or len(rows) < 200:
         return None
     close = [x["c"] for x in rows]
     e20, e50, e200 = ind.ema(close, 20), ind.ema(close, 50), ind.ema(close, 200)
