@@ -3,6 +3,7 @@ import unittest
 
 import scanner
 import sls_strategy
+import sls_engine
 
 
 class SlsScannerIntegrationTests(unittest.TestCase):
@@ -13,7 +14,7 @@ class SlsScannerIntegrationTests(unittest.TestCase):
         self.assertTrue(scanner.DEFAULTS["sls_enabled"])
 
     def test_strategy_contract_is_spot_buy_only(self):
-        source = inspect.getsource(sls_strategy.evaluate_sls_coin)
+        source = inspect.getsource(sls_engine.evaluate_series)
         self.assertIn('"signal_action": "BUY"', source)
         self.assertNotIn('"signal_action": "SELL"', source)
         self.assertNotIn('"signal_action": "SHORT"', source)
