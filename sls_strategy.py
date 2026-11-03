@@ -40,6 +40,17 @@ def _pivot_lows(values, left=2, right=2):
     return result
 
 
+def _rsi_series(values, period=14):
+    """Rolling RSI values aligned to candle indices (no forward references)."""
+    out = [50.0] * len(values)
+    for i in range(period, len(values)):
+        window = [values[j] - values[j-1] for j in range(i-period+1, i+1)]
+        gains = sum(max(x, 0.0) for x in window) / period
+        losses = sum(max(-x, 0.0) for x in window) / period
+        out[i] = 100.0 if losses == 0 and gains > 0 else 50.0 if losses == 0 else 100.0 - 100.0 / (1.0 + gains / losses)
+    return out
+
+
 def _state(rows):
     if not rows or len(rows) < 60:
         return None
@@ -111,13 +122,13 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0):
         c5 = (5 if breakout else 0) + (4 if higher_lows else 0) + (3 if discount else 0) + (3 if sweep else 0)
 
         # C6: bullish RSI divergence from confirmed swing lows (10).
-        rsi_values = []
-        for end in range(15, len(close) + 1):
-            rsi_values.append(float(ind.rsi(close[:end], 14) or 50))
-        rsi_values = [50.0] * (len(close) - len(rsi_values)) + rsi_values
-        rp = _pivot_lows(rsi_values)
+        rsi_values = _rsi_series(close, 14)
         lp = _pivot_lows(low)
-        divergence = len(rp) >= 2 and len(lp) >= 2 and lp[-1][1] < lp[-2][1] and rp[-1][1] > rp[-2][1] + 2
+        divergence = (
+            len(lp) >= 2
+            and lp[-1][1] < lp[-2][1]
+            and rsi_values[lp[-1][0]] > rsi_values[lp[-2][0]] + 2
+        )
         c6 = 10 if divergence else 0
 
         # C7: extension guard, ATR stop and upside room (10).
