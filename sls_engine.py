@@ -110,7 +110,8 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
     res20=max(h[i-20:i]) if i>=20 else None
     bos=False; bos_bars=[]
     for k in range(max(1,i-10),i+1):
-        if len(highs) and c[k]>max(x[1] for x in highs if x[0]<k) if any(x[0]<k for x in highs) else False:
+        prior_highs=[x[1] for x in highs if x[0] < k]
+        if prior_highs and c[k] > max(prior_highs):
             if c[k]>o[k] and (not bos_bars or k-bos_bars[-1]>=5): bos_bars.append(k)
     bos=bool(bos_bars and i-bos_bars[-1]<=10)
 
@@ -136,10 +137,11 @@ def evaluate_series(rows, interval, htf_rows=None, btc_rows=None,
         obs=[z for z in obs if c[k]>=z["bottom"]][-5:]
         fvgs=[z for z in fvgs if c[k]>=z["bottom"]][-4:]
         # Confirmed SSL levels: 0.35 ATR proximity, five retained, 50-bar expiry.
-        for p_idx, p_val in low_pivots[-2:]:
-            if p_idx < k and k-p_idx <= 50 and abs(l[k]-p_val) <= 0.35*(atrs[k] or 0):
-                if not any(x[0] == p_idx for x in equal_lows):
-                    equal_lows.append((p_idx,p_val))
+        # Pair consecutive confirmed pivot lows; compare pivot prices, not later candle lows.
+        if len(low_pivots) >= 2 and low_pivots[-1][0] + pivot_len == k:
+            (p1,v1),(p2,v2)=low_pivots[-2],low_pivots[-1]
+            if p2-p1 <= 50 and abs(v2-v1) <= 0.35*(atrs[k] or 0):
+                equal_lows.append((p2,(v1+v2)/2.0))
         equal_lows=[x for x in equal_lows if k-x[0] <= 50][-5:]
         swept=next((level for level in equal_lows if l[k] < level[1] and c[k] > level[1]),None)
         if swept is not None and k-last_sweep>=10:
