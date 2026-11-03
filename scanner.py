@@ -326,6 +326,30 @@ def _buy_signal_identity(r):
     return "|".join((coin, family, setup, trigger, bos))
 
 
+def _migrate_fired_signal_state(fired):
+    """Migrate legacy interval-qualified keys while preserving SLS timeframe keys."""
+    if not isinstance(fired, dict):
+        return {}, False
+    if not any("|" in str(key) for key in fired):
+        return fired, False
+    migrated = {}
+    for key, value in fired.items():
+        if not isinstance(value, dict):
+            continue
+        parts = str(key).split("|")
+        if len(parts) == 3 and parts[1].upper() == "SLS" and parts[2] in sls_strategy.INTERVALS:
+            # Current SLS state is deliberately keyed by coin/strategy/interval.
+            migrated["|".join((parts[0].upper(), "SLS", parts[2]))] = value
+            continue
+        coin = parts[0].upper()
+        if not coin:
+            continue
+        previous = migrated.get(coin)
+        if previous is None or float(value.get("ts", 0) or 0) > float(previous.get("ts", 0) or 0):
+            migrated[coin] = value
+    return migrated, True
+
+
 def _claim_buy_notification_keys(signals, now_ts, ttl_days=30):
     """Atomically claim BUY notification identities across workflow runners.
 
@@ -626,19 +650,9 @@ def run_buy(token, chat_id, realtime_cache=None):
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
         hits = [r for batch in ex.map(scan, tasks) for r in (batch or [])]
 
-    fired = load_json("state/fired_signals.json", {}) or {}
-    migrated_fired = False
-    if any("|" in str(k) for k in fired):
-        migrated = {}
-        for key, value in fired.items():
-            coin = str(key).split("|", 1)[0].upper()
-            if not coin or not isinstance(value, dict):
-                continue
-            previous = migrated.get(coin)
-            if previous is None or float(value.get("ts", 0) or 0) > float(previous.get("ts", 0) or 0):
-                migrated[coin] = value
-        fired = migrated
-        migrated_fired = True
+    fired, migrated_fired = _migrate_fired_signal_state(
+        load_json("state/fired_signals.json", {}) or {}
+    )
 
     now_ts = datetime.now(timezone.utc).timestamp()
     active_coins = {
