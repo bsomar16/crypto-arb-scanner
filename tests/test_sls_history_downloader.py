@@ -33,7 +33,7 @@ class SlsHistoryDownloaderTests(unittest.TestCase):
                                          fetch_json=fake_fetch, pause=0)
         self.assertEqual(len(rows), downloader.LIMIT + 1)
         self.assertEqual(rows[0]["t"], 0)
-        self.assertEqual(rows[-1]["t"], downloader.LIMIT * 300000 - 999)
+        self.assertEqual(rows[-1]["t"], (downloader.LIMIT - 1) * 300000 + 1)
         self.assertEqual(rows[0]["q"], 900.0)
         self.assertEqual(len(calls), 2)
         first_start = int(parse_qs(urlparse(calls[0]).query)["startTime"][0])
