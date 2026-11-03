@@ -120,6 +120,18 @@ def evaluate_sls_coin(coin, interval="1h", cfg=None, chg24=0.0, candle_provider=
         )
         if not result:
             return None
+        # Pine buyEvent is a rising edge, not a persistent qualifying state.
+        # Compare against the prior closed bar with historically available
+        # HTF and BTC context only.
+        if len(rows) >= 206:
+            prev_close = _interval_close_ms(int(rows[-2]["t"]), interval)
+            prev_htf = _asof_closed(raw_htf, prev_close, htf) if htf else None
+            prev_btc = _asof_closed(raw_btc, prev_close, benchmark_interval)
+            prev_signal = evaluate_series(
+                rows[:-1], interval, htf_rows=prev_htf, btc_rows=prev_btc,
+                sensitivity=mode, min_score=cfg.get("sls_min_score"))
+            if prev_signal:
+                return None
         result["coin"] = symbol
         result["strategy_id"] = f"sls_{interval}"
         result["trade_horizon"] = "Scalp" if interval in ("5m","15m") else "Medium" if interval in ("1h","4h") else "Long"
