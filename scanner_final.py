@@ -1,0 +1,1075 @@
+#!/usr/bin/env python3
+"""Crypto-only signal bot orchestration - FULLY INTEGRATED VERSION.
+
+Modes: daily | buy | realtime | price | backtest | validate | portfolio | check | report | all
+
+FEATURES:
+- Multi-exchange discovery (8 exchanges)
+- Pump potential filter (>40% potential moves)
+- Win rate filtering and ranking (min 55%)
+- ML classifier for P(WIN) prediction
+- Market regime detection & adaptive strategies
+- Dynamic risk management (Kelly, trailing stops)
+- Correlation clustering & signal deduplication
+- Narrative tracking & sector rotation
+- Derivatives integration (funding, OI, liquidations)
+- Performance attribution dashboard
+- WebSocket real-time feeds (optional)
+"""
+
+import base64
+import concurrent.futures
+import json
+import os
+import sys
+from argparse import ArgumentParser
+from datetime import datetime, timezone
+
+from botutil import esc, telegram_msg, load_json, save_json, fmt_price, log, set_json_logs
+from signal_audit import SignalAudit
+from markets import fetch_binance_24h, crypto_quote
+from signals import intraday_signal
+import alerts as alerts_mod
+import positions as positions_mod
+import signal_outcomes
+import component_quality
+import outcome_attribution
+import signal_history
+import market_regime
+import signal_lifecycle
+import abt_strategy
+import sls_strategy
+import multi_exchange
+import shadow_trading
+
+# NEW: Integration modules
+from integration import SignalEnricher, create_enricher, enrich_discovery_with_all
+
+STATE_DIR = "state"
+
+DEFAULTS = {
+    "timezone_label": "UTC",
+    "daily_hour_utc": 8,
+    "daily_minute_utc": 0,
+    "daily_top_n": 20,
+    "daily_scan_top": 80,
+    "min_daily_qv": 1500000,
+    "buy_scan_top_n": 100,
+    "buy_min_vol": 2000000,
+    "buy_intervals": ["5m", "15m", "1h", "4h", "1d", "1w"],
+    "buy_scan_every_minutes": 15,
+    "buy_min_vol_x": 1.15,
+    "buy_fast_top_n": 150,
+    "buy_fast_top_n_shown": 15,
+    "buy_fast_min_hour_vol": 100000,
+    "buy_fast_min_vol_x": 1.35,
+    "signal_min_potential_pct": 5.0,
+    "signal_max_potential_pct": 300.0,
+    "signal_min_score": 55,
+    "signal_min_rr": 1.5,
+    "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", "TON", "TRX", "DOT", "LTC", "MATIC", "PEPE", "FET", "APT", "ARB", "OP", "INJ"],
+    "holdings": [],
+    "price_alerts": [],
+    "backtest_symbols": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE"],
+    "position_expiry_days": 14,
+    "max_open_positions": 5,
+    "realtime_scan_interval_seconds": 60,
+    "realtime_discovery_refresh_seconds": 900,
+    "realtime_monitor_candidates": 25,
+    "realtime_kline_enabled": True,
+    "realtime_kline_intervals": ["5m", "15m", "1h"],
+    "realtime_kline_max_symbols": 100,
+    "realtime_kline_max_bars": 120,
+    "outcome_tracking_enabled": True,
+    "outcome_refresh_seconds": 300,
+    "outcome_max_pending": 60,
+    "outcome_horizon_bars": {"5m": 288, "15m": 96, "1h": 48},
+    "market_regime_enabled": True,
+    "market_regime_breadth_min_quote_volume": 1000000,
+    "market_regime_breadth_limit": 100,
+    "multi_exchange_enabled": True,
+    "multi_exchange_max_dispersion_pct": 1.5,
+    "multi_exchange_max_candidates": 30,
+    "correlation_interval": "1h",
+    "correlation_lookback_bars": 72,
+    "max_pairwise_correlation": 0.88,
+    "correlation_workers": 8,
+    "correlation_risk_hard_block": False,
+    "shadow_trading_enabled": False,
+    "shadow_notional_usdt": 300.0,
+    "shadow_state_path": "state/shadow_trades.jsonl",
+    "shadow_4h_structure_candidate_enabled": False,
+    "abt_enabled": False,
+    "sls_enabled": True,
+    "sls_sensitivity": "Balanced",
+    "abt_min_bars": 70,
+    "abt_pivot_left": 5,
+    "abt_pivot_right": 5,
+    "abt_require_untouched_trendline": True,
+    "abt_breakout_buffer_atr": 0.15,
+    "abt_touch_lookback": 15,
+    "abt_climax_volume_x": 2.0,
+    "abt_absorption_volume_x": 0.60,
+    "abt_absorption_range_ratio": 0.40,
+    "abt_stop_atr": 1.5,
+    "abt_min_score_early": 52,
+    "abt_min_score_reversal": 55,
+    "abt_min_score_breakout": 58,
+    "shadow_4h_structure_state_path": "state/shadow_4h_structure.jsonl",
+    
+    # Multi-exchange discovery settings
+    "discovery_exchanges": ["BINANCE", "BYBIT", "OKX", "MEXC", "GATE", "KUCOIN", "HTX", "BITGET"],
+    "discovery_min_quote_volume": 500000,
+    "discovery_universe_size": 600,
+    "discovery_deep_candidates": 300,
+    "discovery_workers": 24,
+    "discovery_fast_scan_size": 600,
+    "discovery_min_pump_score": 60,
+    "discovery_pump_weight": 0.3,
+    
+    # Pump filter settings
+    "signal_min_pump_potential_pct": 40.0,
+    "signal_require_pump_filter": True,
+    
+    # Win rate filter settings
+    "signal_min_win_rate_pct": 55.0,
+    "signal_min_win_rate_samples": 10,
+    "signal_win_rate_weight": 0.2,
+    "signal_win_rate_boost_max": 20.0,
+    
+    # ML settings
+    "ml_model_type": "xgboost",
+    "ml_retrain_interval_hours": 24,
+    "ml_min_samples": 50,
+    "ml_threshold": 0.55,
+    
+    # Regime settings
+    "regime_lookback_days": 30,
+    "regime_breadth_min_qv": 1000000,
+    "regime_breadth_limit": 100,
+    
+    # Risk settings
+    "account_equity_usdt": 10000,
+    "max_total_exposure_usdt": 3000,
+    "max_position_notional_usdt": 500,
+    "risk_per_trade_pct": 1.0,
+    "max_daily_loss_usdt": 50,
+    "kelly_sizing_enabled": True,
+    "kelly_lookback_trades": 100,
+    "kelly_max_fraction": 0.25,
+    "trailing_stop_enabled": True,
+    "trailing_activation_r": 1.0,
+    "trailing_distance_r": 0.5,
+    "max_pairwise_correlation": 0.75,
+    "max_same_sector_positions": 2,
+    
+    # Correlation clustering
+    "correlation_threshold": 0.75,
+    "correlation_lookback_days": 30,
+    "min_cluster_size": 2,
+    
+    # Narrative tracking
+    "narrative_lookback_hours": 24,
+    "narrative_min_coins": 3,
+    "narrative_momentum_threshold": 50,
+    
+    # Attribution
+    "attribution_lookback_days": 30,
+    
+    # WebSocket (optional)
+    "ws_enabled": False,
+    "ws_exchanges": ["BINANCE", "BYBIT", "OKX"],
+    "ws_futures": True,
+}
+
+def load_cfg():
+    d = load_json("config.json", {}) or {}
+    out = dict(DEFAULTS)
+    out.update(d)
+    return out
+
+def now_s():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+def _candidate_universe(cfg, q, star, t24=None):
+    """Build a wide discovery universe instead of volume-rank-only candidates."""
+    from discovery import discover
+    results, deep = discover(t24 or [], cfg)
+    discovered = [r["coin"] for r in deep]
+    floor = float(cfg.get("discovery_min_quote_volume", 500000))
+    for sym in sorted(star - set(discovered)):
+        if q.get(sym, 0) >= floor:
+            discovered.append(sym)
+    return discovered, results
+
+def _rank_trade_candidates(hits, cfg, enricher=None):
+    """Rank qualified BUY signals by setup quality + all advanced factors."""
+    attribution = outcome_attribution.aggregate(signal_history._read(), min_samples=30)
+    try:
+        regime = market_regime.detect_regime(
+            fetch_binance_24h(),
+            breadth_min_quote_volume=float(cfg.get("market_regime_breadth_min_quote_volume", 1000000)),
+            breadth_limit=int(cfg.get("market_regime_breadth_limit", 100)),
+        ) if bool(cfg.get("market_regime_enabled", True)) else {"state": "UNKNOWN", "score_modifier": 0.0}
+    except Exception as e:
+        log("BUY", "market regime unavailable:", e)
+        regime = {"state": "UNKNOWN", "score_modifier": 0.0}
+    scored = []
+    for r in hits:
+        historical = r.get("historical_win_pct")
+        sample = int(r.get("historical_sample", 0) or 0)
+        rr_component = min(100.0, float(r.get("rr", 0)) / 3.0 * 100.0)
+        base_quality = (
+            float(r.get("entry_quality", 50.0)) * 0.20
+            + float(r.get("score", 0)) * 0.20
+            + float(r.get("expansion_score", 0)) * 0.15
+            + rr_component * 0.10
+        )
+        outcome_quality = 0.0
+        if historical is not None and sample >= 20:
+            rates = r.get("historical_milestone_rates", {}) or {}
+            early = float(rates.get("5", 0.0)) * 0.35 + float(rates.get("10", 0.0)) * 0.25 + float(rates.get("20", 0.0)) * 0.15
+            mfe = min(100.0, max(0.0, float(r.get("historical_avg_mfe_pct", 0.0))) * 2.0)
+            mae = min(100.0, max(0.0, -float(r.get("historical_avg_mae_pct", 0.0))) * 8.0)
+            outcome_quality = float(historical) * 0.45 + early * 0.35 + mfe * 0.10 + (100.0 - mae) * 0.10
+            quality = base_quality * 0.70 + outcome_quality * 0.30
+        else:
+            quality = base_quality / 0.85
+        row = dict(r)
+        component_modifier = component_quality.ranking_modifier(row, attribution, min_samples=30)
+        row["component_quality_modifier"] = component_modifier
+        row["market_regime"] = regime.get("state", "UNKNOWN")
+        row["market_regime_volatility"] = regime.get("volatility", "UNKNOWN")
+        row["market_regime_breadth_pct"] = regime.get("breadth_pct", 0.0)
+        row["market_regime_modifier"] = float(regime.get("score_modifier", 0.0) or 0.0)
+        bullish = row.get("bullish_potential", {}) or {}
+        row["bullish_potential_modifier"] = round((float(bullish.get("score", 50.0)) - 50.0) * 0.08, 1)
+        if str(row.get("strategy", "")).upper() == "ABT":
+            try:
+                hs = signal_history.comparable_stats(row, min_samples=int(cfg.get("abt_confidence_min_samples", 30)))
+            except Exception:
+                hs = None
+            if hs and hs.get("win_pct") is not None and int(hs.get("sample", 0) or 0) >= int(cfg.get("abt_confidence_min_samples", 30)):
+                raw_conf = float(row.get("confidence_score", row.get("score", 0)) or 0)
+                win_pct = float(hs.get("win_pct", 0) or 0)
+                row["confidence_calibrated"] = round(max(0.0, min(100.0, raw_conf * 0.70 + win_pct * 0.30)), 1)
+                row["confidence_historical_win_pct"] = round(win_pct, 1)
+                row["confidence_historical_sample"] = int(hs.get("sample", 0) or 0)
+                row["confidence_calibration_scope"] = hs.get("scope")
+                row["confidence_calibration_modifier"] = round(max(-5.0, min(5.0, (win_pct - 70.0) * 0.15)), 1)
+            else:
+                row["confidence_calibrated"] = float(row.get("confidence_score", row.get("score", 0)) or 0)
+                row["confidence_calibration_modifier"] = 0.0
+        else:
+            row["confidence_calibration_modifier"] = 0.0
+        
+        # NEW: Advanced factor modifiers
+        # Win rate modifier
+        win_rate_modifier = 0.0
+        win_rate = row.get("historical_win_pct")
+        win_rate_samples = int(row.get("historical_sample", 0) or 0)
+        min_samples = int(cfg.get("signal_min_win_rate_samples", 10))
+        if win_rate is not None and win_rate_samples >= min_samples:
+            if win_rate <= 50:
+                win_rate_norm = 0
+            elif win_rate >= 80:
+                win_rate_norm = 100
+            else:
+                win_rate_norm = (win_rate - 50) * 100 / 30
+            sample_confidence = min(1.0, win_rate_samples / 50.0)
+            win_rate_modifier = win_rate_norm * sample_confidence * 0.15  # Max 15 pts
+            row["win_rate_modifier"] = round(win_rate_modifier, 1)
+        else:
+            row["win_rate_modifier"] = 0.0
+        
+        # ML modifier
+        ml_modifier = 0.0
+        ml_prob = row.get("ml_win_prob", 0.5)
+        if ml_prob >= 0.7:
+            ml_modifier = (ml_prob - 0.7) * 100  # Up to 30 pts
+        elif ml_prob <= 0.4:
+            ml_modifier = (ml_prob - 0.5) * 100  # Down to -10 pts
+        row["ml_modifier"] = round(ml_modifier, 1)
+        
+        # Derivatives modifier
+        deriv_modifier = 0.0
+        deriv_score = row.get("derivatives_score", 0)
+        if deriv_score > 20:
+            deriv_modifier = min(10, deriv_score / 5)
+        elif deriv_score < -20:
+            deriv_modifier = max(-10, deriv_score / 5)
+        row["derivatives_modifier"] = round(deriv_modifier, 1)
+        
+        # Narrative modifier
+        narrative_modifier = 0.0
+        if row.get("narrative_active"):
+            momentum = row.get("narrative_momentum", 0)
+            narrative_modifier = min(10, momentum / 10)
+        row["narrative_modifier"] = round(narrative_modifier, 1)
+        
+        # Regime weight modifier
+        regime_weight = row.get("regime_weight", 1.0)
+        regime_modifier = (regime_weight - 1.0) * 50  # -50 to +50
+        
+        # Correlation cluster modifier
+        cluster_modifier = 0.0
+        if row.get("is_cluster_rep"):
+            cluster_modifier = 5  # Bonus for cluster representative
+        elif row.get("correlation_cluster", -1) >= 0:
+            cluster_modifier = -3  # Penalty for non-rep in cluster
+        
+        # Combine all modifiers
+        total_modifier = (
+            component_modifier + 
+            row["market_regime_modifier"] + 
+            row["bullish_potential_modifier"] + 
+            row["confidence_calibration_modifier"] +
+            win_rate_modifier +
+            ml_modifier +
+            deriv_modifier +
+            narrative_modifier +
+            regime_modifier +
+            cluster_modifier
+        )
+        
+        row["trade_quality"] = round(max(0.0, min(100.0, quality + total_modifier)), 1)
+        scored.append(row)
+    scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
+    return scored
+
+def _interval_due(interval, now=None, last_scan_ts=None, schedule_minutes=None):
+    """Return whether an interval is due without depending on an exact wall-clock slot."""
+    from datetime import datetime, timezone
+    now = now or datetime.now(timezone.utc)
+    if interval in ("5m", "15m"):
+        return True
+    default_minutes = {
+        "1h": 30,
+        "4h": 60,
+        "1d": 240,
+        "1w": 720,
+    }
+    period = float((schedule_minutes or {}).get(interval, default_minutes.get(interval, 0)) or 0)
+    if period <= 0:
+        return False
+    if last_scan_ts is not None:
+        try:
+            return (now.timestamp() - float(last_scan_ts)) >= period * 60.0
+        except (TypeError, ValueError):
+            pass
+    if interval == "1h":
+        return now.minute < 15
+    if interval == "4h":
+        return now.minute < 15 and now.hour % 4 == 0
+    if interval == "1d":
+        return now.minute < 15 and now.hour == 0
+    if interval == "1w":
+        return now.minute < 15 and now.hour == 0 and now.weekday() == 0
+    return False
+
+def _load_buy_interval_state():
+    return load_json("state/buy_interval_state.json", {}) or {}
+
+def _save_buy_interval_state(state):
+    save_json("state/buy_interval_state.json", state)
+
+def _persist_buy_audit(audit, scans=0, hits=0, fresh=0, selected=0, candidates=0, discovery=0):
+    """Persist one diagnostic snapshot and a bounded append-only scan history."""
+    summary = audit.summary(scans=scans, hits=hits, fresh=fresh, selected=selected)
+    summary.update({
+        "deep_candidates": int(candidates),
+        "discovery_candidates": int(discovery),
+        "generated_at": now_s(),
+    })
+    save_json("state/buy_audit_latest.json", summary)
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open("state/buy_audit_history.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(summary, ensure_ascii=False) + "\n")
+    except OSError as e:
+        log("BUY", "audit history write error:", e)
+    return summary
+
+def _format_hold_window(r):
+    lo, hi = r.get("estimated_hold_min_hours"), r.get("estimated_hold_max_hours")
+    if lo is None or hi is None:
+        return "n/a"
+    def fmt(hours):
+        return f"{hours:.0f}h" if hours < 24 else f"{hours / 24:.0f}d"
+    return f"{fmt(float(lo))}–{fmt(float(hi))}"
+
+def _signal_message(r):
+    """Format every BUY alert with the same compact hierarchy."""
+    setup = r.get("setup_type", "MOMENTUM")
+    kind = r.get("trade_horizon", "Scalp" if r["interval"] in ("5m", "15m") else "Medium")
+    family = str(r.get("strategy_family", "") or "")
+    family_label = f" · {family}" if family else ""
+    reasons = ", ".join(r.get("reasons", [])[:5])
+    bp = r.get("bullish_potential", {}) or {}
+    cc = r.get("confidence_components", {}) or {}
+    strategy = str(r.get("strategy", "")).upper()
+    is_abt = strategy == "ABT"
+    is_sls = strategy == "SLS" or family.upper() == "SLS"
+    if is_abt:
+        tier = str(r.get("strategy_family", "ABT"))
+        bp_score = float(r.get("confidence_score", r.get("score", 0)) or 0)
+    else:
+        tier = "SLS" if is_sls else bp.get("tier", "STANDARD")
+        bp_score = float(r.get("score", bp.get("score", 0)) or 0)
+    action = str(r.get("signal_action", "BUY") or "BUY").upper()
+    header = "🟡 <b>EARLY ABT SETUP</b>" if action == "WATCH" else ("🟢 <b>SLS SPOT BUY SIGNAL</b>" if is_sls else "🟢 <b>CONFIRMED BUY SIGNAL</b>")
+    action_line = "👀 <b>Action: WATCH</b> · Await ABT* / ABT confirmation" if action == "WATCH" else ("🎯 <b>Action: SPOT BUY · Strategy: SLS</b>" if is_sls else "🎯 <b>Action: BUY</b>")
+    cc = r.get("confidence_components", {}) or {}
+    pump_details = r.get("pump_details", {}) or {}
+    pump_tier = pump_details.get("pump_tier", "UNKNOWN")
+    pump_score = pump_details.get("pump_score", 0)
+    
+    # NEW: Advanced fields
+    ml_prob = r.get("ml_win_prob", 0.5)
+    ml_pred = r.get("ml_prediction", "UNKNOWN")
+    regime = r.get("market_regime", "NEUTRAL")
+    narrative = r.get("active_narrative", "")
+    cluster_rep = r.get("is_cluster_rep", True)
+    trade_quality = r.get("trade_quality", 0)
+    
+    lines = [
+        header,
+        f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}{family_label}",
+        f"📌 Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')} · 1h: {r.get('mtf_1h', '?')} · 1d: {r.get('mtf_1d', '?')} · 1w: {r.get('mtf_1w', '?')}",
+        action_line,
+        f"💰 Entry: <b>{fmt_price(r['entry'])}</b> · 🛑 Stop: {fmt_price(r['stop'])}",
+        "🎯 <b>Targets:</b>",
+        f"⏳ <b>TP1:</b> {fmt_price(r['t1'])}",
+        f"⏳ <b>TP2:</b> {fmt_price(r['t2'])}",
+        f"⏳ <b>TP3:</b> {fmt_price(r['t3'])}",
+        *([f"⏳ <b>TP4:</b> {fmt_price(r['t4'])}", f"⏳ <b>TP5:</b> {fmt_price(r['t5'])}"] if is_sls and r.get("t4") is not None and r.get("t5") is not None else []),
+        f"📈 <b>Modelled potential:</b> +{float(r.get('modelled_potential_pct', r.get('potential_pct', 0.0))):.1f}% · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
+        (f"🎯 <b>TP3 theoretical upside:</b> +{float(r.get('theoretical_tp3_potential_pct', r.get('potential_pct', 0.0))):.1f}%"
+         if is_sls and r.get("modelled_potential_pct") is not None else ""),
+        (f"🧠 ABT confidence: <b>{bp_score:.0f}/100</b> · Structure {float(cc.get('structure', 0)):.0f} · MTF {float(cc.get('mtf', 0)):.0f} · Vol {float(cc.get('volume', 0)):.0f} · Momentum {float(cc.get('momentum', 0)):.0f} · OB {float(cc.get('order_block', 0)):.0f} · Regime {float(cc.get('regime', 0)):.0f}"
+         if is_abt else f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100"),
+        f"⚡ Pump potential: <b>{pump_tier}</b> ({pump_score:.0f}/100) · Target: >{cfg.get('signal_min_pump_potential_pct', 40):.0f}%",
+        f"🤖 ML: <b>{ml_pred}</b> ({ml_prob:.0%})",
+        f"📊 Regime: <b>{regime}</b>",
+        f"📰 Narrative: {narrative}" if narrative else "",
+        f"🎯 Cluster: {'Rep' if r.get('is_cluster_rep') else 'Member'}",
+        f"⭐ Quality: <b>{trade_quality:.1f}/100</b>",
+        f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>",
+        f"📊 Score: <b>{float(r.get('score', 0)):.0f}/100</b> · RSI {float(r.get('rsi', 0)):.0f} · volume ×{float(r.get('vol_x', 0)):.2f} · 24h {float(r.get('chg24', 0)):+.1f}%",
+        f"🧠 Why: {esc(reasons)}" if reasons else "🧠 Why: structure + momentum confirmation",
+    ]
+    return [l for l in lines if l]  # Filter empty lines
+
+def _buy_signal_identity(r):
+    """Stable business identity for one logical BUY setup."""
+    coin = str(r.get("coin", "")).upper()
+    interval = str(r.get("interval", "") or "")
+    setup = str(r.get("setup_type", "") or "")
+    trigger = str(r.get("entry_trigger", "") or "")
+    try:
+        bos = format(float(r.get("bos_level", 0) or 0), ".10g")
+    except (TypeError, ValueError):
+        bos = "0"
+    family = str(r.get("strategy_family", "") or "")
+    strategy = str(r.get("strategy", "") or "").upper()
+    if strategy == "SLS" or family.upper() == "SLS":
+        return "|".join((coin, family, interval, setup, trigger, bos))
+    return "|".join((coin, family, setup, trigger, bos))
+
+def _migrate_fired_signal_state(fired):
+    """Migrate legacy interval-qualified keys while preserving SLS timeframe keys."""
+    if not isinstance(fired, dict):
+        return {}, False
+    if not any("|" in str(key) for key in fired):
+        return fired, False
+    migrated = {}
+    for key, value in fired.items():
+        if not isinstance(value, dict):
+            continue
+        parts = str(key).split("|")
+        if len(parts) == 3 and parts[1].upper() == "SLS" and parts[2] in sls_strategy.INTERVALS:
+            migrated["|".join((parts[0].upper(), "SLS", parts[2]))] = value
+            continue
+        coin = parts[0].upper()
+        if not coin:
+            continue
+        previous = migrated.get(coin)
+        if previous is None or float(value.get("ts", 0) or 0) > float(previous.get("ts", 0) or 0):
+            migrated[coin] = value
+    return migrated, True
+
+def _claim_buy_notification_keys(signals, now_ts, ttl_days=30):
+    """Atomically claim BUY notification identities across workflow runners."""
+    keys = []
+    for signal in signals:
+        key = _buy_signal_identity(signal)
+        if key and key not in keys:
+            keys.append(key)
+    if not keys:
+        return set()
+
+    token = os.environ.get("GITHUB_TOKEN", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "bsomar16/crypto-arb-scanner")
+    if not token:
+        if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+            log("BUY", "notification claim store unavailable: GITHUB_TOKEN missing; failing closed")
+            return set()
+        return set(keys)
+
+    import urllib.error
+    import urllib.request
+
+    path = "state/telegram_buy_claims.json"
+    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref=main"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2026-03-10",
+        "User-Agent": "crypto-arb-scanner-buy-dedupe",
+    }
+    cutoff = float(now_ts) - max(1, int(ttl_days)) * 86400.0
+
+    for _ in range(5):
+        sha = None
+        claims = {}
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            sha = payload.get("sha")
+            raw = base64.b64decode(payload.get("content", "")).decode("utf-8")
+            document = json.loads(raw) if raw.strip() else {}
+            claims = document.get("claims", {}) if isinstance(document, dict) else {}
+            if not isinstance(claims, dict):
+                claims = {}
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                log("BUY", f"notification claim read failed HTTP {exc.code}; failing closed")
+                return set()
+        except (OSError, ValueError, json.JSONDecodeError, UnicodeError) as exc:
+            log("BUY", "notification claim read failed; failing closed:", exc)
+            return set()
+
+        claims = {
+            str(key): value for key, value in claims.items()
+            if isinstance(value, (int, float)) and float(value) >= cutoff
+        }
+        claimable = [key for key in keys if key not in claims]
+        if not claimable:
+            return set()
+        for key in claimable:
+            claims[key] = float(now_ts)
+
+        document = {"version": 1, "claims": claims}
+        encoded = base64.b64encode(
+            json.dumps(document, ensure_ascii=False, sort_keys=True, indent=1).encode("utf-8")
+        ).decode("ascii")
+        body = {
+            "message": "Claim BUY notification identities",
+            "content": encoded,
+            "branch": "main",
+            "committer": {
+                "name": "github-actions[bot]",
+                "email": "41898282+github-actions[bot]@users.noreply.github.com",
+            },
+        }
+        if sha:
+            body["sha"] = sha
+        try:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{repo}/contents/{path}",
+                data=json.dumps(body).encode("utf-8"),
+                headers={**headers, "Content-Type": "application/json"},
+                method="PUT",
+            )
+            with urllib.request.urlopen(req, timeout=15):
+                return set(claimable)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 409:
+                continue
+            log("BUY", f"notification claim write failed HTTP {exc.code}; failing closed")
+            return set()
+        except OSError as exc:
+            log("BUY", "notification claim write failed; failing closed:", exc)
+            return set()
+
+    log("BUY", "notification claim contention did not settle; failing closed")
+    return set()
+
+def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02,
+                        cooldown_minutes=240, rearm_score_delta=10.0, limit=None, audit=None):
+    """Return only materially new BUY setups."""
+    updates = {}
+    fresh = []
+    active_coins = {str(c).upper() for c in (active_coins or set())}
+    best_by_coin = {}
+
+    for r in hits:
+        coin = str(r.get("coin", "")).upper()
+        if not coin:
+            continue
+        is_sls = str(r.get("strategy", "")).upper() == "SLS"
+        group_key = f"{coin}|SLS|{r.get('interval', '')}" if is_sls else coin
+        current = best_by_coin.get(group_key)
+        if current is None or (r["score"], r["rr"], r["potential_pct"]) > (
+            current["score"], current["rr"], current["potential_pct"]
+        ):
+            best_by_coin[group_key] = r
+
+    for group_key, r in best_by_coin.items():
+        coin = str(r.get("coin", "")).upper()
+        if coin in active_coins:
+            if audit is not None:
+                audit.reject("dedupe_active_position")
+            continue
+
+        old = fired.get(group_key)
+        if old is None and group_key != coin:
+            old = fired.get(coin, {})
+        if old is None:
+            old = {}
+        if not old:
+            is_new_signal = True
+        else:
+            old_key = str(old.get("signal_key", "") or "")
+            current_key = _buy_signal_identity(r)
+            elapsed_min = max(0.0, (float(now_ts) - float(old.get("ts", 0) or 0)) / 60.0)
+            cooldown_elapsed = elapsed_min >= max(0.0, float(cooldown_minutes))
+
+            old_setup = str(old.get("setup_type", "") or "")
+            old_trigger = str(old.get("entry_trigger", "") or "")
+            setup_changed = bool(old_setup and old_setup != r.get("setup_type", ""))
+            trigger_changed = bool(old_trigger and old_trigger != r.get("entry_trigger", ""))
+
+            if old_key:
+                same_setup = old_key == current_key
+            elif old.get("bos_level") is not None and r.get("bos_level") is not None:
+                try:
+                    old_bos = format(float(old.get("bos_level")), ".10g")
+                    current_bos = format(float(r.get("bos_level")), ".10g")
+                except (TypeError, ValueError):
+                    old_bos = current_bos = None
+                if old_bos is not None and current_bos is not None:
+                    same_setup = "|".join((coin, "", old_setup, old_trigger, old_bos)) == current_key
+                else:
+                    same_setup = (
+                        old_setup == str(r.get("setup_type", "") or "")
+                        and (not old_trigger or old_trigger == str(r.get("entry_trigger", "") or ""))
+                    )
+            else:
+                same_setup = (
+                    old_setup == str(r.get("setup_type", "") or "")
+                    and (not old_trigger or old_trigger == str(r.get("entry_trigger", "") or ""))
+                )
+
+            material_rearm = (not same_setup) and (setup_changed or trigger_changed)
+            if not (setup_changed or trigger_changed):
+                material_rearm = not same_setup
+
+            is_new_signal = bool(cooldown_elapsed and material_rearm)
+
+        if old and not is_new_signal:
+            if audit is not None:
+                audit.reject("dedupe_unchanged")
+            continue
+
+        updates[group_key] = {
+            "ts": now_ts,
+            "entry": r["entry"],
+            "score": r["score"],
+            "setup_type": r.get("setup_type", ""),
+            "interval": r.get("interval", ""),
+            "entry_trigger": r.get("entry_trigger", ""),
+            "candle_open_time": int(r.get("candle_open_time", 0) or 0),
+            "bos_level": r.get("bos_level"),
+            "signal_key": _buy_signal_identity(r),
+        }
+        fresh.append(r)
+
+    fresh.sort(key=lambda r: (-r["score"], -r["rr"], -r["potential_pct"]))
+    return (fresh if limit is None else fresh[:limit]), updates
+
+def run_buy(token, chat_id, realtime_cache=None):
+    cfg = load_cfg()
+    
+    # Initialize enricher
+    enricher = create_enricher(cfg)
+    
+    try:
+        outcome_refresh = signal_outcomes.update_pending(cfg=cfg)
+        if outcome_refresh.get("updated"):
+            log("OUTCOMES", f"updated={outcome_refresh.get('updated')} pending={outcome_refresh.get('pending')}")
+    except Exception as e:
+        log("OUTCOMES", "refresh error:", e)
+    intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h", "4h", "1d", "1w"]) if i in ("5m", "15m", "1h", "4h", "1d", "1w")]
+    if not intervals:
+        intervals = ["5m", "15m", "1h", "4h", "1d", "1w"]
+
+    t24 = fetch_binance_24h()
+    q = crypto_quote(t24)
+    current_prices = {}
+    chg = {}
+    for x in t24:
+        s = x.get("symbol", "")
+        if s.endswith("USDT") and s != "USDTUSDT":
+            try:
+                symbol = s[:-4]
+                chg[symbol] = float(x.get("priceChangePercent", 0))
+                if x.get("lastPrice") is not None:
+                    current_prices[symbol] = float(x.get("lastPrice"))
+            except (ValueError, TypeError):
+                pass
+
+    star = {str(w).upper() for w in cfg.get("watchlist", [])}
+    star |= {str(h.get("symbol", "")).upper() for h in cfg.get("holdings", []) if h.get("symbol")}
+
+    # Stage 1: scan a broad liquid universe with multi-exchange discovery
+    cands, discovery_rows = _candidate_universe(cfg, q, star, t24=t24)
+    
+    # Enrich discovery with all advanced features
+    discovery_rows = enrich_discovery_with_all(discovery_rows, cfg)
+    
+    deep_n = int(cfg.get("discovery_deep_candidates", 300))
+    if realtime_cache is not None:
+        cands = cands[:max(1, int(cfg.get("realtime_monitor_candidates", 25)))]
+    else:
+        cands = cands[:max(deep_n, len(star))]
+    interval_state = _load_buy_interval_state()
+    schedule_minutes = cfg.get("buy_interval_schedule_minutes", {}) or {}
+    now_dt = datetime.now(timezone.utc)
+    due_intervals = [
+        interval
+        for interval in intervals
+        if _interval_due(
+            interval,
+            now=now_dt,
+            last_scan_ts=interval_state.get(interval),
+            schedule_minutes=schedule_minutes,
+        )
+    ]
+    tasks = [(sym, interval) for interval in due_intervals for sym in cands]
+
+    audit = SignalAudit()
+
+    def scan(task):
+        sym, interval = task
+        results = []
+        standard = intraday_signal(
+            sym,
+            interval=interval,
+            min_vol_x=None,
+            min_hour_vol=float(cfg.get("buy_fast_min_hour_vol", 100000)),
+            chg24=chg.get(sym),
+            min_potential_pct=float(cfg.get("signal_min_potential_pct", 5.0)),
+            max_potential_pct=float(cfg.get("signal_max_potential_pct", 300.0)),
+            min_score=None,
+            min_rr=None,
+            realtime_bars=(realtime_cache.get(sym, interval) if realtime_cache is not None else None),
+            cfg=cfg,
+            audit=audit,
+        )
+        if standard:
+            results.append(standard)
+        if bool(cfg.get("abt_enabled", False)):
+            abt = abt_strategy.evaluate_abt_coin(sym, interval=interval, cfg=cfg, chg24=chg.get(sym, 0.0))
+            if abt:
+                results.append(abt)
+        if bool(cfg.get("sls_enabled", True)):
+            sls = sls_strategy.evaluate_sls_coin(sym, interval=interval, cfg=cfg, chg24=chg.get(sym, 0.0))
+            if sls:
+                results.append(sls)
+        return results
+
+    workers = int(cfg.get("deep_scan_workers", 16))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
+        hits = [r for batch in ex.map(scan, tasks) for r in (batch or [])]
+
+    # Apply pump potential filter (>40% potential)
+    if bool(cfg.get("signal_require_pump_filter", True)):
+        min_pump_pct = float(cfg.get("signal_min_pump_potential_pct", 40.0))
+        before_filter = len(hits)
+        hits = [r for r in hits if float(r.get("potential_pct", 0) or 0) >= min_pump_pct]
+        log("BUY", f"Pump filter (>{min_pump_pct}%): {before_filter} -> {len(hits)} signals")
+        for _ in range(before_filter - len(hits)):
+            audit.reject("pump_filter")
+
+    # Apply win rate filter
+    if bool(cfg.get("signal_min_win_rate_pct", 0) > 0):
+        min_wr = float(cfg.get("signal_min_win_rate_pct", 55))
+        min_samples = int(cfg.get("signal_min_win_rate_samples", 10))
+        before_wr = len(hits)
+        hits = [r for r in hits if r.get("historical_win_pct") is None or 
+                r.get("historical_sample", 0) < min_samples or
+                r.get("historical_win_pct", 0) >= min_wr]
+        log("BUY", f"Win rate filter (>{min_wr}%): {before_wr} -> {len(hits)} signals")
+        for _ in range(before_wr - len(hits)):
+            audit.reject("win_rate_filter")
+
+    fired, migrated_fired = _migrate_fired_signal_state(
+        load_json("state/fired_signals.json", {}) or {}
+    )
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    active_coins = {
+        str(p.get("coin", "")).upper()
+        for p in positions_mod.load()
+        if p.get("status") == "open" and p.get("coin")
+    }
+    fresh, updates = _dedupe_buy_signals(
+        hits,
+        fired,
+        now_ts,
+        active_coins=active_coins,
+        entry_change_pct=float(cfg.get("buy_signal_entry_change_pct", 0.02)),
+        cooldown_minutes=float(cfg.get("buy_signal_cooldown_minutes", 240)),
+        rearm_score_delta=float(cfg.get("buy_signal_rearm_score_delta", 10.0)),
+        limit=None,
+        audit=audit,
+    )
+
+    # Enrich fresh signals with all advanced features
+    fresh_base = [r for r in fresh]
+    enricher = create_enricher(cfg)
+    enriched_signals = enricher.batch_enrich(fresh_base)
+    
+    # Merge enriched data back
+    enriched_map = {e.base.get("coin"): e for e in enriched_signals}
+    for i, r in enumerate(fresh):
+        coin = r.get("coin")
+        if coin in enriched_map:
+            e = enriched_map[coin]
+            # Merge all enriched fields
+            r.update({
+                "funding_rate": e.funding_rate,
+                "funding_apy": e.funding_apy,
+                "open_interest": e.open_interest,
+                "basis": e.basis,
+                "basis_signal": e.basis_signal,
+                "funding_signal": e.funding_signal,
+                "oi_signal": e.oi_signal,
+                "derivatives_score": e.derivatives_score,
+                "derivatives_signals": e.derivatives_signals,
+                "ml_win_prob": e.ml_win_prob,
+                "ml_prediction": e.ml_prediction,
+                "ml_boost": e.ml_boost,
+                "market_regime": e.market_regime,
+                "regime_confidence": e.regime_confidence,
+                "regime_weight": e.regime_weight,
+                "regime_preferred": e.regime_preferred,
+                "regime_avoided": e.regime_avoided,
+                "regime_position_mult": e.regime_position_mult,
+                "regime_stop_mult": e.regime_stop_mult,
+                "regime_target_mult": e.regime_target_mult,
+                "regime_min_score_adj": e.regime_min_score_adj,
+                "regime_min_vol_x_adj": e.regime_min_vol_x_adj,
+                "regime_min_rr_adj": e.regime_min_rr_adj,
+                "correlation_cluster": e.correlation_cluster,
+                "cluster_representative": e.cluster_representative,
+                "cluster_avg_corr": e.cluster_avg_corr,
+                "cluster_sector": e.cluster_sector,
+                "is_cluster_rep": e.is_cluster_rep,
+                "narrative_sector": e.narrative_sector,
+                "narrative_category": e.narrative_category,
+                "narrative_active": e.narrative_active,
+                "narrative_momentum": e.narrative_momentum,
+                "narrative_boost": e.narrative_boost,
+                "active_narrative": e.active_narrative,
+                "narrative_catalysts": e.narrative_catalysts,
+                "position_size_usdt": e.position_size_usdt,
+                "risk_usdt": e.risk_usdt,
+                "kelly_fraction": e.kelly_fraction,
+            })
+
+    ranked = _rank_trade_candidates(fresh, cfg, enricher)
+    abt_fresh = [r for r in fresh if r.get("strategy") == "ABT"]
+    if abt_fresh:
+        log("ABT", f"qualified stages: {', '.join(sorted({str(r.get('strategy_family')) for r in abt_fresh}))}")
+
+    mx_limit = max(0, int(cfg.get("multi_exchange_max_candidates", 30)))
+    for idx, r in enumerate(ranked):
+        if not bool(cfg.get("multi_exchange_enabled", True)) or idx >= mx_limit:
+            r["multi_exchange_state"] = "UNASSESSED"
+            r["multi_exchange_data_available"] = False
+            r["multi_exchange_modifier"] = 0.0
+            continue
+        try:
+            mx = multi_exchange.assess(r.get("coin"), cfg=cfg)
+        except Exception as e:
+            log("BUY", f"multi-exchange intelligence unavailable for {r.get('coin')}:", e)
+            mx = {"state": "UNKNOWN", "data_available": False, "modifier": 0.0}
+        r["multi_exchange_state"] = mx.get("state", "UNKNOWN")
+        r["multi_exchange_data_available"] = bool(mx.get("data_available", False))
+        r["multi_exchange_count"] = int(mx.get("exchange_count", 0) or 0)
+        r["multi_exchange_low_exchange"] = mx.get("low_exchange")
+        r["multi_exchange_high_exchange"] = mx.get("high_exchange")
+        r["multi_exchange_dispersion_pct"] = mx.get("price_dispersion_pct")
+        r["multi_exchange_fee_adjusted_gap_pct"] = mx.get("fee_adjusted_gap_pct")
+        r["multi_exchange_modifier"] = float(mx.get("modifier", 0.0) or 0.0)
+        r["multi_exchange_reason"] = mx.get("reason", "")
+        r["trade_quality"] = round(max(0.0, min(100.0, float(r.get("trade_quality", 0.0)) + r["multi_exchange_modifier"])), 1)
+    ranked.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
+    selected = ranked
+    trade_selected = [r for r in selected if str(r.get("signal_action", "BUY")).upper() != "WATCH"]
+    early_watch = [r for r in selected if str(r.get("signal_action", "BUY")).upper() == "WATCH"]
+    for r in fresh:
+        try:
+            signal_history.record_signal(r, source="forward_research")
+        except Exception as e:
+            log("BUY", "forward research signal capture error:", e)
+    for r in selected:
+        r["star"] = r["coin"] in star
+
+    completed_at = now_dt.timestamp()
+    for interval in due_intervals:
+        interval_state[interval] = completed_at
+    if due_intervals:
+        _save_buy_interval_state(interval_state)
+    audit_snapshot = _persist_buy_audit(
+        audit,
+        scans=len(tasks), hits=len(hits), fresh=len(fresh), selected=len(selected),
+        candidates=len(cands), discovery=len(discovery_rows),
+    )
+    if bool(cfg.get("shadow_4h_structure_candidate_enabled", False)):
+        candidate_signals = [
+            r for r in selected
+            if str(r.get("interval", "")) == "4h"
+            and float(r.get("structure_score", 0) or 0) >= 50.0
+        ]
+        try:
+            shadow_candidate = shadow_trading.run_once(
+                candidate_signals,
+                lambda coin: current_prices.get(str(coin).upper()),
+                cfg,
+                path=str(cfg.get("shadow_4h_structure_state_path", "state/shadow_4h_structure.jsonl")),
+                variant="structure_ge_50",
+            )
+            log(
+                "SHADOW-4H",
+                f"candidate={len(candidate_signals)} "
+                f"opened={shadow_candidate.get('opened', 0)} "
+                f"closed={shadow_candidate.get('closed', 0)}",
+            )
+        except Exception as e:
+            log("SHADOW-4H", "candidate shadow error:", e)
+    if bool(cfg.get("shadow_4h_nonexpansion_structure_candidate_enabled", False)):
+        candidate_signals = [
+            r for r in selected
+            if str(r.get("interval", "")) == "4h"
+            and float(r.get("structure_score", 0) or 0) >= 50.0
+            and str(r.get("expansion_state") or "") != "EXPANSION"
+        ]
+        try:
+            shadow_candidate = shadow_trading.run_once(
+                candidate_signals,
+                lambda coin: current_prices.get(str(coin).upper()),
+                cfg,
+                path=str(cfg.get("shadow_4h_nonexpansion_structure_state_path", "state/shadow_4h_nonexpansion_structure.jsonl")),
+                variant="non_expansion_and_structure_ge_50",
+            )
+            log(
+                "SHADOW-4H-NONEXP",
+                f"candidate={len(candidate_signals)} "
+                f"opened={shadow_candidate.get('opened', 0)} "
+                f"closed={shadow_candidate.get('closed', 0)}",
+            )
+        except Exception as e:
+            log("SHADOW-4H-NONEXP", "candidate shadow error:", e)
+
+    if not selected and not fired_alerts:
+        log("[BUY] no new signals")
+        log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
+        return False
+
+    opened = 0
+    lines = [
+        f"🎯 <b>CRYPTO BUY SIGNALS</b> · {now_s()}",
+        f"🔎 Multi-exchange discovery: {len(discovery_rows)} candidates · deep: {len(cands)} · {len(tasks)} MTF scans",
+        f"🎯 BUY-qualified signals: {len(trade_selected)} · early ABT watch: {len(early_watch)} · qualified total: {len(selected)} of {len(fresh)}",
+        "",
+    ]
+    for i, r in enumerate(trade_selected, 1):
+        if i > 1:
+            lines.append("")
+        lines.extend([f"<b>#{i}</b>" + (" ⭐" if r.get("star") else "")])
+        lines.extend(_signal_message(r))
+    if early_watch:
+        lines.extend(["", "👀 <b>EARLY ABT WATCHLIST</b>"])
+        for i, r in enumerate(early_watch, 1):
+            lines.extend(["", f"<b>W{i}</b>" + (" ⭐" if r.get("star") else "")])
+            lines.extend(_signal_message(r))
+
+    fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
+    if fired_alerts:
+        lines.extend(["", "🔔 <b>PRICE ALERTS</b>"])
+        lines.extend(fired_alerts[:6])
+    lines.extend([
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "Modelled potential = calculated strategy target, not guaranteed profit.",
+        "24h volume is a liquidity filter only; BUY requires multi-factor confirmation.",
+        "Signals are quality-gated; there is no daily BUY quota.",
+        f"Pump filter: only signals with >{cfg.get('signal_min_pump_potential_pct', 40):.0f}% modelled potential are alerted.",
+        f"Win rate filter: min {cfg.get('signal_min_win_rate_pct', 55):.0f}% with {cfg.get('signal_min_win_rate_samples', 10)}+ samples.",
+    ])
+    log(f"[BUY] {len(selected)} quality signals / {len(fresh)} qualified signals / {len(tasks)} deep scans")
+    log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
+
+    claimed_keys = _claim_buy_notification_keys(selected, now_ts)
+    before_claim = len(selected)
+    selected = [r for r in selected if _buy_signal_identity(r) in claimed_keys]
+    trade_selected = [r for r in selected if str(r.get("signal_action", "BUY")).upper() != "WATCH"]
+    early_watch = [r for r in selected if str(r.get("signal_action", "BUY")).upper() == "WATCH"]
+    allowed_coins = {str(r.get("coin", "")).upper() for r in selected}
+    updates = {coin: value for coin, value in updates.items() if coin in allowed_coins}
+    if before_claim != len(selected):
+        log("BUY", f"notification dedupe suppressed {before_claim - len(selected)} cross-run duplicate(s)")
+        for _ in range(before_claim - len(selected)):
+            audit.reject("dedupe_notification_claim")
+
+    telegram_msg(token, chat_id, "\n".join(lines))
+
+    if updates:
+        fired.update(updates)
+    if updates or migrated_fired:
+        save_json("state/fired_signals.json", fired)
+
+    for r in trade_selected:
+        try:
+            signal_lifecycle.register(r)
+        except Exception as e:
+            log("BUY", "signal lifecycle register error:", e)
+
+    shadow_result = {"opened": 0, "closed": 0, "outcome_source": "shadow"}
+    if bool(cfg.get("shadow_trading_enabled", False)):
+        try:
+            prices = {str(r.get("coin", "")).upper(): float(r.get("entry", r.get("price", 0))) for r in trade_selected}
+            shadow_result = shadow_trading.run_once(
+                trade_selected,
+                lambda coin: prices.get(str(coin).upper()),
+                cfg,
+                path=str(cfg.get("shadow_state_path", "state/shadow_trades.jsonl")),
+            )
+            log("SHADOW", f"opened {shadow_result.get('opened', 0)} / closed {shadow_result.get('closed', 0)}")
+        except Exception as e:
+            log("SHADOW", "shadow trading error:", e)
+
+    try:
+        opened = positions_mod.open_picks(trade_selected, cfg, source="buy")
+    except Exception as e:
+        log("BUY", "positions open error:", e)
+    return True
+
+MODES = ["buy"]
+
+def main():
+    ap = ArgumentParser(); ap.add_argument("--mode", choices=MODES, default="buy")
+    ap.add_argument("--json-logs", action="store_true")
+    args = ap.parse_args()
+    if args.json_logs: set_json_logs(True)
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", ""); chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"); sys.exit(1)
+    os.makedirs(STATE_DIR, exist_ok=True)
+    run_buy(token, chat_id)
+
+if __name__ == "__main__": main()
