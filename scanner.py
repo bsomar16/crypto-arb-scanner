@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
-"""Crypto-only signal bot orchestration.
+"""Crypto-only signal bot orchestration - FULLY INTEGRATED VERSION.
 
 Modes: daily | buy | realtime | price | backtest | validate | portfolio | check | report | all
 
-IMPROVED: Multi-exchange discovery (Binance, Bybit, OKX, MEXC, Gate, KuCoin, HTX, Bitget)
-         Pump potential filter (>40% potential moves)
+FEATURES:
+- Multi-exchange discovery (8 exchanges)
+- Pump potential filter (>40% potential moves)
+- Win rate filtering and ranking (min 55%)
+- ML classifier for P(WIN) prediction
+- Market regime detection & adaptive strategies
+- Dynamic risk management (Kelly, trailing stops)
+- Correlation clustering & signal deduplication
+- Narrative tracking & sector rotation
+- Derivatives integration (funding, OI, liquidations)
+- Performance attribution dashboard
+- WebSocket real-time feeds (optional)
 """
 
 import base64
@@ -31,6 +41,9 @@ import abt_strategy
 import sls_strategy
 import multi_exchange
 import shadow_trading
+
+# NEW: Integration modules
+from integration import SignalEnricher, create_enricher, enrich_discovery_with_all
 
 STATE_DIR = "state"
 
@@ -104,7 +117,7 @@ DEFAULTS = {
     "abt_min_score_breakout": 58,
     "shadow_4h_structure_state_path": "state/shadow_4h_structure.jsonl",
     
-    # NEW: Multi-exchange discovery settings
+    # Multi-exchange discovery settings
     "discovery_exchanges": ["BINANCE", "BYBIT", "OKX", "MEXC", "GATE", "KUCOIN", "HTX", "BITGET"],
     "discovery_min_quote_volume": 500000,
     "discovery_universe_size": 600,
@@ -114,9 +127,59 @@ DEFAULTS = {
     "discovery_min_pump_score": 60,
     "discovery_pump_weight": 0.3,
     
-    # NEW: Pump filter settings
+    # Pump filter settings
     "signal_min_pump_potential_pct": 40.0,
     "signal_require_pump_filter": True,
+    
+    # Win rate filter settings
+    "signal_min_win_rate_pct": 55.0,
+    "signal_min_win_rate_samples": 10,
+    "signal_win_rate_weight": 0.2,
+    "signal_win_rate_boost_max": 20.0,
+    
+    # ML settings
+    "ml_model_type": "xgboost",
+    "ml_retrain_interval_hours": 24,
+    "ml_min_samples": 50,
+    "ml_threshold": 0.55,
+    
+    # Regime settings
+    "regime_lookback_days": 30,
+    "regime_breadth_min_qv": 1000000,
+    "regime_breadth_limit": 100,
+    
+    # Risk settings
+    "account_equity_usdt": 10000,
+    "max_total_exposure_usdt": 3000,
+    "max_position_notional_usdt": 500,
+    "risk_per_trade_pct": 1.0,
+    "max_daily_loss_usdt": 50,
+    "kelly_sizing_enabled": True,
+    "kelly_lookback_trades": 100,
+    "kelly_max_fraction": 0.25,
+    "trailing_stop_enabled": True,
+    "trailing_activation_r": 1.0,
+    "trailing_distance_r": 0.5,
+    "max_pairwise_correlation": 0.75,
+    "max_same_sector_positions": 2,
+    
+    # Correlation clustering
+    "correlation_threshold": 0.75,
+    "correlation_lookback_days": 30,
+    "min_cluster_size": 2,
+    
+    # Narrative tracking
+    "narrative_lookback_hours": 24,
+    "narrative_min_coins": 3,
+    "narrative_momentum_threshold": 50,
+    
+    # Attribution
+    "attribution_lookback_days": 30,
+    
+    # WebSocket (optional)
+    "ws_enabled": False,
+    "ws_exchanges": ["BINANCE", "BYBIT", "OKX"],
+    "ws_futures": True,
 }
 
 def load_cfg():
@@ -139,8 +202,8 @@ def _candidate_universe(cfg, q, star, t24=None):
             discovered.append(sym)
     return discovered, results
 
-def _rank_trade_candidates(hits, cfg):
-    """Rank qualified BUY signals by setup quality; no daily signal quota."""
+def _rank_trade_candidates(hits, cfg, enricher=None):
+    """Rank qualified BUY signals by setup quality + all advanced factors."""
     attribution = outcome_attribution.aggregate(signal_history._read(), min_samples=30)
     try:
         regime = market_regime.detect_regime(
@@ -157,9 +220,9 @@ def _rank_trade_candidates(hits, cfg):
         sample = int(r.get("historical_sample", 0) or 0)
         rr_component = min(100.0, float(r.get("rr", 0)) / 3.0 * 100.0)
         base_quality = (
-            float(r.get("entry_quality", 50.0)) * 0.28
-            + float(r.get("score", 0)) * 0.24
-            + float(r.get("expansion_score", 0)) * 0.20
+            float(r.get("entry_quality", 50.0)) * 0.20
+            + float(r.get("score", 0)) * 0.20
+            + float(r.get("expansion_score", 0)) * 0.15
             + rr_component * 0.10
         )
         outcome_quality = 0.0
@@ -169,9 +232,9 @@ def _rank_trade_candidates(hits, cfg):
             mfe = min(100.0, max(0.0, float(r.get("historical_avg_mfe_pct", 0.0))) * 2.0)
             mae = min(100.0, max(0.0, -float(r.get("historical_avg_mae_pct", 0.0))) * 8.0)
             outcome_quality = float(historical) * 0.45 + early * 0.35 + mfe * 0.10 + (100.0 - mae) * 0.10
-            quality = base_quality * 0.72 + outcome_quality * 0.28
+            quality = base_quality * 0.70 + outcome_quality * 0.30
         else:
-            quality = base_quality / 0.82
+            quality = base_quality / 0.85
         row = dict(r)
         component_modifier = component_quality.ranking_modifier(row, attribution, min_samples=30)
         row["component_quality_modifier"] = component_modifier
@@ -180,7 +243,6 @@ def _rank_trade_candidates(hits, cfg):
         row["market_regime_breadth_pct"] = regime.get("breadth_pct", 0.0)
         row["market_regime_modifier"] = float(regime.get("score_modifier", 0.0) or 0.0)
         bullish = row.get("bullish_potential", {}) or {}
-        # Small ranking preference only; this never creates a BUY or bypasses gates.
         row["bullish_potential_modifier"] = round((float(bullish.get("score", 50.0)) - 50.0) * 0.08, 1)
         if str(row.get("strategy", "")).upper() == "ABT":
             try:
@@ -200,7 +262,77 @@ def _rank_trade_candidates(hits, cfg):
                 row["confidence_calibration_modifier"] = 0.0
         else:
             row["confidence_calibration_modifier"] = 0.0
-        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier + row["market_regime_modifier"] + row["bullish_potential_modifier"] + float(row.get("confidence_calibration_modifier", 0.0)))), 1)
+        
+        # NEW: Advanced factor modifiers
+        # Win rate modifier
+        win_rate_modifier = 0.0
+        win_rate = row.get("historical_win_pct")
+        win_rate_samples = int(row.get("historical_sample", 0) or 0)
+        min_samples = int(cfg.get("signal_min_win_rate_samples", 10))
+        if win_rate is not None and win_rate_samples >= min_samples:
+            if win_rate <= 50:
+                win_rate_norm = 0
+            elif win_rate >= 80:
+                win_rate_norm = 100
+            else:
+                win_rate_norm = (win_rate - 50) * 100 / 30
+            sample_confidence = min(1.0, win_rate_samples / 50.0)
+            win_rate_modifier = win_rate_norm * sample_confidence * 0.15  # Max 15 pts
+            row["win_rate_modifier"] = round(win_rate_modifier, 1)
+        else:
+            row["win_rate_modifier"] = 0.0
+        
+        # ML modifier
+        ml_modifier = 0.0
+        ml_prob = row.get("ml_win_prob", 0.5)
+        if ml_prob >= 0.7:
+            ml_modifier = (ml_prob - 0.7) * 100  # Up to 30 pts
+        elif ml_prob <= 0.4:
+            ml_modifier = (ml_prob - 0.5) * 100  # Down to -10 pts
+        row["ml_modifier"] = round(ml_modifier, 1)
+        
+        # Derivatives modifier
+        deriv_modifier = 0.0
+        deriv_score = row.get("derivatives_score", 0)
+        if deriv_score > 20:
+            deriv_modifier = min(10, deriv_score / 5)
+        elif deriv_score < -20:
+            deriv_modifier = max(-10, deriv_score / 5)
+        row["derivatives_modifier"] = round(deriv_modifier, 1)
+        
+        # Narrative modifier
+        narrative_modifier = 0.0
+        if row.get("narrative_active"):
+            momentum = row.get("narrative_momentum", 0)
+            narrative_modifier = min(10, momentum / 10)
+        row["narrative_modifier"] = round(narrative_modifier, 1)
+        
+        # Regime weight modifier
+        regime_weight = row.get("regime_weight", 1.0)
+        regime_modifier = (regime_weight - 1.0) * 50  # -50 to +50
+        
+        # Correlation cluster modifier
+        cluster_modifier = 0.0
+        if row.get("is_cluster_rep"):
+            cluster_modifier = 5  # Bonus for cluster representative
+        elif row.get("correlation_cluster", -1) >= 0:
+            cluster_modifier = -3  # Penalty for non-rep in cluster
+        
+        # Combine all modifiers
+        total_modifier = (
+            component_modifier + 
+            row["market_regime_modifier"] + 
+            row["bullish_potential_modifier"] + 
+            row["confidence_calibration_modifier"] +
+            win_rate_modifier +
+            ml_modifier +
+            deriv_modifier +
+            narrative_modifier +
+            regime_modifier +
+            cluster_modifier
+        )
+        
+        row["trade_quality"] = round(max(0.0, min(100.0, quality + total_modifier)), 1)
         scored.append(row)
     scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     return scored
@@ -292,6 +424,14 @@ def _signal_message(r):
     pump_tier = pump_details.get("pump_tier", "UNKNOWN")
     pump_score = pump_details.get("pump_score", 0)
     
+    # NEW: Advanced fields
+    ml_prob = r.get("ml_win_prob", 0.5)
+    ml_pred = r.get("ml_prediction", "UNKNOWN")
+    regime = r.get("market_regime", "NEUTRAL")
+    narrative = r.get("active_narrative", "")
+    cluster_rep = r.get("is_cluster_rep", True)
+    trade_quality = r.get("trade_quality", 0)
+    
     lines = [
         header,
         f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}{family_label}",
@@ -309,11 +449,16 @@ def _signal_message(r):
         (f"🧠 ABT confidence: <b>{bp_score:.0f}/100</b> · Structure {float(cc.get('structure', 0)):.0f} · MTF {float(cc.get('mtf', 0)):.0f} · Vol {float(cc.get('volume', 0)):.0f} · Momentum {float(cc.get('momentum', 0)):.0f} · OB {float(cc.get('order_block', 0)):.0f} · Regime {float(cc.get('regime', 0)):.0f}"
          if is_abt else f"🔥 Bullish structure: <b>{esc(tier)}</b> · {bp_score:.0f}/100"),
         f"⚡ Pump potential: <b>{pump_tier}</b> ({pump_score:.0f}/100) · Target: >{cfg.get('signal_min_pump_potential_pct', 40):.0f}%",
+        f"🤖 ML: <b>{ml_pred}</b> ({ml_prob:.0%})",
+        f"📊 Regime: <b>{regime}</b>",
+        f"📰 Narrative: {narrative}" if narrative else "",
+        f"🎯 Cluster: {'Rep' if r.get('is_cluster_rep') else 'Member'}",
+        f"⭐ Quality: <b>{trade_quality:.1f}/100</b>",
         f"⏱ Estimated trade time: <b>{_format_hold_window(r)}</b>",
         f"📊 Score: <b>{float(r.get('score', 0)):.0f}/100</b> · RSI {float(r.get('rsi', 0)):.0f} · volume ×{float(r.get('vol_x', 0)):.2f} · 24h {float(r.get('chg24', 0)):+.1f}%",
         f"🧠 Why: {esc(reasons)}" if reasons else "🧠 Why: structure + momentum confirmation",
     ]
-    return lines
+    return [l for l in lines if l]  # Filter empty lines
 
 def _buy_signal_identity(r):
     """Stable business identity for one logical BUY setup."""
@@ -546,6 +691,10 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
 
 def run_buy(token, chat_id, realtime_cache=None):
     cfg = load_cfg()
+    
+    # Initialize enricher
+    enricher = create_enricher(cfg)
+    
     try:
         outcome_refresh = signal_outcomes.update_pending(cfg=cfg)
         if outcome_refresh.get("updated"):
@@ -576,6 +725,10 @@ def run_buy(token, chat_id, realtime_cache=None):
 
     # Stage 1: scan a broad liquid universe with multi-exchange discovery
     cands, discovery_rows = _candidate_universe(cfg, q, star, t24=t24)
+    
+    # Enrich discovery with all advanced features
+    discovery_rows = enrich_discovery_with_all(discovery_rows, cfg)
+    
     deep_n = int(cfg.get("discovery_deep_candidates", 300))
     if realtime_cache is not None:
         cands = cands[:max(1, int(cfg.get("realtime_monitor_candidates", 25)))]
@@ -631,7 +784,7 @@ def run_buy(token, chat_id, realtime_cache=None):
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
         hits = [r for batch in ex.map(scan, tasks) for r in (batch or [])]
 
-    # NEW: Apply pump potential filter (>40% potential)
+    # Apply pump potential filter (>40% potential)
     if bool(cfg.get("signal_require_pump_filter", True)):
         min_pump_pct = float(cfg.get("signal_min_pump_potential_pct", 40.0))
         before_filter = len(hits)
@@ -639,6 +792,18 @@ def run_buy(token, chat_id, realtime_cache=None):
         log("BUY", f"Pump filter (>{min_pump_pct}%): {before_filter} -> {len(hits)} signals")
         for _ in range(before_filter - len(hits)):
             audit.reject("pump_filter")
+
+    # Apply win rate filter
+    if bool(cfg.get("signal_min_win_rate_pct", 0) > 0):
+        min_wr = float(cfg.get("signal_min_win_rate_pct", 55))
+        min_samples = int(cfg.get("signal_min_win_rate_samples", 10))
+        before_wr = len(hits)
+        hits = [r for r in hits if r.get("historical_win_pct") is None or 
+                r.get("historical_sample", 0) < min_samples or
+                r.get("historical_win_pct", 0) >= min_wr]
+        log("BUY", f"Win rate filter (>{min_wr}%): {before_wr} -> {len(hits)} signals")
+        for _ in range(before_wr - len(hits)):
+            audit.reject("win_rate_filter")
 
     fired, migrated_fired = _migrate_fired_signal_state(
         load_json("state/fired_signals.json", {}) or {}
@@ -662,7 +827,60 @@ def run_buy(token, chat_id, realtime_cache=None):
         audit=audit,
     )
 
-    ranked = _rank_trade_candidates(fresh, cfg)
+    # Enrich fresh signals with all advanced features
+    fresh_base = [r for r in fresh]
+    enricher = create_enricher(cfg)
+    enriched_signals = enricher.batch_enrich(fresh_base)
+    
+    # Merge enriched data back
+    enriched_map = {e.base.get("coin"): e for e in enriched_signals}
+    for i, r in enumerate(fresh):
+        coin = r.get("coin")
+        if coin in enriched_map:
+            e = enriched_map[coin]
+            # Merge all enriched fields
+            r.update({
+                "funding_rate": e.funding_rate,
+                "funding_apy": e.funding_apy,
+                "open_interest": e.open_interest,
+                "basis": e.basis,
+                "basis_signal": e.basis_signal,
+                "funding_signal": e.funding_signal,
+                "oi_signal": e.oi_signal,
+                "derivatives_score": e.derivatives_score,
+                "derivatives_signals": e.derivatives_signals,
+                "ml_win_prob": e.ml_win_prob,
+                "ml_prediction": e.ml_prediction,
+                "ml_boost": e.ml_boost,
+                "market_regime": e.market_regime,
+                "regime_confidence": e.regime_confidence,
+                "regime_weight": e.regime_weight,
+                "regime_preferred": e.regime_preferred,
+                "regime_avoided": e.regime_avoided,
+                "regime_position_mult": e.regime_position_mult,
+                "regime_stop_mult": e.regime_stop_mult,
+                "regime_target_mult": e.regime_target_mult,
+                "regime_min_score_adj": e.regime_min_score_adj,
+                "regime_min_vol_x_adj": e.regime_min_vol_x_adj,
+                "regime_min_rr_adj": e.regime_min_rr_adj,
+                "correlation_cluster": e.correlation_cluster,
+                "cluster_representative": e.cluster_representative,
+                "cluster_avg_corr": e.cluster_avg_corr,
+                "cluster_sector": e.cluster_sector,
+                "is_cluster_rep": e.is_cluster_rep,
+                "narrative_sector": e.narrative_sector,
+                "narrative_category": e.narrative_category,
+                "narrative_active": e.narrative_active,
+                "narrative_momentum": e.narrative_momentum,
+                "narrative_boost": e.narrative_boost,
+                "active_narrative": e.active_narrative,
+                "narrative_catalysts": e.narrative_catalysts,
+                "position_size_usdt": e.position_size_usdt,
+                "risk_usdt": e.risk_usdt,
+                "kelly_fraction": e.kelly_fraction,
+            })
+
+    ranked = _rank_trade_candidates(fresh, cfg, enricher)
     abt_fresh = [r for r in fresh if r.get("strategy") == "ABT"]
     if abt_fresh:
         log("ABT", f"qualified stages: {', '.join(sorted({str(r.get('strategy_family')) for r in abt_fresh}))}")
@@ -791,6 +1009,7 @@ def run_buy(token, chat_id, realtime_cache=None):
         "24h volume is a liquidity filter only; BUY requires multi-factor confirmation.",
         "Signals are quality-gated; there is no daily BUY quota.",
         f"Pump filter: only signals with >{cfg.get('signal_min_pump_potential_pct', 40):.0f}% modelled potential are alerted.",
+        f"Win rate filter: min {cfg.get('signal_min_win_rate_pct', 55):.0f}% with {cfg.get('signal_min_win_rate_samples', 10)}+ samples.",
     ])
     log(f"[BUY] {len(selected)} quality signals / {len(fresh)} qualified signals / {len(tasks)} deep scans")
     log("[BUY AUDIT]", f"scans={len(tasks)} hits={len(hits)} " + audit.format_line())
