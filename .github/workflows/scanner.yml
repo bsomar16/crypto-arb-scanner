@@ -1,0 +1,70 @@
+name: Crypto Signal Scanner
+
+on:
+  schedule:
+    # Run every 15 minutes
+    - cron: '*/15 * * * *'
+  workflow_dispatch:  # Allow manual triggers
+
+permissions:
+  contents: read
+  # Required for notification deduplication (claiming notification identities)
+  contents: write
+
+jobs:
+  scanner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git operations
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 2>/dev/null || pip install \
+            aiohttp \
+            python-dateutil \
+            numpy \
+            scikit-learn \
+            xgboost \
+            lightgbm \
+            pandas \
+            pyyaml \
+            requests
+      
+      - name: Create state directory
+        run: mkdir -p state
+      
+      - name: Run scanner (buy mode)
+        run: python scanner.py --mode buy --json-logs
+        timeout-minutes: 8
+      
+      - name: Upload state artifacts (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-state
+          path: state/
+          retention-days: 7
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Scanner failed! Check the logs."
+          # Could add Slack/email notification here
