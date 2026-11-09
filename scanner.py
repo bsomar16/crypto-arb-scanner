@@ -35,6 +35,9 @@ import signal_lifecycle
 import multi_exchange
 import shadow_trading
 
+# NEW: Integration layer
+from integration import SignalEnricher, create_enricher
+
 MIN_EXCHANGES = 4
 SPREAD_ALERT_PCT = 8.0
 MAX_ALERTS_PER_RUN = 10
@@ -377,6 +380,10 @@ def run_buy(token, chat_id, realtime_cache=None):
         log("BUY", f"Win rate filter (>{min_wr}%): {before_wr} -> {len(hits)} signals")
         for _ in range(before_wr - len(hits)):
             audit.reject("win_rate_filter")
+
+    # NEW: Enrich signals with advanced features (ML, regime, risk, correlation, narrative, derivatives)
+    enricher = create_enricher(cfg)
+    hits = enricher.batch_enrich(hits)
 
     now_ts = datetime.now(timezone.utc).timestamp()
     active_coins = {
