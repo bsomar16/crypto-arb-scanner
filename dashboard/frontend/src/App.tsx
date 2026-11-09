@@ -33,8 +33,9 @@ function useWebSocket(onMessage: (msg: WSMessage) => void) {
   const reconnectAttempts = useRef(0);
 
   const connect = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    // Use environment variable for WebSocket URL, fallback to same host
+    const wsUrl = import.meta.env.VITE_WS_URL || 
+      `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
