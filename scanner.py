@@ -62,6 +62,11 @@ DEFAULTS = {
     "signal_max_potential_pct": 80.0,
     "signal_min_score": 55,
     "signal_min_rr": 1.5,
+    "signal_min_pump_potential_pct": 40.0,
+    "signal_require_pump_filter": true,
+    "signal_min_win_rate_pct": 55.0,
+    "signal_min_win_rate_samples": 10,
+    "signal_win_rate_weight": 0.2,
     "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", "TON", "TRX", "DOT", "LTC", "MATIC", "PEPE", "FET", "APT", "ARB", "OP", "INJ"],
     "holdings": [],
     "price_alerts": [],
@@ -338,6 +343,15 @@ def run_buy(token, chat_id, realtime_cache=None):
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
         hits = [r for r in ex.map(scan, tasks) if r]
 
+    # NEW: Apply pump potential filter (>40% potential)
+    if bool(cfg.get("signal_require_pump_filter", True)):
+        min_pump_pct = float(cfg.get("signal_min_pump_potential_pct", 40.0))
+        before_filter = len(hits)
+        hits = [r for r in hits if float(r.get("potential_pct", 0) or 0) >= min_pump_pct]
+        log("BUY", f"Pump filter (>{min_pump_pct}%): {before_filter} -> {len(hits)} signals")
+        for _ in range(before_filter - len(hits)):
+            audit.reject("pump_filter")
+
     fired = load_json("state/fired_signals.json", {}) or {}
     migrated_fired = False
     if any("|" in str(k) for k in fired):
@@ -351,6 +365,18 @@ def run_buy(token, chat_id, realtime_cache=None):
                 migrated[coin] = value
         fired = migrated
         migrated_fired = True
+
+    # NEW: Apply win rate filter (min 55% with 10+ samples)
+    if bool(cfg.get("signal_min_win_rate_pct", 0) > 0):
+        min_wr = float(cfg.get("signal_min_win_rate_pct", 55))
+        min_samples = int(cfg.get("signal_min_win_rate_samples", 10))
+        before_wr = len(hits)
+        hits = [r for r in hits if r.get("historical_win_pct") is None or 
+                r.get("historical_sample", 0) < min_samples or
+                r.get("historical_win_pct", 0) >= min_wr]
+        log("BUY", f"Win rate filter (>{min_wr}%): {before_wr} -> {len(hits)} signals")
+        for _ in range(before_wr - len(hits)):
+            audit.reject("win_rate_filter")
 
     now_ts = datetime.now(timezone.utc).timestamp()
     active_coins = {
