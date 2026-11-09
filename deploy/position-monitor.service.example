@@ -1,0 +1,17 @@
+[Unit]
+Description=Crypto Arb Scanner Position Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/crypto-arb-scanner
+ExecStart=/usr/bin/python3 /opt/crypto-arb-scanner/position_monitor.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+# Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID through an EnvironmentFile.
+EnvironmentFile=/etc/crypto-arb-scanner.env
+
+[Install]
+WantedBy=multi-user.target
