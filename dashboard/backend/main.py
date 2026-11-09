@@ -53,6 +53,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "crypto-signal-dashboard", "websocket": "/ws"}
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
 # ─── WebSocket Manager ──────────────────────────────────────────────
 class ConnectionManager:
     def __init__(self):
