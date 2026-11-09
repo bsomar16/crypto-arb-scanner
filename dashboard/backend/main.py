@@ -23,6 +23,11 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import uvicorn
 
+# Ensure project root is in sys.path
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 # Try to import scanner modules
 try:
     from botutil import load_json
