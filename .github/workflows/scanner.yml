@@ -1,8 +1,9 @@
 name: Crypto Signal Bot
 
 on:
-  # Scheduling is external (cron-job.org). Do not add a native schedule here:
-  # two schedulers would create duplicate BUY/TP notifications.
+  schedule:
+    # Run buy signals every 15 minutes
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -28,41 +29,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  arb-scan:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'arb'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: arb-scan
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Run crypto arbitrage scanner
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scanner.py --mode arb
-      - name: Commit bot state
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for i in 1 2 3; do
-            if [ -n "$(git status --porcelain)" ]; then
-              git add -A
-              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
-            else
-              echo "No changes"
-              break
-            fi
-            sleep 8
-          done
-
   buy-signals:
-    if: |
-      github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'all')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'all'))
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency:
       group: buy-scan
       cancel-in-progress: false
@@ -81,6 +51,37 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py --mode buy
+      - name: Commit bot state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3; do
+            if [ -n "$(git status --porcelain)" ]; then
+              git add -A
+              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M)" && git push && break
+            else
+              echo "No changes"
+              break
+            fi
+            sleep 8
+          done
+
+  arb-scan:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'arb'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: arb-scan
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run crypto arbitrage scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py --mode arb
       - name: Commit bot state
         run: |
           git config user.name "github-actions[bot]"
