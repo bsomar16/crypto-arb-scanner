@@ -165,7 +165,7 @@ function RegimeCard({ regime }: { regime: Regime | null }) {
         </div>
         <div className="card-row">
           <span className="card-label">Weighted Change</span>
-          <span className="card-value mono {'positive' : ''}{regime.weighted_chg.toFixed(2)}%</span>
+          <span className={`card-value mono ${regime.weighted_chg >= 0 ? "positive" : "negative"}`}>{regime.weighted_chg >= 0 ? "+" : ""}{regime.weighted_chg.toFixed(2)}%</span>
         </div>
         <div className="card-row">
           <span className="card-label">Vol Regime</span>
@@ -554,7 +554,7 @@ function MLPerformanceChart({ ml }: { ml: MLStatus | null }) {
     day: `Day ${30 - i}`,
     accuracy: Math.max(0.5, Math.min(0.9, ml.val_accuracy + (Math.random() - 0.5) * 0.15)),
     auc: Math.max(0.5, Math.min(0.95, ml.val_auc + (Math.random() - 0.5) * 0.1))
-  }).reverse();
+  })).reverse();
 
   return (
     <div className="card">
@@ -653,7 +653,7 @@ export default function App() {
                 style={{ display: 'flex', alignItems: 'center', gap: 6 }}
               >
                 <tab.icon size={16} />
-                {tab.label} {tab.count > 0 && <span className="mono" style={{ fontSize: '0.7rem', background: 'rgba(0,0,0,0.2)', padding: '1px 6px', borderRadius: 10 }}>{tab.count}</span>
+                {tab.label} {tab.count > 0 && <span className="mono" style={{ fontSize: '0.7rem', background: 'rgba(0,0,0,0.2)', padding: '1px 6px', borderRadius: 10 }}>{tab.count}</span>}
               </button>
             ))}
           </div>
