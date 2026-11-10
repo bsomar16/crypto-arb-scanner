@@ -281,6 +281,14 @@ async def refresh_all_data():
         
     except Exception as e:
         print(f"Refresh error: {e}")
+        if not dashboard_state.signals:
+            dashboard_state.signals = get_demo_signals()
+            dashboard_state.positions = get_demo_positions()
+            dashboard_state.regime = get_demo_regime()
+            dashboard_state.narratives = get_demo_narratives()
+            dashboard_state.ml_status = get_demo_ml()
+            dashboard_state.portfolio = get_demo_portfolio()
+            dashboard_state.last_update = datetime.now(timezone.utc).isoformat()
 
 # ─── REST API ───────────────────────────────────────────────────────
 @app.get("/api/state", response_model=DashboardState)
