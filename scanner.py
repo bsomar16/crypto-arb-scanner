@@ -66,7 +66,7 @@ DEFAULTS = {
     "signal_min_score": 55,
     "signal_min_rr": 1.5,
     "signal_min_pump_potential_pct": 40.0,
-    "signal_require_pump_filter": true,
+    "signal_require_pump_filter": True,
     "signal_min_win_rate_pct": 55.0,
     "signal_min_win_rate_samples": 10,
     "signal_win_rate_weight": 0.2,

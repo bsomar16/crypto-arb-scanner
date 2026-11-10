@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 
@@ -56,10 +57,15 @@ class WalkForwardTests(unittest.TestCase):
         rows = self.rows(12)
         report = evaluate_windows(rows, lambda i, train, all_rows: None,
                                   lambda *args: None, train_bars=4, test_bars=2)
-        with tempfile.NamedTemporaryFile(suffix=".json") as f:
-            persist(report, f.name)
-            f.seek(0)
-            self.assertIn('"walk_forward"', f.read().decode("utf-8"))
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            f.close()
+            try:
+                persist(report, f.name)
+                with open(f.name, "r", encoding="utf-8") as rf:
+                    self.assertIn('"walk_forward"', rf.read())
+            finally:
+                if os.path.exists(f.name):
+                    os.unlink(f.name)
 
 
 if __name__ == "__main__":

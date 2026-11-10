@@ -31,9 +31,16 @@ except ImportError:
     LGB_AVAILABLE = False
     lgb = None
 
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
-from sklearn.preprocessing import StandardScaler
+try:
+    from sklearn.model_selection import TimeSeriesSplit
+    from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+    from sklearn.preprocessing import StandardScaler
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    TimeSeriesSplit = None
+    accuracy_score = precision_score = recall_score = roc_auc_score = None
+    StandardScaler = None
 
 from botutil import log, load_json, save_json
 
@@ -96,7 +103,7 @@ class MLClassifier:
         self.config = config or {}
         self.model_type = model_type
         self.model = None
-        self.scaler = StandardScaler()
+        self.scaler = StandardScaler() if StandardScaler is not None else None
         self.feature_importance = {}
         self.metadata = {
             "model_type": model_type,
@@ -183,15 +190,18 @@ class MLClassifier:
             )
         else:
             # Fallback: sklearn RandomForest
-            from sklearn.ensemble import RandomForestClassifier
-            return RandomForestClassifier(
-                n_estimators=200,
-                max_depth=10,
-                min_samples_split=10,
-                min_samples_leaf=5,
-                random_state=42,
-                n_jobs=-1
-            )
+            try:
+                from sklearn.ensemble import RandomForestClassifier
+                return RandomForestClassifier(
+                    n_estimators=200,
+                    max_depth=10,
+                    min_samples_split=10,
+                    min_samples_leaf=5,
+                    random_state=42,
+                    n_jobs=-1
+                )
+            except ImportError:
+                return None
     
     def extract_features(self, signal: Dict) -> Optional[np.ndarray]:
         """Extract feature vector from signal dict."""
@@ -346,6 +356,8 @@ class MLClassifier:
     def train(self, X: np.ndarray, y: np.ndarray, 
               validation_split: float = 0.2) -> Dict:
         """Train the model with time-series cross-validation."""
+        if not SKLEARN_AVAILABLE or self.scaler is None:
+            return {"error": "scikit-learn is required for training"}
         if len(X) < 50:
             return {"error": "Insufficient training data (min 50 samples)"}
         
@@ -423,7 +435,7 @@ class MLClassifier:
     
     def predict_proba(self, signal: Dict) -> float:
         """Predict P(WIN) for a signal."""
-        if not self.is_trained or self.model is None:
+        if not self.is_trained or self.model is None or self.scaler is None:
             return 0.5
         
         feat_vec = self.extract_features(signal)

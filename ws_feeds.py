@@ -16,8 +16,14 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Callable, Any, Set
 from urllib.parse import urljoin
 
-import websockets
-from websockets.client import WebSocketClientProtocol
+try:
+    import websockets
+    from websockets.client import WebSocketClientProtocol
+    WEBSOCKETS_AVAILABLE = True
+except ImportError:
+    WEBSOCKETS_AVAILABLE = False
+    websockets = None
+    WebSocketClientProtocol = Any
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +64,9 @@ class WSConnection:
         
     async def connect(self) -> bool:
         """Establish WebSocket connection."""
+        if not WEBSOCKETS_AVAILABLE:
+            logger.warning("websockets library not available")
+            return False
         try:
             self.ws = await websockets.connect(
                 self.config.url,
@@ -97,10 +106,11 @@ class WSConnection:
                     logger.warning(f"Invalid JSON from {self.config.url}")
                 except Exception as e:
                     logger.error(f"Message processing error: {e}")
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning(f"Connection closed: {self.config.url}")
         except Exception as e:
-            logger.error(f"Handler error: {e}")
+            if WEBSOCKETS_AVAILABLE and isinstance(e, getattr(websockets.exceptions, "ConnectionClosed", ())):
+                logger.warning(f"Connection closed: {self.config.url}")
+            else:
+                logger.error(f"Handler error: {e}")
     
     async def process_message(self, data: Dict):
         """Process incoming message - override in subclass."""
