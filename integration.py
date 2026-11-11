@@ -89,6 +89,35 @@ class EnhancedSignal:
         if self.attribution_factors is None:
             self.attribution_factors = {}
 
+    def to_dict(self) -> Dict:
+        out = dict(self.base)
+        for k, v in self.__dict__.items():
+            if k != "base":
+                out[k] = v
+        return out
+
+    def get(self, key, default=None):
+        if hasattr(self, key):
+            val = getattr(self, key)
+            if val is not None:
+                return val
+        return self.base.get(key, default)
+
+    def __getitem__(self, key):
+        if hasattr(self, key):
+            val = getattr(self, key)
+            if val is not None:
+                return val
+        return self.base[key]
+
+    def __setitem__(self, key, value):
+        if hasattr(self, key):
+            setattr(self, key, value)
+        self.base[key] = value
+
+    def __contains__(self, key):
+        return hasattr(self, key) or key in self.base
+
 
 class SignalEnricher:
     """Enriches base signals with all advanced features."""
@@ -176,14 +205,14 @@ class SignalEnricher:
             enriched.derivatives_signals = deriv_signal["signals"]
         
         # 2. ML enrichment
-        enriched = enhance_signal_with_ml(enriched.base, self.ml_classifier)
+        enhance_signal_with_ml(enriched.base, self.ml_classifier)
         enriched.ml_win_prob = enriched.base.get("ml_win_prob", 0.5)
         enriched.ml_prediction = enriched.base.get("ml_prediction", "UNKNOWN")
         enriched.ml_boost = enriched.base.get("ml_boost", 0)
         
         # 3. Regime enrichment
         regime_info = self.regime_detector.detect_regime()
-        enriched = enhance_signal_with_regime(enriched.base, self.regime_detector)
+        enhance_signal_with_regime(enriched.base, self.regime_detector)
         enriched.market_regime = enriched.base.get("market_regime", "NEUTRAL")
         enriched.regime_confidence = enriched.base.get("regime_confidence", 0)
         enriched.regime_weight = enriched.base.get("regime_weight", 1.0)
@@ -203,7 +232,7 @@ class SignalEnricher:
         # Placeholder - actual clustering done in batch_enrich
         
         # 5. Narrative enrichment
-        enriched = enhance_signal_with_narrative(enriched.base, self.narrative_tracker)
+        enhance_signal_with_narrative(enriched.base, self.narrative_tracker)
         enriched.narrative_sector = enriched.base.get("narrative_sector", "other")
         enriched.narrative_category = enriched.base.get("narrative_category", "")
         enriched.narrative_active = enriched.base.get("narrative_active", False)

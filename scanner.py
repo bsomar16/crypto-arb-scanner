@@ -34,6 +34,8 @@ import market_regime
 import signal_lifecycle
 import multi_exchange
 import shadow_trading
+import sls_strategy
+import sls_position_store
 
 # NEW: Integration layer
 from integration import SignalEnricher, create_enricher
@@ -70,6 +72,8 @@ DEFAULTS = {
     "signal_min_win_rate_pct": 55.0,
     "signal_min_win_rate_samples": 10,
     "signal_win_rate_weight": 0.2,
+    "sls_enabled": True,
+    "sls_sensitivity": "Balanced",
     "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", "TON", "TRX", "DOT", "LTC", "MATIC", "PEPE", "FET", "APT", "ARB", "OP", "INJ"],
     "holdings": [],
     "price_alerts": [],
@@ -228,16 +232,45 @@ def _rank_trade_candidates(hits, cfg):
     return scored
 
 def _signal_message(r):
-    setup = r.get("setup_type", "MOMENTUM"); kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"; reasons = ", ".join(r.get("reasons", [])[:5])
-    return [f"🟢 <b>CONFIRMED BUY SIGNAL</b>", f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}", f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}", "Action: <b>BUY</b>", f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}", f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}", f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}", f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%", f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation"]
+    strategy = str(r.get("strategy", "")).upper()
+    is_sls = strategy == "SLS" or str(r.get("strategy_family", "")).upper() == "SLS"
+    if is_sls:
+        setup = r.get("setup_type", "SLS")
+        reasons = ", ".join(r.get("reasons", [])[:5])
+        lines = [
+            "🟢 <b>SLS SPOT BUY SIGNAL</b>",
+            f"🚀 <b>{esc(r['coin'])}</b> · SLS v9 · {r['interval']}",
+            f"Setup: <b>{setup}</b> · Regime: <b>{r.get('sls_regime', '?')}</b>",
+            "🎯 Action: <b>SPOT BUY · Strategy: SLS</b>",
+            f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: <b>{fmt_price(r['stop'])}</b> (-{r.get('risk_pct', 0.0):.1f}%)",
+            f"⏳ TP1: {fmt_price(r['t1'])} · TP2: {fmt_price(r['t2'])} · TP3: {fmt_price(r['t3'])}",
+        ]
+        if r.get("t4") is not None and r.get("t5") is not None:
+            lines.append(f"⏳ TP4: {fmt_price(r['t4'])} · TP5: {fmt_price(r['t5'])}")
+        lines.extend([
+            f"📈 Modelled potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
+            f"🧠 Score: <b>{r['score']:.0f}/100</b> (req: {r.get('sls_threshold', 70):.0f}) · RSI {r.get('rsi', 0):.0f} · Vol ×{r.get('vol_x', 1.0):.2f}",
+            f"Why: {esc(reasons)}" if reasons else "Why: SLS v9 multi-component confirmation",
+        ])
+        return lines
+
+    setup = r.get("setup_type", "MOMENTUM")
+    kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"
+    reasons = ", ".join(r.get("reasons", [])[:5])
+    return [
+        f"🟢 <b>CONFIRMED BUY SIGNAL</b>",
+        f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}",
+        f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}",
+        "Action: <b>BUY</b>",
+        f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: {fmt_price(r['stop'])}",
+        f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}",
+        f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
+        f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%",
+        f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation",
+    ]
 
 def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None, audit=None):
-    """Return one BUY notification per coin.
-
-    A coin is silent while it has an open tracked position. After that signal
-    closes, the same coin can alert again only when the new setup is materially
-    different (entry moved, setup changed, or timeframe changed).
-    """
+    """Return one BUY notification per coin (or per coin/timeframe for independent SLS)."""
     updates = {}
     fresh = []
     active_coins = {str(c).upper() for c in (active_coins or set())}
@@ -247,20 +280,25 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
         coin = str(r.get("coin", "")).upper()
         if not coin:
             continue
-        current = best_by_coin.get(coin)
+        is_sls = str(r.get("strategy", "")).upper() == "SLS"
+        group_key = f"{coin}|SLS|{r.get('interval', '')}" if is_sls else coin
+        current = best_by_coin.get(group_key)
         if current is None or (r["score"], r["rr"], r["potential_pct"]) > (
             current["score"], current["rr"], current["potential_pct"]
         ):
-            best_by_coin[coin] = r
+            best_by_coin[group_key] = r
 
-    for coin, r in best_by_coin.items():
+    for group_key, r in best_by_coin.items():
+        coin = str(r.get("coin", "")).upper()
+        is_sls = str(r.get("strategy", "")).upper() == "SLS"
         # Never emit another BUY while this coin's previous signal is active.
-        if coin in active_coins:
+        if coin in active_coins and not is_sls:
             if audit is not None:
                 audit.reject("dedupe_active_position")
             continue
 
-        old = fired.get(coin, {})
+        fired_key = group_key if is_sls else coin
+        old = fired.get(fired_key, {})
         old_entry = float(old.get("entry", 0) or 0)
         old_setup = str(old.get("setup_type", "") or "")
         old_interval = str(old.get("interval", "") or "")
@@ -281,13 +319,14 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
                 audit.reject("dedupe_unchanged")
             continue
 
-        updates[coin] = {
+        updates[fired_key] = {
             "ts": now_ts,
             "entry": r["entry"],
             "score": r["score"],
             "setup_type": r.get("setup_type", ""),
             "interval": r.get("interval", ""),
             "candle_open_time": int(r.get("candle_open_time", 0) or 0),
+            "strategy": r.get("strategy", ""),
         }
         fresh.append(r)
 
@@ -327,7 +366,8 @@ def run_buy(token, chat_id, realtime_cache=None):
 
     def scan(task):
         sym, interval = task
-        return intraday_signal(
+        results = []
+        sig = intraday_signal(
             sym,
             interval=interval,
             min_vol_x=float(cfg.get("buy_min_vol_x", 1.15)),
@@ -341,10 +381,48 @@ def run_buy(token, chat_id, realtime_cache=None):
             cfg=cfg,
             audit=audit,
         )
+        if sig:
+            results.append(sig)
+        if bool(cfg.get("sls_enabled", True)):
+            sls = sls_strategy.evaluate_sls_coin(
+                sym, interval=interval, cfg=cfg, chg24=chg.get(sym, 0.0),
+                error_logger=lambda m: log("SLS", m),
+            )
+            if sls:
+                results.append(sls)
+        return results
 
     workers = int(cfg.get("deep_scan_workers", 16))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(4, workers)) as ex:
-        hits = [r for r in ex.map(scan, tasks) if r]
+        hits = [r for batch in ex.map(scan, tasks) for r in (batch if isinstance(batch, list) else ([batch] if batch else []))]
+
+    # Advance persistent SLS positions with new closed bars and enforce lock
+    sls_state = sls_position_store.load_state()
+    sls_events = []
+    for pos in list(sls_state.values()):
+        if pos.get("status") != "open":
+            continue
+        try:
+            bars = sls_strategy._candles(pos["coin"], pos["interval"], 240)
+            if bars:
+                sls_events.extend(sls_position_store.advance_position(
+                    sls_state, pos["coin"], pos["interval"], bars
+                ))
+        except Exception as e:
+            log("SLS", f"position refresh failed for {pos.get('coin')} {pos.get('interval')}:", e)
+    if sls_events:
+        for event in sls_events:
+            log("SLS OUTCOME", event)
+    sls_position_store.save_state(sls_state)
+    sls_locked = sls_position_store.active_keys(sls_state)
+    if sls_locked:
+        before_sls_lock = len(hits)
+        hits = [r for r in hits if not (
+            str(r.get("strategy", "")).upper() == "SLS"
+            and sls_position_store.key(r.get("coin", ""), r.get("interval", "")) in sls_locked
+        )]
+        if len(hits) != before_sls_lock:
+            log("SLS", f"active-position lock suppressed {before_sls_lock - len(hits)} repeated BUY candidate(s)")
 
     # NEW: Apply pump potential filter (>40% potential)
     if bool(cfg.get("signal_require_pump_filter", True)):
@@ -383,7 +461,7 @@ def run_buy(token, chat_id, realtime_cache=None):
 
     # NEW: Enrich signals with advanced features (ML, regime, risk, correlation, narrative, derivatives)
     enricher = create_enricher(cfg)
-    hits = enricher.batch_enrich(hits)
+    hits = [h.to_dict() if hasattr(h, "to_dict") else h for h in enricher.batch_enrich(hits)]
 
     now_ts = datetime.now(timezone.utc).timestamp()
     active_coins = {
@@ -473,6 +551,15 @@ def run_buy(token, chat_id, realtime_cache=None):
         fired.update(updates)
     if updates or migrated_fired:
         save_json("state/fired_signals.json", fired)
+
+    # Register new SLS positions
+    sls_opened = 0
+    for r in selected:
+        if str(r.get("strategy", "")).upper() == "SLS":
+            sls_opened += int(sls_position_store.register_signal(sls_state, r))
+    if sls_opened:
+        sls_position_store.save_state(sls_state)
+        log("SLS", f"persistent SLS positions opened={sls_opened}")
 
     for r in selected:
         try:

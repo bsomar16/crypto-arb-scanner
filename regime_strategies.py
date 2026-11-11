@@ -332,8 +332,9 @@ class RegimeDetector:
             # MACD
             macd, signal, hist = ind.macd(closes)
             
-            # ADX for trend strength
-            adx = ind.adx(highs, lows, closes)
+            # ADX for trend strength (safe fallback if not in indicators module)
+            adx_fn = getattr(ind, "adx", None)
+            adx = adx_fn(highs, lows, closes) if callable(adx_fn) else None
             
             current = closes[-1]
             

@@ -449,15 +449,16 @@ def get_derivatives_signal(coin: str,
             signal["signals"].append(f"Negative funding ({fr:.3f}%)")
     
     # Basis signal
-    basis = signal["basis"]
-    if basis > 1.0:  # futures > 1% premium
-        signal["basis_signal"] = "RICH"
-        signal["composite_score"] -= 10  # mean reversion risk
-        signal["signals"].append(f"Rich basis ({basis:.2f}%)")
-    elif basis < -0.5:  # futures discount
-        signal["basis_signal"] = "CHEAP"
-        signal["composite_score"] += 10  # potential short squeeze
-        signal["signals"].append(f"Cheap basis ({basis:.2f}%)")
+    basis = signal.get("basis")
+    if basis is not None:
+        if basis > 1.0:  # futures > 1% premium
+            signal["basis_signal"] = "RICH"
+            signal["composite_score"] -= 10  # mean reversion risk
+            signal["signals"].append(f"Rich basis ({basis:.2f}%)")
+        elif basis < -0.5:  # futures discount
+            signal["basis_signal"] = "CHEAP"
+            signal["composite_score"] += 10  # potential short squeeze
+            signal["signals"].append(f"Cheap basis ({basis:.2f}%)")
     
     # Open interest signal
     oi = oi_data.get(coin, 0)
