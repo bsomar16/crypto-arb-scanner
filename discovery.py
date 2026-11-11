@@ -215,6 +215,8 @@ def fetch_all_exchanges_24h(cfg) -> Dict[str, Dict[str, Tuple[float, float]]]:
 
 def _klines(exchange: str, symbol: str, interval: str = "1h", limit: int = 32):
     """Fetch klines from a specific exchange."""
+    if not str(symbol).isascii():
+        return None
     url = EXCHANGE_KLINES_ENDPOINTS.get(exchange)
     if not url:
         return None

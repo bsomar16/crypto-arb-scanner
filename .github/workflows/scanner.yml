@@ -4,6 +4,8 @@ on:
   schedule:
     # Run buy signals every 15 minutes
     - cron: '*/15 * * * *'
+    # Run daily crypto report every day at 08:00 UTC (09:00 CET)
+    - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -103,6 +105,7 @@ jobs:
 
   daily-picks:
     if: |
+      (github.event.schedule == '0 8 * * *') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'daily') ||
       (github.event_name == 'workflow_dispatch' && inputs.mode == 'all')
     runs-on: ubuntu-latest
