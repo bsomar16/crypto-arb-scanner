@@ -2,13 +2,22 @@ export interface SignalModel {
   coin: string;
   interval: string;
   setup_type: string;
+  strategy?: string;
+  strategy_family?: string;
   entry: number;
   stop: number;
   target: number;
+  t1?: number;
+  t2?: number;
+  t3?: number;
+  t4?: number;
+  t5?: number;
   rr: number;
   potential_pct: number;
   score: number;
   trade_quality: number;
+  sls_regime?: string;
+  sls_threshold?: number;
   ml_win_prob?: number;
   ml_prediction?: string;
   market_regime?: string;
@@ -19,10 +28,10 @@ export interface SignalModel {
   pump_tier?: string;
   pump_score?: number;
   timestamp: string;
-  is_cluster_rep: boolean;
+  is_cluster_rep?: boolean;
   derivatives_signals?: string[];
   correlation_cluster?: number;
-  is_cluster_rep?: boolean;
+  reasons?: string[];
 }
 
 export interface PositionModel {
