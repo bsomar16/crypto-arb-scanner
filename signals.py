@@ -174,9 +174,12 @@ def intraday_signal(coin, interval="15m", limit=180, min_vol_x=None, min_hour_vo
             return _audit_reject(audit, "trend_data")
 
         structure = structure_snapshot(closes, highs, lows)
+        cfg_require_retest = bool(cfg.get("signal_require_retest", False)) if cfg else False
+        cfg_require_sweep = bool(cfg.get("signal_require_sweep", False)) if cfg else False
         entry = evaluate_entry(
             closes, highs, lows, [float(k[1]) for k in data], interval, atr=a,
-            require_retest=True,
+            require_retest=cfg_require_retest,
+            require_sweep=cfg_require_sweep,
         )
         if not entry:
             return _audit_reject(audit, "entry_confirmation")

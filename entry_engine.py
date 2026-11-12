@@ -52,10 +52,11 @@ def evaluate_entry(closes, highs, lows, opens, interval, atr=None, require_retes
     if require_retest and (retest is None or confirm is None):
         return None
     if confirm is None:
-        confirm = {"index": retest["index"], "open": opens[retest["index"]], "high": highs[retest["index"]],
-                   "low": lows[retest["index"]], "close": closes[retest["index"]],
-                   "body_strength": _body_strength(opens[retest["index"]], highs[retest["index"]],
-                                                    lows[retest["index"]], closes[retest["index"]])}
+        ref_idx = retest["index"] if retest is not None else bos["index"]
+        confirm = {"index": ref_idx, "open": opens[ref_idx], "high": highs[ref_idx],
+                   "low": lows[ref_idx], "close": closes[ref_idx],
+                   "body_strength": _body_strength(opens[ref_idx], highs[ref_idx],
+                                                    lows[ref_idx], closes[ref_idx])}
     entry_price = confirm["close"]
     if entry_price <= broken_level:
         return None

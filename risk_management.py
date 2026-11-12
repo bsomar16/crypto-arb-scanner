@@ -155,15 +155,16 @@ class DynamicRiskManager:
         risk_usdt = min(base_risk_usdt, kelly_risk_usdt)
         
         # Regime adjustment
-        regime_mult = signal.get("regime_position_mult", 1.0)
+        regime_mult = float(signal.get("regime_position_mult") or 1.0)
         risk_usdt *= regime_mult
         
         # ML adjustment
-        ml_boost = signal.get("ml_boost", 0)
+        ml_boost = float(signal.get("ml_boost") or 0.0)
         risk_usdt *= (1 + ml_boost / 100)
         
-        # Win rate adjustment
-        win_rate = signal.get("historical_win_pct", 50) / 100
+        # Win rate adjustment (safe fallback if historical_win_pct is None)
+        raw_wr = signal.get("historical_win_pct")
+        win_rate = float(raw_wr if raw_wr is not None else 50.0) / 100.0
         if win_rate > 0.6:
             risk_usdt *= 1.2
         elif win_rate < 0.45:
