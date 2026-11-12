@@ -3,7 +3,17 @@ name: production-readiness
 on:
   workflow_dispatch:
   push:
+    paths-ignore:
+      - 'state/**'
+      - 'docs/**'
+      - 'dashboard/frontend/**'
+      - 'README.md'
   pull_request:
+    paths-ignore:
+      - 'state/**'
+      - 'docs/**'
+      - 'dashboard/frontend/**'
+      - 'README.md'
 
 jobs:
   audit:
