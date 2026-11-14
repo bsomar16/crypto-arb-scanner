@@ -14,10 +14,37 @@ from typing import Dict, List, Optional, Callable, Any
 from botutil import http_json, log
 from sls_engine import evaluate_series, SetupTracker
 
-INTERVALS = ("5m", "15m", "1h", "4h", "1d", "1w")
-HTF_MAP = {"5m": "1h", "15m": "4h", "1h": "1d", "4h": "1w", "1d": "1M", "1w": None}
-TF_A_MAP = {"5m": "1d", "15m": "1d", "1h": "1d", "4h": "1w", "1d": "1w", "1w": "1M"}
-TF_B_MAP = {"5m": "1w", "15m": "1w", "1h": "1w", "4h": "1M", "1d": "1M", "1w": None}
+INTERVALS = ("5m", "15m", "30m", "45m", "1h", "4h", "1d", "1w")
+HTF_MAP = {
+    "5m": "1h",
+    "15m": "4h",
+    "30m": "4h",
+    "45m": "4h",
+    "1h": "1d",
+    "4h": "1w",
+    "1d": "1M",
+    "1w": None,
+}
+TF_A_MAP = {
+    "5m": "1d",
+    "15m": "1d",
+    "30m": "1d",
+    "45m": "1d",
+    "1h": "1d",
+    "4h": "1w",
+    "1d": "1w",
+    "1w": "1M",
+}
+TF_B_MAP = {
+    "5m": "1w",
+    "15m": "1w",
+    "30m": "1w",
+    "45m": "1w",
+    "1h": "1w",
+    "4h": "1M",
+    "1d": "1M",
+    "1w": None,
+}
 
 _CACHE: Dict[Any, Any] = {}
 _LOCK = RLock()
@@ -35,6 +62,40 @@ def _parse_closed_candles(raw: List[Any], now_ms: int) -> List[Dict[str, Any]]:
     ]
 
 
+def resample_15m_to_45m(bars_15m: List[Dict[str, Any]], now_ms: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Resample 15m Binance klines into standard 45m bars aligned to UTC midnight.
+
+    45m bars start at 00:00, 00:45, 01:30, 02:15, 03:00 UTC (32 bars per UTC day).
+    Only returns fully closed 45m bars formed by complete 3-bar clusters.
+    """
+    if not bars_15m:
+        return []
+    BUCKET_MS = 2_700_000  # 45 minutes in ms
+    now = int(time.time() * 1000) if now_ms is None else now_ms
+    groups: Dict[int, List[Dict[str, Any]]] = {}
+    for b in bars_15m:
+        bucket = (int(b["t"]) // BUCKET_MS) * BUCKET_MS
+        if bucket + BUCKET_MS <= now:
+            groups.setdefault(bucket, []).append(b)
+
+    out = []
+    for bucket in sorted(groups.keys()):
+        cluster = groups[bucket]
+        if len(cluster) < 3:
+            continue
+        cluster.sort(key=lambda x: int(x["t"]))
+        out.append({
+            "t": bucket,
+            "o": float(cluster[0]["o"]),
+            "h": max(float(x["h"]) for x in cluster),
+            "l": min(float(x["l"]) for x in cluster),
+            "c": float(cluster[-1]["c"]),
+            "v": sum(float(x["v"]) for x in cluster),
+            "q": sum(float(x.get("q", 0.0)) for x in cluster),
+        })
+    return out
+
+
 def _candles(symbol: str, interval: str, limit: int = 240) -> Optional[List[Dict[str, Any]]]:
     key = (symbol, interval, limit)
     now = time.monotonic()
@@ -42,6 +103,20 @@ def _candles(symbol: str, interval: str, limit: int = 240) -> Optional[List[Dict
         item = _CACHE.get(key)
         if item and (now - item[0] < 45):
             return item[1]
+
+    if interval == "45m":
+        # Fetch underlying 15m bars and resample to 45m (limit * 3 bars needed)
+        fetch_limit = min(1000, max(300, limit * 3 + 30))
+        bars_15m = _candles(symbol, "15m", limit=fetch_limit)
+        value = resample_15m_to_45m(bars_15m or [], int(time.time() * 1000))
+        if value and len(value) >= 50:
+            value = value[-limit:]
+        else:
+            value = None
+        with _LOCK:
+            _CACHE[key] = (now, value)
+        return value
+
     try:
         url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit={limit}"
         raw = http_json(url, timeout=12)
@@ -65,7 +140,7 @@ def _interval_close_ms(open_ms: int, interval: str) -> int:
         end = start.replace(year=start.year + 1, month=1, day=1) if start.month == 12 else start.replace(month=start.month + 1, day=1)
         return int(end.timestamp() * 1000)
     units = {
-        "1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000,
+        "1m": 60000, "5m": 300000, "15m": 900000, "30m": 1800000, "45m": 2700000, "1h": 3600000,
         "4h": 14400000, "1d": 86400000, "1w": 604800000
     }
     return open_ms + units.get(interval, 3600000)
@@ -153,7 +228,7 @@ def evaluate_sls_coin(coin: str, interval: str = "1h", cfg: Optional[Dict[str, A
         # Enrich result for scanner and notification compatibility
         result["coin"] = symbol
         result["strategy_id"] = f"sls_{interval}"
-        result["trade_horizon"] = "Scalp" if interval in ("5m", "15m") else "Medium" if interval in ("1h", "4h") else "Long"
+        result["trade_horizon"] = "Scalp" if interval in ("5m", "15m", "30m") else "Medium" if interval in ("45m", "1h", "4h") else "Long"
         result["chg24"] = float(chg24 or 0.0)
         result["entry_quality"] = result["score"]
         result["expansion_score"] = result["score"]

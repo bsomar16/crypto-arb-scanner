@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Any, Set
 from botutil import load_json, save_json
 
 PATH = "state/sls_positions.json"
-LIFETIME = {"1m": 120, "5m": 120, "15m": 120, "1h": 120, "4h": 120, "1d": 40, "1w": 12}
+LIFETIME = {"1m": 120, "5m": 120, "15m": 120, "30m": 120, "45m": 120, "1h": 120, "4h": 120, "1d": 40, "1w": 12}
 C_FEE = 0.002
 C_SLOT = 0.2
 

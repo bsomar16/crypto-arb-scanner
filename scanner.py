@@ -56,7 +56,7 @@ DEFAULTS = {
     "min_daily_qv": 1500000,
     "buy_scan_top_n": 100,
     "buy_min_vol": 2000000,
-    "buy_intervals": ["5m", "15m", "1h"],
+    "buy_intervals": ["5m", "15m", "30m", "45m", "1h"],
     "buy_scan_every_minutes": 5,
     "buy_min_vol_x": 1.15,
     "buy_fast_top_n": 150,
@@ -94,7 +94,7 @@ DEFAULTS = {
     "outcome_tracking_enabled": True,
     "outcome_refresh_seconds": 300,
     "outcome_max_pending": 60,
-    "outcome_horizon_bars": {"5m": 288, "15m": 96, "1h": 48},
+    "outcome_horizon_bars": {"5m": 288, "15m": 96, "30m": 48, "45m": 32, "1h": 48},
     "market_regime_enabled": True,
     "market_regime_breadth_min_quote_volume": 1000000,
     "market_regime_breadth_limit": 100,
@@ -255,7 +255,7 @@ def _signal_message(r):
         return lines
 
     setup = r.get("setup_type", "MOMENTUM")
-    kind = "SCALP" if r["interval"] in ("5m", "15m") else "SMALL TRADE"
+    kind = "SCALP" if r["interval"] in ("5m", "15m", "30m") else "SMALL TRADE"
     reasons = ", ".join(r.get("reasons", [])[:5])
     return [
         f"🟢 <b>CONFIRMED BUY SIGNAL</b>",
@@ -335,9 +335,10 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
 
 def run_buy(token, chat_id, realtime_cache=None):
     cfg = load_cfg()
-    intervals = [i for i in cfg.get("buy_intervals", ["5m", "15m", "1h"]) if i in ("5m", "15m", "1h")]
+    allowed_intervals = ("5m", "15m", "30m", "45m", "1h")
+    intervals = [i for i in cfg.get("buy_intervals", list(allowed_intervals)) if i in allowed_intervals]
     if not intervals:
-        intervals = ["5m", "15m", "1h"]
+        intervals = ["5m", "15m", "30m", "45m", "1h"]
 
     t24 = fetch_binance_24h()
     q = crypto_quote(t24)

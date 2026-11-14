@@ -79,6 +79,69 @@ class SlsScannerIntegrationTests(unittest.TestCase):
                 self.assertIsNotNone(res)
                 self.assertEqual(res["strategy"], "SLS")
 
+    def test_intervals_support_30m_and_45m(self):
+        self.assertIn("30m", sls_strategy.INTERVALS)
+        self.assertIn("45m", sls_strategy.INTERVALS)
+        self.assertIn("30m", sls_strategy.HTF_MAP)
+        self.assertIn("45m", sls_strategy.HTF_MAP)
+        self.assertEqual(sls_strategy._interval_close_ms(0, "30m"), 1800000)
+        self.assertEqual(sls_strategy._interval_close_ms(0, "45m"), 2700000)
+        self.assertIn("30m", scanner.DEFAULTS["buy_intervals"])
+        self.assertIn("45m", scanner.DEFAULTS["buy_intervals"])
+
+    def test_45m_resampling_aggregation(self):
+        # Create 6 15m bars covering two 45m buckets:
+        # Bucket 1: 0, 900_000, 1_800_000 (0 to 45m)
+        # Bucket 2: 2_700_000, 3_600_000, 4_500_000 (45m to 90m)
+        bars_15m = [
+            {"t": 0, "o": 10.0, "h": 12.0, "l": 9.5, "c": 11.0, "v": 100.0, "q": 1100.0},
+            {"t": 900_000, "o": 11.0, "h": 13.0, "l": 10.5, "c": 12.5, "v": 150.0, "q": 1800.0},
+            {"t": 1_800_000, "o": 12.5, "h": 14.0, "l": 11.8, "c": 13.0, "v": 200.0, "q": 2600.0},
+            {"t": 2_700_000, "o": 13.0, "h": 15.0, "l": 12.8, "c": 14.0, "v": 120.0, "q": 1600.0},
+            {"t": 3_600_000, "o": 14.0, "h": 16.5, "l": 13.5, "c": 15.5, "v": 180.0, "q": 2700.0},
+            {"t": 4_500_000, "o": 15.5, "h": 17.0, "l": 14.8, "c": 16.0, "v": 220.0, "q": 3500.0},
+        ]
+        # Evaluate as of time after bucket 2 closes (e.g. 6_000_000)
+        res = sls_strategy.resample_15m_to_45m(bars_15m, now_ms=6_000_000)
+        self.assertEqual(len(res), 2)
+        
+        # Check first 45m bar
+        b1 = res[0]
+        self.assertEqual(b1["t"], 0)
+        self.assertEqual(b1["o"], 10.0)
+        self.assertEqual(b1["h"], 14.0)
+        self.assertEqual(b1["l"], 9.5)
+        self.assertEqual(b1["c"], 13.0)
+        self.assertEqual(b1["v"], 450.0)
+        self.assertEqual(b1["q"], 5500.0)
+
+        # Check second 45m bar
+        b2 = res[1]
+        self.assertEqual(b2["t"], 2_700_000)
+        self.assertEqual(b2["o"], 13.0)
+        self.assertEqual(b2["h"], 17.0)
+        self.assertEqual(b2["l"], 12.8)
+        self.assertEqual(b2["c"], 16.0)
+        self.assertEqual(b2["v"], 520.0)
+        self.assertEqual(b2["q"], 7800.0)
+
+    def test_evaluate_sls_coin_on_45m(self):
+        # Verify evaluate_sls_coin executes cleanly on 45m
+        bars_45m = [{"t": i * 2_700_000, "o": 100, "h": 103, "l": 98, "c": 102, "v": 3000, "q": 306000} for i in range(215)]
+        mock_signal = {
+            "strategy": "SLS", "signal_action": "BUY", "coin": "SOL", "interval": "45m",
+            "entry": 102, "stop": 97, "t1": 105, "t2": 108, "t3": 112, "t4": 115, "t5": 118,
+            "potential_pct": 10.0, "risk_pct": 3.0, "rr": 3.33, "score": 85, "sls_threshold": 70,
+            "candle_open_time": bars_45m[-1]["t"], "setup_type": "EARLY_BRK"
+        }
+        with patch.object(sls_strategy, "_candles", return_value=bars_45m):
+            with patch.object(sls_strategy, "evaluate_series", side_effect=[mock_signal, None]):
+                res = sls_strategy.evaluate_sls_coin("SOL", "45m")
+                self.assertIsNotNone(res)
+                self.assertEqual(res["interval"], "45m")
+                self.assertEqual(res["setup_type"], "EARLY_BRK")
+                self.assertEqual(res["trade_horizon"], "Medium")
+
 
 if __name__ == "__main__":
     unittest.main()
