@@ -250,7 +250,10 @@ def evaluate_series(rows: List[Dict[str, Any]], interval: str,
     if len(rows) < 205:
         return None
 
-    tf_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080}.get(interval)
+    tf_minutes = {
+        "1m": 1, "5m": 5, "15m": 15, "30m": 30, "45m": 45,
+        "1h": 60, "4h": 240, "1d": 1440, "1w": 10080
+    }.get(interval)
     if tf_minutes is None:
         return None
 

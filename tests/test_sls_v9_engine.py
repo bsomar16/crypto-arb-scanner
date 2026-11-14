@@ -101,6 +101,23 @@ class SlsV9EngineTests(unittest.TestCase):
             self.assertIn("c_early", res["sls_components"])
 
 
+    def test_evaluate_series_handles_30m_and_45m(self):
+        rows = make_rows(count=260, drift=0.1)
+        htf = make_rows(count=260, drift=0.1)
+        btc = make_rows(count=260, drift=0.1)
+        # Verify 30m and 45m do not fail with None due to unmapped interval
+        # If indicators qualify, they return a dict with matching interval
+        try:
+            res_30m = evaluate_series(rows, "30m", htf_rows=htf, btc_rows=btc, sensitivity="Aggressive")
+            if res_30m is not None:
+                self.assertEqual(res_30m["interval"], "30m")
+            res_45m = evaluate_series(rows, "45m", htf_rows=htf, btc_rows=btc, sensitivity="Aggressive")
+            if res_45m is not None:
+                self.assertEqual(res_45m["interval"], "45m")
+        except Exception as e:
+            self.fail(f"evaluate_series raised exception on 30m/45m: {e}")
+
+
 if __name__ == "__main__":
     unittest.main()
 

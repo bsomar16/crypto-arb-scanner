@@ -101,8 +101,15 @@ def _candles(symbol: str, interval: str, limit: int = 240) -> Optional[List[Dict
     now = time.monotonic()
     with _LOCK:
         item = _CACHE.get(key)
-        if item and (now - item[0] < 45):
+        if item and (now - item[0] < 90):
             return item[1]
+        # Check if we have a larger or equal slice for (symbol, interval) in cache
+        for (c_sym, c_inv, c_lim), (c_ts, c_val) in _CACHE.items():
+            if c_sym == symbol and c_inv == interval and (now - c_ts < 90) and c_val:
+                if len(c_val) >= limit:
+                    sliced = c_val[-limit:]
+                    _CACHE[key] = (c_ts, sliced)
+                    return sliced
 
     if interval == "45m":
         # Fetch underlying 15m bars and resample to 45m (limit * 3 bars needed)
@@ -117,18 +124,23 @@ def _candles(symbol: str, interval: str, limit: int = 240) -> Optional[List[Dict
             _CACHE[key] = (now, value)
         return value
 
+    # When fetching 15m, fetch at least 750 bars so that 45m resampling reuses it with 0 extra API calls
+    effective_limit = max(limit, 750) if interval == "15m" else limit
     try:
-        url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit={limit}"
+        url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit={effective_limit}"
         raw = http_json(url, timeout=12)
         if not raw:
             # Fallback to api.binance.com
-            url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit={limit}"
+            url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit={effective_limit}"
             raw = http_json(url, timeout=12)
         out = _parse_closed_candles(raw, int(time.time() * 1000)) if raw else None
         value = out if (out and len(out) >= 50) else None
     except Exception:
         value = None
     with _LOCK:
+        if value is not None and effective_limit != limit:
+            _CACHE[(symbol, interval, effective_limit)] = (now, value)
+            value = value[-limit:]
         _CACHE[key] = (now, value)
     return value
 
@@ -222,8 +234,14 @@ def evaluate_sls_coin(coin: str, interval: str = "1h", cfg: Optional[Dict[str, A
                 setup_tracker=_GLOBAL_SETUP_TRACKER,
             )
             if prev_signal:
-                # Rising edge only - suppress persistent qualification
-                return None
+                prev_setup = str(prev_signal.get("setup_type", ""))
+                curr_setup = str(result.get("setup_type", ""))
+                # Allow upgrade: if prior bar was an EARLY_* setup and this bar confirmed into a primary setup
+                is_upgrade = prev_setup.startswith("EARLY_") and not curr_setup.startswith("EARLY_")
+                if not is_upgrade:
+                    # Rising edge only - suppress persistent qualification
+                    return None
+                result["setup_upgrade_from"] = prev_setup
 
         # Enrich result for scanner and notification compatibility
         result["coin"] = symbol
@@ -243,6 +261,8 @@ def evaluate_sls_coin(coin: str, interval: str = "1h", cfg: Optional[Dict[str, A
             "Structure targets TP1-TP5 laddered across overhead resistances",
             "SPOT BUY ONLY · Pine Script v9 engine",
         ]
+        if result.get("setup_upgrade_from"):
+            reasons.insert(1, f"Confirmed upgrade: {result['setup_upgrade_from']} → {setup}")
         result["reasons"] = reasons
         result["sls_htf"] = htf
         result["sls_btc_confirmed"] = result.get("sls_benchmark") != "B_NA"

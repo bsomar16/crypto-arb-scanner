@@ -74,6 +74,7 @@ DEFAULTS = {
     "signal_win_rate_weight": 0.2,
     "sls_enabled": True,
     "sls_sensitivity": "Balanced",
+    "sls_allow_multi_timeframe_signals": False,
     "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", "TON", "TRX", "DOT", "LTC", "MATIC", "PEPE", "FET", "APT", "ARB", "OP", "INJ"],
     "holdings": [],
     "price_alerts": [],
@@ -226,7 +227,9 @@ def _rank_trade_candidates(hits, cfg):
         row["market_regime_volatility"] = regime.get("volatility", "UNKNOWN")
         row["market_regime_breadth_pct"] = regime.get("breadth_pct", 0.0)
         row["market_regime_modifier"] = float(regime.get("score_modifier", 0.0) or 0.0)
-        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier + row["market_regime_modifier"])), 1)
+        mtf_boost = min(10.0, (row.get("mtf_confluence_count", 1) - 1) * 5.0) if row.get("mtf_confluence_count", 0) >= 2 else 0.0
+        row["mtf_confluence_boost"] = mtf_boost
+        row["trade_quality"] = round(max(0.0, min(100.0, quality + component_modifier + row["market_regime_modifier"] + mtf_boost)), 1)
         scored.append(row)
     scored.sort(key=lambda r: (-r["trade_quality"], -r["score"], -r["rr"], -r["potential_pct"]))
     return scored
@@ -236,17 +239,24 @@ def _signal_message(r):
     is_sls = strategy == "SLS" or str(r.get("strategy_family", "")).upper() == "SLS"
     if is_sls:
         setup = r.get("setup_type", "SLS")
+        if r.get("setup_upgrade_from"):
+            setup_display = f"<b>{esc(setup)}</b> (Confirmed from {esc(r['setup_upgrade_from'])})"
+        else:
+            setup_display = f"<b>{esc(setup)}</b>"
         reasons = ", ".join(r.get("reasons", [])[:5])
         lines = [
             "🟢 <b>SLS SPOT BUY SIGNAL</b>",
             f"🚀 <b>{esc(r['coin'])}</b> · SLS v9 · {r['interval']}",
-            f"Setup: <b>{setup}</b> · Regime: <b>{r.get('sls_regime', '?')}</b>",
+            f"Setup: {setup_display} · Regime: <b>{r.get('sls_regime', '?')}</b>",
             "🎯 Action: <b>SPOT BUY · Strategy: SLS</b>",
             f"Entry: <b>{fmt_price(r['entry'])}</b> · Stop: <b>{fmt_price(r['stop'])}</b> (-{r.get('risk_pct', 0.0):.1f}%)",
             f"⏳ TP1: {fmt_price(r['t1'])} · TP2: {fmt_price(r['t2'])} · TP3: {fmt_price(r['t3'])}",
         ]
         if r.get("t4") is not None and r.get("t5") is not None:
             lines.append(f"⏳ TP4: {fmt_price(r['t4'])} · TP5: {fmt_price(r['t5'])}")
+        if r.get("mtf_confluence_intervals"):
+            confluence_str = " + ".join(r["mtf_confluence_intervals"])
+            lines.append(f"⚡ <b>MTF Confluence:</b> <b>{confluence_str}</b> (alignment boost)")
         lines.extend([
             f"📈 Modelled potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
             f"🧠 Score: <b>{r['score']:.0f}/100</b> (req: {r.get('sls_threshold', 70):.0f}) · RSI {r.get('rsi', 0):.0f} · Vol ×{r.get('vol_x', 1.0):.2f}",
@@ -257,7 +267,7 @@ def _signal_message(r):
     setup = r.get("setup_type", "MOMENTUM")
     kind = "SCALP" if r["interval"] in ("5m", "15m", "30m") else "SMALL TRADE"
     reasons = ", ".join(r.get("reasons", [])[:5])
-    return [
+    lines = [
         f"🟢 <b>CONFIRMED BUY SIGNAL</b>",
         f"🚀 <b>{esc(r['coin'])}</b> · {kind} · {r['interval']}",
         f"Setup: <b>{setup}</b> · 4h: {r.get('trend_4h', '?')}",
@@ -266,22 +276,44 @@ def _signal_message(r):
         f"T1: {fmt_price(r['t1'])} · T2: {fmt_price(r['t2'])} · T3: {fmt_price(r['t3'])}",
         f"Potential: <b>+{r['potential_pct']:.1f}%</b> · Risk: {r['risk_pct']:.2f}% · R:R {r['rr']:.2f}",
         f"Score: <b>{r['score']:.0f}/100</b> · RSI {r['rsi']:.0f} · volume ×{r['vol_x']:.2f} · 24h {r['chg24']:+.1f}%",
-        f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation",
     ]
+    if r.get("mtf_confluence_intervals"):
+        confluence_str = " + ".join(r["mtf_confluence_intervals"])
+        lines.append(f"⚡ <b>MTF Confluence:</b> <b>{confluence_str}</b> (alignment boost)")
+    lines.append(f"Why: {esc(reasons)}" if reasons else "Why: structure + momentum confirmation")
+    return lines
 
-def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None, audit=None):
+def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct=0.02, limit=None, audit=None, cfg=None):
     """Return one BUY notification per coin (or per coin/timeframe for independent SLS)."""
     updates = {}
     fresh = []
     active_coins = {str(c).upper() for c in (active_coins or set())}
     best_by_coin = {}
 
+    # Multi-timeframe confluence detection across all hits in current cycle
+    intervals_by_coin = {}
+    for r in hits:
+        c = str(r.get("coin", "")).upper()
+        inv = str(r.get("interval", ""))
+        if c and inv:
+            intervals_by_coin.setdefault(c, set()).add(inv)
+
+    for r in hits:
+        c = str(r.get("coin", "")).upper()
+        if c in intervals_by_coin and len(intervals_by_coin[c]) >= 2:
+            r["mtf_confluence_intervals"] = sorted(intervals_by_coin[c])
+            r["mtf_confluence_count"] = len(intervals_by_coin[c])
+
+    allow_mtf_repeats = bool(cfg.get("sls_allow_multi_timeframe_signals", False)) if cfg else False
+
     for r in hits:
         coin = str(r.get("coin", "")).upper()
         if not coin:
             continue
         is_sls = str(r.get("strategy", "")).upper() == "SLS"
-        group_key = f"{coin}|SLS|{r.get('interval', '')}" if is_sls else coin
+        group_key = f"{coin}|SLS|{r.get('interval', '')}" if (is_sls and allow_mtf_repeats) else (
+            f"{coin}|SLS" if is_sls else coin
+        )
         current = best_by_coin.get(group_key)
         if current is None or (r["score"], r["rr"], r["potential_pct"]) > (
             current["score"], current["rr"], current["potential_pct"]
@@ -361,7 +393,7 @@ def run_buy(token, chat_id, realtime_cache=None):
         cands = cands[:max(1, int(cfg.get("realtime_monitor_candidates", 25)))]
     else:
         cands = cands[:max(deep_n, len(star))]
-    tasks = [(sym, interval) for interval in intervals for sym in cands]
+    tasks = [(sym, interval) for sym in cands for interval in intervals]
 
     audit = SignalAudit()
 
@@ -478,6 +510,7 @@ def run_buy(token, chat_id, realtime_cache=None):
         entry_change_pct=float(cfg.get("buy_signal_entry_change_pct", 0.02)),
         limit=None,
         audit=audit,
+        cfg=cfg,
     )
 
     # Signal generation is quality-gated, not quota-gated.

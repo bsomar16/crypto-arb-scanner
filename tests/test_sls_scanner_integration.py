@@ -142,6 +142,77 @@ class SlsScannerIntegrationTests(unittest.TestCase):
                 self.assertEqual(res["setup_type"], "EARLY_BRK")
                 self.assertEqual(res["trade_horizon"], "Medium")
 
+    def test_setup_upgrade_emits_when_prior_bar_was_early(self):
+        # When prior bar was an EARLY_BRK and current bar confirms as BRK, rising edge must NOT suppress it
+        rows = [{"t": i * 900_000, "o": 100, "h": 102, "l": 99, "c": 101, "v": 1000, "q": 101000} for i in range(210)]
+        curr_signal = {
+            "strategy": "SLS", "signal_action": "BUY", "coin": "ETH", "interval": "15m",
+            "entry": 101, "stop": 98, "t1": 103, "t2": 105, "t3": 108, "t4": 110, "t5": 112,
+            "potential_pct": 6.9, "risk_pct": 2.97, "rr": 2.3, "score": 82, "sls_threshold": 70,
+            "candle_open_time": rows[-1]["t"], "setup_type": "BRK"
+        }
+        prev_signal = {
+            "strategy": "SLS", "signal_action": "BUY", "coin": "ETH", "interval": "15m",
+            "entry": 100, "stop": 97, "t1": 102, "t2": 104, "t3": 107, "t4": 109, "t5": 111,
+            "potential_pct": 7.0, "risk_pct": 3.0, "rr": 2.3, "score": 75, "sls_threshold": 70,
+            "candle_open_time": rows[-2]["t"], "setup_type": "EARLY_BRK"
+        }
+        with patch.object(sls_strategy, "_candles", return_value=rows):
+            with patch.object(sls_strategy, "evaluate_series", side_effect=[curr_signal, prev_signal]):
+                res = sls_strategy.evaluate_sls_coin("ETH", "15m")
+                self.assertIsNotNone(res)
+                self.assertEqual(res["setup_type"], "BRK")
+                self.assertEqual(res["setup_upgrade_from"], "EARLY_BRK")
+                self.assertTrue(any("Confirmed upgrade: EARLY_BRK" in r for r in res["reasons"]))
+
+    def test_mtf_confluence_annotation_and_ranking_boost(self):
+        # Two hits on same coin with different intervals
+        hit_15m = {
+            "coin": "SOL", "interval": "15m", "strategy": "SLS", "setup_type": "BRK",
+            "entry": 150.0, "stop": 145.0, "t1": 155.0, "t2": 160.0, "t3": 170.0,
+            "potential_pct": 13.3, "risk_pct": 3.33, "rr": 4.0, "score": 80.0,
+            "sls_threshold": 70, "candle_open_time": 1000
+        }
+        hit_45m = {
+            "coin": "SOL", "interval": "45m", "strategy": "SLS", "setup_type": "EARLY_BRK",
+            "entry": 151.0, "stop": 144.0, "t1": 156.0, "t2": 162.0, "t3": 172.0,
+            "potential_pct": 14.0, "risk_pct": 4.6, "rr": 3.0, "score": 85.0,
+            "sls_threshold": 70, "candle_open_time": 1000
+        }
+        fresh, updates = scanner._dedupe_buy_signals([hit_15m, hit_45m], {}, 1000)
+        # Should consolidate into 1 best signal (highest score 45m)
+        self.assertEqual(len(fresh), 1)
+        best = fresh[0]
+        self.assertEqual(best["coin"], "SOL")
+        self.assertEqual(best["interval"], "45m")
+        self.assertEqual(best["mtf_confluence_intervals"], ["15m", "45m"])
+        self.assertEqual(best["mtf_confluence_count"], 2)
+
+        # Signal message should display MTF Confluence
+        msg = scanner._signal_message(best)
+        joined = "\n".join(msg)
+        self.assertIn("MTF Confluence", joined)
+        self.assertIn("15m + 45m", joined)
+
+        # Ranking boost
+        ranked = scanner._rank_trade_candidates([best], {})
+        self.assertEqual(ranked[0]["mtf_confluence_boost"], 5.0)
+
+    def test_15m_and_45m_cache_sharing(self):
+        sls_strategy._CACHE.clear()
+        mock_raw = [[i * 900_000, "10", "12", "9", "11", "100", 0, "1000"] for i in range(750)]
+        with patch.object(sls_strategy, "http_json", return_value=mock_raw) as mock_http:
+            # 1. Fetch 15m (requests 240, but fetches 750 for 45m reuse)
+            bars_15m = sls_strategy._candles("AVAX", "15m", limit=240)
+            self.assertIsNotNone(bars_15m)
+            self.assertEqual(len(bars_15m), 240)
+            self.assertEqual(mock_http.call_count, 1)
+
+            # 2. Fetch 45m (should use cached 750 15m bars with ZERO additional HTTP calls)
+            bars_45m = sls_strategy._candles("AVAX", "45m", limit=240)
+            self.assertIsNotNone(bars_45m)
+            self.assertEqual(mock_http.call_count, 1)  # STILL 1, no new HTTP calls!
+
 
 if __name__ == "__main__":
     unittest.main()
