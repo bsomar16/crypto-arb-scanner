@@ -178,6 +178,25 @@ class TestBullishTrendEngine(unittest.TestCase):
         self.assertEqual(res.trend_state, "OVEREXTENDED_BULL")
         self.assertNotIn(res.trend_state, ("STRONG_BULLISH_TREND", "BULLISH_TREND", "BULLISH_PULLBACK"))
 
+    def test_anti_chasing_blocks_rolled_48h_spike(self):
+        """A coin that jumped +48% 30 hours ago (now flat for 24h) must still be caught as overextended."""
+        candles = []
+        base_ms = 1730000000000
+        price = 100.0
+        for i in range(80):
+            if 40 <= i < 48:
+                o, c = price, price * 1.052  # +50% surge 32 hours ago
+                h, l = c * 1.005, o * 0.998
+            else:
+                o = price
+                c = price * (1.002 if i % 2 == 0 else 0.999)
+                h, l = max(o, c) * 1.004, min(o, c) * 0.996
+            candles.append(_make_kline(base_ms + i * 3_600_000, o, h, l, c, 1200.0, tbr=0.58))
+            price = c
+        res = evaluate_bullish_trend(candles)
+        self.assertTrue(res.overextended)
+        self.assertEqual(res.trend_state, "OVEREXTENDED_BULL")
+
     def test_insufficient_history_returns_neutral(self):
         candles = _generate_bullish_trend_candles(n=15)
         res = evaluate_bullish_trend(candles)

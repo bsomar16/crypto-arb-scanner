@@ -40,8 +40,8 @@ jobs:
       group: buy-scan
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -57,63 +57,73 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py --mode buy
+      - name: Run Smart Money Accumulation, Bullish Trend & Outcome Tracker
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python smart_money_scanner.py --scan
       - name: Commit bot state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for i in 1 2 3; do
-            git pull --rebase --autostash || true
-            if [ -n "$(git status --porcelain)" ]; then
-              git add -A
-              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
-            else
-              echo "No changes"
-              break
-            fi
-            sleep 8
-          done
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]"
+            for i in 1 2 3; do
+              if git push origin main; then
+                break
+              fi
+              git fetch --depth=5 origin main
+              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              sleep 3
+            done
+          else
+            echo "No changes"
+          fi
 
   smart-money-signals:
-    needs: [buy-signals]
-    if: ${{ always() && !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'smart_money' || inputs.mode == 'all'))) }}
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'smart_money'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
       group: smart-money-scan
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run Smart Money Accumulation, Bullish Trend & Outcome Tracker
+      - name: Run Smart Money Accumulation, Bullish Trend & Outcome Tracker (forced)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "smart_money" ]; then
-            python smart_money_scanner.py --scan --force
-          else
-            python smart_money_scanner.py --scan
-          fi
+        run: python smart_money_scanner.py --scan --force
       - name: Commit Smart Money state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for i in 1 2 3; do
-            git pull --rebase --autostash || true
-            if [ -n "$(git status --porcelain state/smart_money_scanner_state.json state/smart_money_signals.jsonl state/smart_money_tracked_signals.json state/smart_money_outcomes.jsonl 2>/dev/null)" ]; then
-              git add state/smart_money_scanner_state.json state/smart_money_signals.jsonl state/smart_money_tracked_signals.json state/smart_money_outcomes.jsonl 2>/dev/null || true
-              git commit -m "Update Smart Money state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
-            else
-              echo "No Smart Money state changes"
-              break
+          for f in state/smart_money_scanner_state.json state/smart_money_signals.jsonl state/smart_money_tracked_signals.json state/smart_money_outcomes.jsonl; do
+            if [ -f "$f" ]; then
+              git add "$f"
             fi
-            sleep 8
           done
+          if ! git diff --cached --quiet; then
+            git commit -m "Update Smart Money state $(date -u +%Y-%m-%dT%H:%M) [skip ci]"
+            for i in 1 2 3; do
+              if git push origin main; then
+                break
+              fi
+              git fetch --depth=5 origin main
+              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              sleep 3
+            done
+          else
+            echo "No Smart Money state changes"
+          fi
 
   arb-scan:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'arb'
@@ -122,10 +132,11 @@ jobs:
       group: arb-scan
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run crypto arbitrage scanner
@@ -137,16 +148,20 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for i in 1 2 3; do
-            if [ -n "$(git status --porcelain)" ]; then
-              git add -A
-              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
-            else
-              echo "No changes"
-              break
-            fi
-            sleep 8
-          done
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]"
+            for i in 1 2 3; do
+              if git push origin main; then
+                break
+              fi
+              git fetch --depth=5 origin main
+              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              sleep 3
+            done
+          else
+            echo "No changes"
+          fi
 
   daily-picks:
     if: |
@@ -158,10 +173,11 @@ jobs:
       group: daily-report
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run daily crypto report
@@ -173,16 +189,20 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for i in 1 2 3; do
-            if [ -n "$(git status --porcelain)" ]; then
-              git add -A
-              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
-            else
-              echo "No changes"
-              break
-            fi
-            sleep 8
-          done
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]"
+            for i in 1 2 3; do
+              if git push origin main; then
+                break
+              fi
+              git fetch --depth=5 origin main
+              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              sleep 3
+            done
+          else
+            echo "No changes"
+          fi
 
   weekly-backtest:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'backtest'
@@ -191,10 +211,11 @@ jobs:
       group: weekly-backtest
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run weekly crypto backtest
@@ -210,10 +231,11 @@ jobs:
       group: position-check
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Follow-up crypto check
@@ -225,16 +247,20 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for i in 1 2 3; do
-            if [ -n "$(git status --porcelain)" ]; then
-              git add -A
-              git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
-            else
-              echo "No changes"
-              break
-            fi
-            sleep 8
-          done
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]"
+            for i in 1 2 3; do
+              if git push origin main; then
+                break
+              fi
+              git fetch --depth=5 origin main
+              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              sleep 3
+            done
+          else
+            echo "No changes"
+          fi
 
   signal-report:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'report'
@@ -243,10 +269,11 @@ jobs:
       group: signal-report
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Generate crypto signal report

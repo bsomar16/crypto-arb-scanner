@@ -286,8 +286,11 @@ def evaluate_bullish_trend(
     higher_highs, higher_lows, last_swing_low = _detect_swing_structure(highs, lows, window=36)
 
     dist_ema20_atr = (close_now - ema20) / atr14 if atr14 > 1e-12 else 0.0
+    dist_ema50_atr = (close_now - ema50) / atr14 if atr14 > 1e-12 else 0.0
     ref_24h = closes[-25] if len(closes) >= 25 else closes[0]
     pct_24h = ((close_now - ref_24h) / ref_24h * 100.0) if ref_24h > 1e-12 else 0.0
+    ref_48h = closes[-49] if len(closes) >= 49 else closes[0]
+    pct_48h = ((close_now - ref_48h) / ref_48h * 100.0) if ref_48h > 1e-12 else 0.0
 
     # Higher-timeframe (e.g. 4h) alignment check
     htf_aligned: Optional[bool] = None
@@ -314,11 +317,13 @@ def evaluate_bullish_trend(
                 if h_closes[-1] < h_e50 and h_e20 < h_e50:
                     htf_bearish = True
 
-    # Anti-chasing overextension guard (prevents buying parabolic blow-off tops)
+    # Anti-chasing overextension guard (prevents buying parabolic blow-off tops or rolled 48h spikes)
     overextended = (
         dist_ema20_atr > 3.0
+        or dist_ema50_atr > 4.8
         or rsi14 > 76.0
         or pct_24h > 28.0
+        or pct_48h > 40.0
     )
 
     reasons: List[str] = []
