@@ -61,6 +61,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for i in 1 2 3; do
+            git pull --rebase --autostash || true
             if [ -n "$(git status --porcelain)" ]; then
               git add -A
               git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
@@ -73,7 +74,7 @@ jobs:
 
   smart-money-signals:
     needs: [buy-signals]
-    if: ${{ always() && !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'smart_money' || inputs.mode == 'all'))) }}
+    if: ${{ always() && !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'buy' || inputs.mode == 'smart_money' || inputs.mode == 'all'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:

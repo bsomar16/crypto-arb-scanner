@@ -75,6 +75,7 @@ DEFAULTS = {
     "sls_enabled": True,
     "sls_sensitivity": "Balanced",
     "sls_allow_multi_timeframe_signals": False,
+    "buy_signal_cooldown_minutes": 180,
     "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", "TON", "TRX", "DOT", "LTC", "MATIC", "PEPE", "FET", "APT", "ARB", "OP", "INJ"],
     "holdings": [],
     "price_alerts": [],
@@ -305,15 +306,15 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
             r["mtf_confluence_count"] = len(intervals_by_coin[c])
 
     allow_mtf_repeats = bool(cfg.get("sls_allow_multi_timeframe_signals", False)) if cfg else False
+    cooldown_minutes = float(cfg.get("buy_signal_cooldown_minutes", 0) or 0) if cfg else 0.0
+    cooldown_sec = max(0.0, cooldown_minutes * 60.0)
 
     for r in hits:
         coin = str(r.get("coin", "")).upper()
         if not coin:
             continue
         is_sls = str(r.get("strategy", "")).upper() == "SLS"
-        group_key = f"{coin}|SLS|{r.get('interval', '')}" if (is_sls and allow_mtf_repeats) else (
-            f"{coin}|SLS" if is_sls else coin
-        )
+        group_key = f"{coin}|SLS|{r.get('interval', '')}" if (is_sls and allow_mtf_repeats) else coin
         current = best_by_coin.get(group_key)
         if current is None or (r["score"], r["rr"], r["potential_pct"]) > (
             current["score"], current["rr"], current["potential_pct"]
@@ -323,19 +324,29 @@ def _dedupe_buy_signals(hits, fired, now_ts, active_coins=None, entry_change_pct
     for group_key, r in best_by_coin.items():
         coin = str(r.get("coin", "")).upper()
         is_sls = str(r.get("strategy", "")).upper() == "SLS"
-        # Never emit another BUY while this coin's previous signal is active.
-        if coin in active_coins and not is_sls:
+        # Never emit another BUY while this coin's previous signal/position is active.
+        if coin in active_coins and (not is_sls or not allow_mtf_repeats):
             if audit is not None:
                 audit.reject("dedupe_active_position")
             continue
 
-        fired_key = group_key if is_sls else coin
-        old = fired.get(fired_key, {})
+        fired_key = group_key
+        old = fired.get(fired_key) or fired.get(coin) or {}
+        old_ts = float(old.get("ts", 0) or 0)
         old_entry = float(old.get("entry", 0) or 0)
         old_setup = str(old.get("setup_type", "") or "")
         old_interval = str(old.get("interval", "") or "")
         old_candle = int(old.get("candle_open_time", 0) or 0)
         old_score = float(old.get("score", 0) or 0)
+
+        # Enforce per-coin cooldown window to prevent repeated BUY alerts across 5m/15m/1h cycles.
+        # Only an explicit EARLY_BRK -> BRK confirmation upgrade may bypass cooldown.
+        is_explicit_upgrade = bool(r.get("setup_upgrade_from") == "EARLY_BRK" and r.get("setup_type") == "BRK")
+        if old and cooldown_sec > 0 and old_ts > 0 and (now_ts - old_ts) < cooldown_sec and not is_explicit_upgrade:
+            if audit is not None:
+                audit.reject("dedupe_cooldown")
+            continue
+
         candle_changed = int(r.get("candle_open_time", 0) or 0) > old_candle if old_candle else False
         if old_entry <= 0:
             is_new_signal = True
@@ -448,12 +459,17 @@ def run_buy(token, chat_id, realtime_cache=None):
             log("SLS OUTCOME", event)
     sls_position_store.save_state(sls_state)
     sls_locked = sls_position_store.active_keys(sls_state)
+    sls_active_coins = {str(k).split("|", 1)[0].upper() for k in sls_locked if k}
+    allow_mtf_repeats = bool(cfg.get("sls_allow_multi_timeframe_signals", False))
     if sls_locked:
         before_sls_lock = len(hits)
-        hits = [r for r in hits if not (
-            str(r.get("strategy", "")).upper() == "SLS"
-            and sls_position_store.key(r.get("coin", ""), r.get("interval", "")) in sls_locked
-        )]
+        if allow_mtf_repeats:
+            hits = [r for r in hits if not (
+                str(r.get("strategy", "")).upper() == "SLS"
+                and sls_position_store.key(r.get("coin", ""), r.get("interval", "")) in sls_locked
+            )]
+        else:
+            hits = [r for r in hits if str(r.get("coin", "")).upper() not in sls_active_coins]
         if len(hits) != before_sls_lock:
             log("SLS", f"active-position lock suppressed {before_sls_lock - len(hits)} repeated BUY candidate(s)")
 
@@ -468,7 +484,7 @@ def run_buy(token, chat_id, realtime_cache=None):
 
     fired = load_json("state/fired_signals.json", {}) or {}
     migrated_fired = False
-    if any("|" in str(k) for k in fired):
+    if not allow_mtf_repeats and any("|" in str(k) for k in fired):
         migrated = {}
         for key, value in fired.items():
             coin = str(key).split("|", 1)[0].upper()
@@ -502,6 +518,8 @@ def run_buy(token, chat_id, realtime_cache=None):
         for p in positions_mod.load()
         if p.get("status") == "open" and p.get("coin")
     }
+    if not allow_mtf_repeats:
+        active_coins |= sls_active_coins
     fresh, updates = _dedupe_buy_signals(
         hits,
         fired,
@@ -548,6 +566,8 @@ def run_buy(token, chat_id, realtime_cache=None):
 
     fired_alerts, _ = alerts_mod.check_price_alerts(cfg)
     if not selected and not fired_alerts:
+        if migrated_fired:
+            save_json("state/fired_signals.json", fired)
         log("[BUY] no new signals")
         return False
 
