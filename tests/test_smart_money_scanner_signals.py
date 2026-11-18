@@ -286,6 +286,15 @@ class TestSmartMoneyScannerSignals(unittest.TestCase):
         # After 7 hours: cooldown expired, can re-alert
         self.assertTrue(self.engine.should_emit_signal("AVAXUSDT", "EARLY_ACCUMULATION", now_ts=t0 + 7 * 3600))
 
+        # Intra-trend flip (BULLISH_PULLBACK -> STRONG_BULLISH_TREND) must NOT bypass cooldown
+        self.engine.record_signal_emitted("XLMUSDT", "BULLISH_PULLBACK", now_ts=t0)
+        self.assertFalse(self.engine.should_emit_signal("XLMUSDT", "BULLISH_TREND", now_ts=t0 + 900))
+        self.assertFalse(self.engine.should_emit_signal("XLMUSDT", "STRONG_BULLISH_TREND", now_ts=t0 + 900))
+
+        # Active tracked signal lock: NEVER re-alert while open in tracker, even after cooldown expires
+        self.engine.tracker.tracked["ZKPUSDT"] = {"symbol": "ZKPUSDT"}
+        self.assertFalse(self.engine.should_emit_signal("ZKPUSDT", "CONTINUATION_CONFIRMED", now_ts=t0 + 24 * 3600))
+
     def test_adaptive_price_formatting_and_tokenized_equity_exclusion(self):
         self.assertEqual(fmt_price(64448.32), "$64,448.32")
         self.assertEqual(fmt_price(71.384), "$71.384")

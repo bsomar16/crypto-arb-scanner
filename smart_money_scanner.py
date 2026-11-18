@@ -417,7 +417,11 @@ class SmartMoneySignalEngine:
         return 0
 
     def should_emit_signal(self, symbol: str, signal_type: str, now_ts: Optional[float] = None) -> bool:
-        """Checks cooldown & upgrade logic to prevent duplicate Telegram spam."""
+        """Checks active tracked lock, cooldown, and strict breakout upgrade rules."""
+        # Never re-alert a coin while an active Smart Money signal is still open & tracked
+        if symbol in self.tracker.tracked:
+            return False
+
         now = now_ts if now_ts is not None else time.time()
         entry = self.state.get("cooldowns", {}).get(symbol)
         if not entry:
@@ -427,8 +431,13 @@ class SmartMoneySignalEngine:
         last_type = str(entry.get("signal_type", ""))
         cooldown_sec = SIGNAL_COOLDOWN_HOURS.get(signal_type, 4.0) * 3600.0
 
-        # Allow immediate alert on lifecycle stage upgrade (e.g. EARLY_ACCUMULATION -> PRE_BREAKOUT -> BREAKOUT)
-        if SIGNAL_PRIORITY.get(signal_type, 0) > SIGNAL_PRIORITY.get(last_type, 0):
+        # Only allow cooldown bypass on a true structural breakout upgrade from Accumulation
+        is_breakout_upgrade = (
+            last_type in ("EARLY_ACCUMULATION", "PRE_BREAKOUT")
+            and signal_type in ("PRE_BREAKOUT", "BREAKOUT_DETECTED", "CONTINUATION_CONFIRMED", "RETEST_CONFIRMED")
+            and SIGNAL_PRIORITY.get(signal_type, 0) > SIGNAL_PRIORITY.get(last_type, 0)
+        )
+        if is_breakout_upgrade:
             return True
 
         return (now - last_ts) >= cooldown_sec

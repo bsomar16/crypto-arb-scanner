@@ -75,7 +75,7 @@ jobs:
                 break
               fi
               git fetch --depth=5 origin main
-              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              git rebase -X theirs --autostash origin/main || { git rebase --abort; exit 1; }
               sleep 3
             done
           else
@@ -118,7 +118,7 @@ jobs:
                 break
               fi
               git fetch --depth=5 origin main
-              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              git rebase -X theirs --autostash origin/main || { git rebase --abort; exit 1; }
               sleep 3
             done
           else
@@ -156,7 +156,7 @@ jobs:
                 break
               fi
               git fetch --depth=5 origin main
-              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              git rebase -X theirs --autostash origin/main || { git rebase --abort; exit 1; }
               sleep 3
             done
           else
@@ -197,7 +197,7 @@ jobs:
                 break
               fi
               git fetch --depth=5 origin main
-              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              git rebase -X theirs --autostash origin/main || { git rebase --abort; exit 1; }
               sleep 3
             done
           else
@@ -255,7 +255,7 @@ jobs:
                 break
               fi
               git fetch --depth=5 origin main
-              git rebase --autostash origin/main || { git rebase --abort; exit 1; }
+              git rebase -X theirs --autostash origin/main || { git rebase --abort; exit 1; }
               sleep 3
             done
           else
