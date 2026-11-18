@@ -76,6 +76,7 @@ DEFAULTS = {
     "sls_sensitivity": "Balanced",
     "sls_allow_multi_timeframe_signals": False,
     "buy_signal_cooldown_minutes": 180,
+    "exclude_tokenized_equities": True,
     "watchlist": ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", "TON", "TRX", "DOT", "LTC", "MATIC", "PEPE", "FET", "APT", "ARB", "OP", "INJ"],
     "holdings": [],
     "price_alerts": [],
@@ -177,6 +178,16 @@ def run_arb(token, chat_id):
     if offline: lines.extend(["", f"⚠️ offline feeds: {', '.join(offline)}"])
     telegram_msg(token, chat_id, "\n".join(lines)); return True
 
+_REAL_CRYPTO_ENDING_IN_B = {
+    "AMB", "ARB", "BB", "BNB", "CKB", "DGB", "MOB", "PHB", "SHIB", "TRB", "VIB", "YB",
+}
+
+def _is_tokenized_equity(coin):
+    c = str(coin or "").upper().strip()
+    if c.endswith("USDT"):
+        c = c[:-4]
+    return len(c) >= 3 and c.endswith("B") and c not in _REAL_CRYPTO_ENDING_IN_B
+
 def _candidate_universe(cfg, q, star, t24=None):
     """Build a wide discovery universe instead of volume-rank-only candidates."""
     from discovery import discover
@@ -186,6 +197,8 @@ def _candidate_universe(cfg, q, star, t24=None):
     for sym in sorted(star - set(discovered)):
         if q.get(sym, 0) >= floor:
             discovered.append(sym)
+    if bool(cfg.get("exclude_tokenized_equities", True)):
+        discovered = [c for c in discovered if not _is_tokenized_equity(c)]
     return discovered, results
 
 def _rank_trade_candidates(hits, cfg):

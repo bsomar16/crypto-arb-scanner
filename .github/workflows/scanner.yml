@@ -44,6 +44,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run trade tracking/status cycle
@@ -85,21 +86,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run Smart Money Accumulation & Bullish Trend scan
+      - name: Run Smart Money Accumulation, Bullish Trend & Outcome Tracker
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python smart_money_scanner.py --scan
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "smart_money" ]; then
+            python smart_money_scanner.py --scan --force
+          else
+            python smart_money_scanner.py --scan
+          fi
       - name: Commit Smart Money state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for i in 1 2 3; do
-            git pull --rebase || true
-            if [ -n "$(git status --porcelain state/smart_money_scanner_state.json state/smart_money_signals.jsonl 2>/dev/null)" ]; then
-              git add state/smart_money_scanner_state.json state/smart_money_signals.jsonl 2>/dev/null || true
+            git pull --rebase --autostash || true
+            if [ -n "$(git status --porcelain state/smart_money_scanner_state.json state/smart_money_signals.jsonl state/smart_money_tracked_signals.json state/smart_money_outcomes.jsonl 2>/dev/null)" ]; then
+              git add state/smart_money_scanner_state.json state/smart_money_signals.jsonl state/smart_money_tracked_signals.json state/smart_money_outcomes.jsonl 2>/dev/null || true
               git commit -m "Update Smart Money state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
             else
               echo "No Smart Money state changes"

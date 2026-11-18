@@ -19,10 +19,15 @@ from typing import List
 
 from smart_money.trend import evaluate_bullish_trend
 from smart_money.volume_cvd import compute_volume_cvd_analytics
+from smart_money.signal_tracker import SmartMoneySignalTracker, format_outcome_telegram_update
+import scanner
 from smart_money_scanner import (
     SmartMoneySignalEngine,
     format_telegram_alert,
+    format_telegram_digest,
     fmt_price,
+    is_tokenized_equity,
+    load_recent_classic_coins,
     EXCLUDED_SYMBOLS,
 )
 
@@ -219,13 +224,14 @@ class TestSmartMoneyScannerSignals(unittest.TestCase):
         # Verify Telegram formatting works without error
         msg = format_telegram_alert(sig)
         self.assertIn("SOL/USDT", msg)
-        self.assertIn("Accumulation Score", msg)
+        self.assertIn("Accum", msg)
 
     def test_emits_bullish_trend_signal(self):
         candles_1h = _generate_bullish_trend_candles(n=81, start_price=100.0, step=0.35)
         candles_4h = _generate_bullish_trend_candles(n=61, start_price=80.0, step=0.60)
         sig, metrics = self.engine.evaluate_symbol_data(
-            "TAOUSDT", candles_1h, klines_4h=candles_4h, macro_regime="BULL"
+            "TAOUSDT", candles_1h, klines_4h=candles_4h, macro_regime="BULL",
+            recent_classic_coins={"TAOUSDT"},
         )
 
         self.assertIsNotNone(sig, f"Expected bullish trend signal, got None. Metrics: {metrics}")
@@ -233,12 +239,14 @@ class TestSmartMoneyScannerSignals(unittest.TestCase):
             sig["signal_type"],
             ("STRONG_BULLISH_TREND", "BULLISH_TREND", "BULLISH_PULLBACK", "BREAKOUT_DETECTED", "CONTINUATION_CONFIRMED"),
         )
+        self.assertTrue(sig["double_confluence"])
         self.assertLess(sig["stop_loss"], sig["entry_price"])
         self.assertGreater(sig["tp2"], sig["tp1"])
 
-        msg = format_telegram_alert(sig)
-        self.assertIn("TAO/USDT", msg)
-        self.assertIn("Bullish Trend Score", msg)
+        digest = format_telegram_digest([sig], macro_regime="BEAR")
+        self.assertIn("TAO/USDT", digest)
+        self.assertIn("DOUBLE CONFLUENCE", digest)
+        self.assertIn("BTC Macro Regime: BEAR", digest)
 
     def test_cooldown_deduplication_and_stage_upgrade(self):
         t0 = 1_700_000_000.0
@@ -259,7 +267,7 @@ class TestSmartMoneyScannerSignals(unittest.TestCase):
         # After 7 hours: cooldown expired, can re-alert
         self.assertTrue(self.engine.should_emit_signal("AVAXUSDT", "EARLY_ACCUMULATION", now_ts=t0 + 7 * 3600))
 
-    def test_adaptive_price_formatting_and_stablecoin_exclusions(self):
+    def test_adaptive_price_formatting_and_tokenized_equity_exclusion(self):
         self.assertEqual(fmt_price(64448.32), "$64,448.32")
         self.assertEqual(fmt_price(71.384), "$71.384")
         self.assertEqual(fmt_price(0.1542), "$0.1542")
@@ -267,6 +275,65 @@ class TestSmartMoneyScannerSignals(unittest.TestCase):
         self.assertIn("USDCUSDT", EXCLUDED_SYMBOLS)
         self.assertIn("RWUSDUSDT", EXCLUDED_SYMBOLS)
         self.assertIn("PAXGUSDT", EXCLUDED_SYMBOLS)
+
+        # Tokenized equities excluded
+        for eq in ("NVDABUSDT", "GOOGLBUSDT", "SOXLBUSDT", "MUBUSDT", "SPCXBUSDT", "SNXXB", "TSLAB"):
+            self.assertTrue(is_tokenized_equity(eq), f"Should exclude tokenized stock {eq}")
+            self.assertTrue(scanner._is_tokenized_equity(eq), f"scanner.py should exclude {eq}")
+
+        # Real crypto ending in 'B' MUST be kept
+        for crypto in ("BNBUSDT", "ARBUSDT", "SHIBUSDT", "TRBUSDT", "CKBUSDT", "BBUSDT", "BNB", "ARB", "SHIB"):
+            self.assertFalse(is_tokenized_equity(crypto), f"Must NOT exclude real crypto {crypto}")
+            self.assertFalse(scanner._is_tokenized_equity(crypto), f"scanner.py must NOT exclude {crypto}")
+
+    def test_rvol_floor_blocks_dead_volume_signals(self):
+        candles_1h = _generate_bullish_trend_candles(n=81, start_price=100.0, step=0.35)
+        # Crush final closed bar's volume to 0.15x baseline (dead volume)
+        candles_1h[-2][5] = "150.0"
+        candles_1h[-2][9] = "90.0"
+        sig, _ = self.engine.evaluate_symbol_data("LOWVOLUSDT", candles_1h, macro_regime="BULL")
+        self.assertIsNone(sig, "Dead RVOL (< 0.65x) setup should be filtered out")
+
+    def test_signal_tracker_tp1_then_tp2_lifecycle_and_stats(self):
+        tracked_path = os.path.join(self.tmp_dir, "tracked.json")
+        outcomes_path = os.path.join(self.tmp_dir, "outcomes.jsonl")
+        tracker = SmartMoneySignalTracker(tracked_path=tracked_path, outcomes_path=outcomes_path)
+
+        base_ms = 1730000000000
+        sig = {
+            "signal_id": "sig-001",
+            "symbol": "SOLUSDT",
+            "signal_type": "EARLY_ACCUMULATION",
+            "timestamp_utc": "2026-11-18 09:00:00 UTC",
+            "entry_price": 100.0,
+            "stop_loss": 98.0,
+            "tp1": 103.0,
+            "tp2": 106.0,
+        }
+        self.assertTrue(tracker.register_signal(sig, candle_open_ms=base_ms))
+
+        # Build 25 historical bars + 2 new closed bars hitting TP1 then TP2 + 1 unclosed bar
+        bars = [_make_kline(base_ms - (25 - i) * 3_600_000, 99.0, 100.5, 98.5, 100.0, 1000.0) for i in range(25)]
+        bars.append(_make_kline(base_ms + 3_600_000, 100.2, 103.5, 99.8, 102.8, 1500.0))      # Hits TP1 (103.0)
+        bars.append(_make_kline(base_ms + 2 * 3_600_000, 102.8, 106.5, 102.0, 106.1, 1800.0))  # Hits TP2 (106.0)
+        bars.append(_make_kline(base_ms + 3 * 3_600_000, 106.1, 106.2, 105.9, 106.0, 400.0))   # Forming bar
+
+        events = tracker.advance_all(lambda sym: bars)
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["event_type"], "TP1_HIT")
+        self.assertEqual(events[1]["event_type"], "TP2_EXECUTED_FULL")
+        self.assertNotIn("SOLUSDT", tracker.tracked)
+
+        stats = tracker.compute_stats()
+        self.assertEqual(stats["total_closed"], 1)
+        self.assertEqual(stats["win_rate_pct"], 100.0)
+        self.assertEqual(stats["tp1_hit_rate_pct"], 100.0)
+        self.assertIn("EARLY_ACCUMULATION", stats["by_signal_type"])
+
+        msg = format_outcome_telegram_update(events, stats)
+        self.assertIn("SOL/USDT", msg)
+        self.assertIn("TP1 HIT", msg)
+        self.assertIn("TP2 FULL TARGET HIT", msg)
 
 
 if __name__ == "__main__":

@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Smart Money Phase 2 — Real-Time Signal Generator & Alert Engine.
+"""Smart Money Phase 2 — Real-Time Signal Generator, Tracker & Alert Engine.
 
-Scans Binance Spot public market data across the top liquid USDT universe for:
+Scans genuine liquid Binance Spot crypto pairs (excluding stablecoins & tokenized stocks) for:
 1. Wyckoff Accumulation & Absorption (EARLY_ACCUMULATION, PRE_BREAKOUT)
 2. Bullish Trend & Healthy Pullbacks (STRONG_BULLISH_TREND, BULLISH_TREND, BULLISH_PULLBACK)
 3. Resistance Breakouts & N+1 Continuations (BREAKOUT_DETECTED, CONTINUATION_CONFIRMED)
 4. Post-Breakout Retest Bounces (RETEST_CONFIRMED)
 
-Dispatches actionable BUY/LONG signals with precise Entry, Stop-Loss, TP1 (+1.5R),
-and TP2 (+3.0R) targets to Telegram, Terminal, and Persistent Signal History.
+Features:
+- BTC Macro Regime-aware filtering & Telegram risk banner (tightened thresholds in BEAR)
+- Minimum RVOL & positive institutional CVD flow floors
+- Cross-scanner Double Confluence detection (Classic/SLS + Smart Money)
+- Single consolidated Telegram digest (top 3 setups max, zero message flood)
+- Automatic shadow TP1/TP2/SL outcome tracking & win-rate analytics (`smart_money/signal_tracker.py`)
+- Closed-1h-candle deduplication (fast skip when no new hourly bar closed)
 
 Strictly Binance Spot Read-Only. Zero live order placement. Zero trading keys required.
 """
@@ -22,12 +27,18 @@ import uuid
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Set
 
 from botutil import http_json, telegram_msg
 from smart_money.volume_cvd import compute_volume_cvd_analytics
 from smart_money.accumulation import evaluate_accumulation_structure
 from smart_money.trend import evaluate_bullish_trend
+from smart_money.signal_tracker import (
+    SmartMoneySignalTracker,
+    format_outcome_telegram_update,
+    TRACKED_SIGNALS_PATH,
+    OUTCOMES_JOURNAL_PATH,
+)
 from smart_money.breakout import (
     extract_resistance_pivots,
     cluster_resistance_pivots,
@@ -43,13 +54,20 @@ from smart_money.breakout import (
 
 BINANCE_DATA_URL = "https://data-api.binance.vision"
 
-# Stablecoins, fiat-pegged, synthetic USD, and commodity-pegged tickers excluded from scanning
+# Stablecoins, fiat-pegged, synthetic USD, and commodity/wrapped tickers excluded from scanning
 EXCLUDED_SYMBOLS = {
     "USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "USDPUSDT", "DAIUSDT", "BUSDUSDT",
     "EURUSDT", "AEURUSDT", "EURIUSDT", "GBPUSDT", "AUDUSDT", "BRLUSDT",
     "TRYUSDT", "USD1USDT", "BFUSDUSDT", "USDEUSDT", "XUSDUSDT", "RLUSDUSDT",
     "RWUSDUSDT", "PYUSDUSDT", "GUSDUSDT", "SUSDUSDT", "FRAXUSDT", "LUSDUSDT",
     "PAXGUSDT", "XAUTUSDT", "WBTCUSDT", "WBETHUSDT", "BNSOLUSDT", "STETHUSDT",
+}
+
+# Verified genuine crypto base assets on Binance whose symbol ends in 'B'.
+# All other 3+ char *BUSDT tickers (NVDAB, TSLAB, GOOGLB, SOXLB, MUB, SPCXB, SNXXB, etc.)
+# are Binance tokenized equities/ETFs that trade with equity hours and distorted crypto volume.
+REAL_CRYPTO_ENDING_IN_B = {
+    "AMB", "ARB", "BB", "BNB", "CKB", "DGB", "MOB", "PHB", "SHIB", "TRB", "VIB", "YB",
 }
 
 DEFAULT_WATCHLIST = [
@@ -61,6 +79,7 @@ DEFAULT_WATCHLIST = [
 
 SIGNALS_JOURNAL_PATH = os.path.join("state", "smart_money_signals.jsonl")
 SCANNER_STATE_PATH = os.path.join("state", "smart_money_scanner_state.json")
+CLASSIC_FIRED_SIGNALS_PATH = os.path.join("state", "fired_signals.json")
 
 # Signal priority hierarchy (higher number = stronger / later lifecycle stage)
 SIGNAL_PRIORITY: Dict[str, int] = {
@@ -85,6 +104,15 @@ SIGNAL_COOLDOWN_HOURS: Dict[str, float] = {
     "RETEST_CONFIRMED": 2.0,
     "CONTINUATION_CONFIRMED": 2.0,
 }
+
+
+def is_tokenized_equity(symbol_or_coin: str) -> bool:
+    """Returns True if ticker is a Binance tokenized equity/ETF (e.g. NVDABUSDT, SOXLB, MUBUSDT)."""
+    s = str(symbol_or_coin or "").upper().strip()
+    base = s[:-4] if s.endswith("USDT") else s
+    if len(base) >= 3 and base.endswith("B") and base not in REAL_CRYPTO_ENDING_IN_B:
+        return True
+    return False
 
 
 def fmt_price(price: float) -> str:
@@ -127,8 +155,9 @@ def fetch_orderbook(symbol: str, limit: int = 50) -> Optional[Dict[str, Any]]:
 def discover_liquid_universe(
     max_symbols: int = 60,
     min_quote_volume_usdt: float = 5_000_000.0,
+    exclude_tokenized_stocks: bool = True,
 ) -> List[str]:
-    """Dynamically discovers the top liquid Binance Spot USDT pairs by 24h volume."""
+    """Dynamically discovers the top liquid genuine crypto Binance Spot USDT pairs."""
     try:
         tickers = http_json(f"{BINANCE_DATA_URL}/api/v3/ticker/24hr", timeout=15)
         if not isinstance(tickers, list):
@@ -136,12 +165,13 @@ def discover_liquid_universe(
 
         eligible: List[Tuple[float, str]] = []
         for t in tickers:
-            sym = str(t.get("symbol", ""))
+            sym = str(t.get("symbol", "")).upper()
             if not sym.endswith("USDT") or sym in EXCLUDED_SYMBOLS:
                 continue
-            # Filter out USD-pegged tokens dynamically by name prefix/suffix
             base = sym[:-4]
             if base.endswith("USD") or base.startswith("USD"):
+                continue
+            if exclude_tokenized_stocks and is_tokenized_equity(sym):
                 continue
             try:
                 qv = float(t.get("quoteVolume", 0.0))
@@ -163,8 +193,45 @@ def discover_liquid_universe(
         return list(DEFAULT_WATCHLIST)
 
 
+def load_recent_classic_coins(
+    fired_path: str = CLASSIC_FIRED_SIGNALS_PATH,
+    lookback_hours: float = 6.0,
+    now_ts: Optional[float] = None,
+) -> Set[str]:
+    """Reads state/fired_signals.json (read-only) to detect Classic/SLS + Smart Money double confluence."""
+    if not os.path.exists(fired_path):
+        return set()
+    now = now_ts if now_ts is not None else time.time()
+    cutoff = now - (lookback_hours * 3600.0)
+    recent: Set[str] = set()
+    try:
+        with open(fired_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            for key, val in data.items():
+                if not isinstance(val, dict):
+                    continue
+                ts = float(val.get("ts", 0) or 0)
+                if ts >= cutoff:
+                    coin = str(key).split("|", 1)[0].upper()
+                    if coin:
+                        recent.add(f"{coin}USDT" if not coin.endswith("USDT") else coin)
+    except Exception:
+        pass
+    return recent
+
+
+def _regime_banner(macro_regime: str) -> str:
+    reg = str(macro_regime or "SIDEWAYS").upper()
+    if reg == "BULL":
+        return "🟢 <b>BTC Macro Regime: BULL</b>"
+    if reg == "BEAR":
+        return "⚠️ <b>BTC Macro Regime: BEAR</b> <i>(Elevated Risk — Tightened Filters, Reduce Size)</i>"
+    return f"🟡 <b>BTC Macro Regime: {reg}</b>"
+
+
 def format_telegram_alert(sig: Dict[str, Any]) -> str:
-    """Formats high-impact HTML alert for Telegram across all Smart Money signal types."""
+    """Formats a single high-impact HTML alert block for Telegram."""
     sym = sig["symbol"].replace("USDT", "/USDT")
     stype = sig["signal_type"]
     entry = sig["entry_price"]
@@ -187,71 +254,88 @@ def format_telegram_alert(sig: Dict[str, Any]) -> str:
     adx14 = sig.get("adx14", 0.0)
     rsi14 = sig.get("rsi14", 50.0)
     reasons = sig.get("reasons", [])
+    double_conf = bool(sig.get("double_confluence", False))
 
     if stype == "CONTINUATION_CONFIRMED":
-        header = "🚀 <b>SMART MONEY BREAKOUT: CONTINUATION</b>"
-        action = "Confirmed resistance breakout with strong institutional volume & delta."
+        badge = "🚀 <b>BREAKOUT CONTINUATION</b>"
     elif stype == "RETEST_CONFIRMED":
-        header = "🎯 <b>SMART MONEY ENTRY: RETEST BOUNCE</b>"
-        action = f"Confirmed support bounce off broken resistance ({fmt_price(r_level)})."
+        badge = "🎯 <b>RETEST BOUNCE</b>"
     elif stype == "BREAKOUT_DETECTED":
-        header = "⚡ <b>SMART MONEY BREAKOUT DETECTED</b>"
-        action = f"Price closed above overhead resistance ({fmt_price(r_level)}). Watch for continuation or retest."
+        badge = "⚡ <b>RESISTANCE BREAKOUT</b>"
     elif stype == "PRE_BREAKOUT":
-        header = "🔥 <b>SMART MONEY ACCUMULATION: PRE-BREAKOUT</b>"
-        action = f"Tight Wyckoff base coiling near resistance ({fmt_price(r_level)}). Breakout imminent."
+        badge = "🔥 <b>PRE-BREAKOUT ACCUMULATION</b>"
     elif stype == "EARLY_ACCUMULATION":
-        header = "📦 <b>SMART MONEY ACCUMULATION DETECTED</b>"
-        action = f"Institutional base building detected below resistance ({fmt_price(r_level)})."
+        badge = "📦 <b>WYCKOFF ACCUMULATION</b>"
     elif stype == "STRONG_BULLISH_TREND":
         if sig.get("accumulation_class") in ("EARLY_ACCUMULATION", "PRE_BREAKOUT"):
-            header = "🔥📈 <b>SMART MONEY: ACCUMULATION + STRONG BULLISH TREND</b>"
+            badge = "🔥📈 <b>ACCUMULATION + STRONG BULLISH TREND</b>"
         else:
-            header = "📈 <b>SMART MONEY STRONG BULLISH TREND</b>"
-        action = "Institutional-backed uptrend (EMA stack + ADX + positive CVD flow + 4h alignment)."
+            badge = "📈 <b>STRONG BULLISH TREND</b>"
     elif stype == "BULLISH_PULLBACK":
-        header = "🟢 <b>SMART MONEY BULLISH TREND PULLBACK</b>"
-        action = "Healthy dip to EMA20 support inside an active bullish uptrend."
+        badge = "🟢 <b>BULLISH TREND PULLBACK</b>"
     else:
-        header = "📈 <b>SMART MONEY BULLISH TREND</b>"
-        action = "Confirmed bullish uptrend with positive buying pressure."
+        badge = "📈 <b>BULLISH TREND</b>"
 
     lines = [
-        header,
-        f"<b>Pair:</b> <code>{sym}</code> (1h/4h Binance Spot)",
-        f"<b>Time:</b> {sig['timestamp_utc']}",
-        "",
-        f"💵 <b>Reference Entry:</b> <code>{fmt_price(entry)}</code>",
-        f"🛑 <b>Stop Loss:</b> <code>{fmt_price(sl)}</code> (<b>-{sl_pct:.2f}%</b>)",
-        f"🎯 <b>TP1 (1.5R):</b> <code>{fmt_price(tp1)}</code> (<b>+{tp1_pct:.2f}%</b>) <i>[50% + Move SL to BE]</i>",
-        f"🎯 <b>TP2 (3.0R):</b> <code>{fmt_price(tp2)}</code> (<b>+{tp2_pct:.2f}%</b>) <i>[Remaining 50%]</i>",
+        f"{badge} · <code>{sym}</code>",
     ]
-    if r_level > 0 and stype in ("EARLY_ACCUMULATION", "PRE_BREAKOUT"):
-        dist_r = ((r_level - entry) / entry * 100.0) if entry > 0 else 0.0
-        lines.append(f"🧱 <b>Breakout Level:</b> <code>{fmt_price(r_level)}</code> (+{dist_r:.2f}% away)")
+    if double_conf:
+        lines.append("🔥 <b>DOUBLE CONFLUENCE:</b> Confirmed by BOTH Classic/SLS & Smart Money!")
 
     lines.extend([
-        "",
-        "📊 <b>Smart Money Analytics:</b>",
-        f"• Accumulation Score: <b>{accum:.1f}/100</b> ({sig.get('accumulation_class', 'NONE')})",
-        f"• Bullish Trend Score: <b>{trend_score:.1f}/100</b> (ADX {adx14:.1f} · RSI {rsi14:.1f})",
+        f"💵 Entry: <code>{fmt_price(entry)}</code> · 🛑 SL: <code>{fmt_price(sl)}</code> (<b>-{sl_pct:.2f}%</b>)",
+        f"🎯 TP1 (1.5R): <code>{fmt_price(tp1)}</code> (<b>+{tp1_pct:.2f}%</b>) · TP2 (3.0R): <code>{fmt_price(tp2)}</code> (<b>+{tp2_pct:.2f}%</b>)",
     ])
+    if r_level > 0 and stype in ("EARLY_ACCUMULATION", "PRE_BREAKOUT"):
+        dist_r = ((r_level - entry) / entry * 100.0) if entry > 0 else 0.0
+        lines.append(f"🧱 Breakout Level: <code>{fmt_price(r_level)}</code> (+{dist_r:.2f}% away)")
+
+    analytics = (
+        f"📊 Accum <b>{accum:.0f}</b> ({sig.get('accumulation_class', 'NONE')}) · "
+        f"Trend <b>{trend_score:.0f}</b> (ADX {adx14:.0f}, RSI {rsi14:.0f})"
+    )
     if b_score > 0:
-        lines.append(f"• Breakout Conviction: <b>{b_score:.1f}/100</b>")
-    lines.append(f"• Volume: <b>{rvol:.2f}x</b> · CVD Slope: <b>{cvd_slope:+.3f}</b> · Delta: <b>{delta * 100:+.1f}%</b>")
+        analytics += f" · Break <b>{b_score:.0f}</b>"
+    lines.append(analytics)
+
+    flow_line = f"💧 RVOL <b>{rvol:.2f}x</b> · CVD <b>{cvd_slope:+.3f}</b> · Delta <b>{delta * 100:+.1f}%</b>"
     if ob_status == "ASSESSED":
-        lines.append(f"• Order Book (±1%): <b>{dir_1pct * 100:.1f}% Bids</b> vs <b>{(1 - dir_1pct) * 100:.1f}% Asks</b>")
+        flow_line += f" · Bids ±1%: <b>{dir_1pct * 100:.0f}%</b>"
     if htf_aligned is not None:
-        htf_txt = "✅ Bullish Aligned" if htf_aligned else "⚠️ Neutral/Counter"
-        lines.append(f"• 4h Higher-TF Trend: <b>{htf_txt}</b>")
+        flow_line += f" · 4h: <b>{'✅ Bull' if htf_aligned else '⚠️ Neut'}</b>"
+    lines.append(flow_line)
 
     if reasons:
-        lines.append("")
-        lines.append("🔍 <b>Key Signals:</b>")
-        for r in reasons[:4]:
-            lines.append(f"  • {r}")
+        lines.append(f"🔍 <i>{' · '.join(reasons[:2])}</i>")
 
-    lines.extend(["", f"💡 <i>{action}</i>"])
+    return "\n".join(lines)
+
+
+def format_telegram_digest(
+    signals: List[Dict[str, Any]],
+    macro_regime: str,
+    stats: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Bundles up to top 3 Smart Money signals into 1 clean, readable Telegram digest."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [
+        f"🧠 <b>SMART MONEY SIGNALS</b> · {now_str}",
+        _regime_banner(macro_regime),
+        "━━━━━━━━━━━━━━━━━━━━",
+    ]
+    for idx, sig in enumerate(signals, 1):
+        if idx > 1:
+            lines.append("")
+        lines.append(f"<b>#{idx}</b> {format_telegram_alert(sig)}")
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    if stats and stats.get("total_closed", 0) >= 3:
+        lines.append(
+            f"📈 <i>Track Record ({stats['total_closed']} closed): "
+            f"Win {stats['win_rate_pct']:.0f}% · TP1 Hit {stats['tp1_hit_rate_pct']:.0f}% · "
+            f"PF {stats['profit_factor']:.2f}</i>"
+        )
+    lines.append("<i>Spot BUY signals only · TP1 = take 50% & move SL to Breakeven.</i>")
     return "\n".join(lines)
 
 
@@ -263,24 +347,25 @@ def log_signal_to_journal(sig: Dict[str, Any]) -> None:
 
 
 def load_scanner_state(state_path: str = SCANNER_STATE_PATH) -> Dict[str, Any]:
-    """Loads persistent alert cooldown & active retest tracking state."""
+    """Loads persistent alert cooldown, last closed 1h candle timestamp, & active retest tracking state."""
     if not os.path.exists(state_path):
-        return {"cooldowns": {}, "retest_candidates": {}}
+        return {"cooldowns": {}, "retest_candidates": {}, "last_scanned_1h_ms": 0}
     try:
         with open(state_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             data.setdefault("cooldowns", {})
             data.setdefault("retest_candidates", {})
+            data.setdefault("last_scanned_1h_ms", 0)
             return data
     except Exception:
         pass
-    return {"cooldowns": {}, "retest_candidates": {}}
+    return {"cooldowns": {}, "retest_candidates": {}, "last_scanned_1h_ms": 0}
 
 
 def save_scanner_state(state: Dict[str, Any], state_path: str = SCANNER_STATE_PATH) -> None:
     """Atomically persists scanner cooldown and retest candidate state."""
-    os.makedirs(os.path.dirname(state_path), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(state_path)), exist_ok=True)
     tmp_path = f"{state_path}.tmp.{uuid.uuid4().hex}"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, sort_keys=True)
@@ -297,16 +382,21 @@ class SmartMoneySignalEngine:
         telegram_token: Optional[str] = None,
         telegram_chat_id: Optional[str] = None,
         state_path: str = SCANNER_STATE_PATH,
+        tracked_path: str = TRACKED_SIGNALS_PATH,
+        outcomes_path: str = OUTCOMES_JOURNAL_PATH,
+        classic_fired_path: str = CLASSIC_FIRED_SIGNALS_PATH,
         fetch_orderbook_enabled: bool = True,
-        max_alerts_per_run: int = 5,
+        max_alerts_per_run: int = 3,
     ):
         self.telegram_token = telegram_token or os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = telegram_chat_id or os.environ.get("TELEGRAM_CHAT_ID")
         self.state_path = state_path
+        self.classic_fired_path = classic_fired_path
         self.fetch_orderbook_enabled = fetch_orderbook_enabled
         self.max_alerts_per_run = max_alerts_per_run
         self.cached_btc_daily: List[Any] = []
         self.state = load_scanner_state(self.state_path)
+        self.tracker = SmartMoneySignalTracker(tracked_path=tracked_path, outcomes_path=outcomes_path)
 
     def get_btc_macro_regime(self) -> str:
         """Fetches daily BTC candles and computes authoritative macro regime (§ 3.3)."""
@@ -319,6 +409,13 @@ class SmartMoneySignalEngine:
             return reg_res.regime
         return "WARMUP"
 
+    def get_latest_closed_1h_ms(self) -> int:
+        """Returns open timestamp (ms) of the latest closed 1h BTC candle."""
+        klines = fetch_klines("BTCUSDT", interval="1h", limit=3)
+        if klines and len(klines) >= 2:
+            return int(klines[-2][0])
+        return 0
+
     def should_emit_signal(self, symbol: str, signal_type: str, now_ts: Optional[float] = None) -> bool:
         """Checks cooldown & upgrade logic to prevent duplicate Telegram spam."""
         now = now_ts if now_ts is not None else time.time()
@@ -330,7 +427,7 @@ class SmartMoneySignalEngine:
         last_type = str(entry.get("signal_type", ""))
         cooldown_sec = SIGNAL_COOLDOWN_HOURS.get(signal_type, 4.0) * 3600.0
 
-        # Always allow immediate alert on lifecycle stage upgrade (e.g. EARLY_ACCUMULATION -> PRE_BREAKOUT -> BREAKOUT)
+        # Allow immediate alert on lifecycle stage upgrade (e.g. EARLY_ACCUMULATION -> PRE_BREAKOUT -> BREAKOUT)
         if SIGNAL_PRIORITY.get(signal_type, 0) > SIGNAL_PRIORITY.get(last_type, 0):
             return True
 
@@ -350,20 +447,17 @@ class SmartMoneySignalEngine:
         klines_4h: Optional[List[Any]] = None,
         macro_regime: str = "SIDEWAYS",
         orderbook: Optional[Dict[str, Any]] = None,
+        recent_classic_coins: Optional[Set[str]] = None,
     ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
-        """Pure analytical evaluation of a symbol from closed 1h + 4h candles.
-
-        Returns:
-            (signal_dict_or_None, metrics_dict)
-        """
+        """Pure analytical evaluation of a symbol from closed 1h + 4h candles."""
         if not klines_1h or len(klines_1h) < 45:
             return None, {}
 
-        # Strictly closed candles (exclude currently forming last candle)
         closed_1h = klines_1h[:-1]
         closed_4h = klines_4h[:-1] if (klines_4h and len(klines_4h) >= 40) else None
         n_idx = len(closed_1h) - 1
         candle_n = closed_1h[n_idx]
+        bar_open_ms = int(candle_n[0])
 
         highs_1h = [float(k[2]) for k in closed_1h]
         lows_1h = [float(k[3]) for k in closed_1h]
@@ -378,7 +472,7 @@ class SmartMoneySignalEngine:
         # 1. Phase 1.1 Volume & CVD Intelligence
         cvd_res = compute_volume_cvd_analytics(closed_1h, lookback=40)
 
-        # 2. Phase 1.1 Wyckoff Accumulation Structure (with optional Order Book DIR)
+        # 2. Phase 1.1 Wyckoff Accumulation Structure
         accum_res = evaluate_accumulation_structure(
             candles=closed_1h,
             cvd_result=cvd_res,
@@ -400,7 +494,7 @@ class SmartMoneySignalEngine:
         r_level = primary_cluster.r_level if primary_cluster else accum_res.range_high
         dist_to_r = ((r_level - c_n) / c_n * 100.0) if (r_level > 0 and c_n > 0) else 0.0
 
-        # 5. Breakout Gates & Conviction Score (if overhead resistance exists)
+        # 5. Breakout Gates & Conviction Score
         s_break = 0.0
         gates_passed = False
         failed_gates: List[str] = []
@@ -449,6 +543,7 @@ class SmartMoneySignalEngine:
         metrics = {
             "symbol": symbol,
             "close": c_n,
+            "candle_open_ms": bar_open_ms,
             "resistance": r_level,
             "dist_to_r": dist_to_r,
             "accum_score": accum_res.accumulation_score,
@@ -469,17 +564,23 @@ class SmartMoneySignalEngine:
             "htf_aligned": trend_res.htf_aligned,
         }
 
-        # 6. Determine Highest-Priority Actionable Signal Type
+        # Regime-aware conviction thresholds (Item 3: tightened during BTC BEAR regime)
+        is_bear = str(macro_regime).upper() == "BEAR"
+        min_early_accum = 60.0 if is_bear else 52.0
+        min_strong_trend = 78.0 if is_bear else 72.0
+        min_bull_trend = 72.0 if is_bear else 62.0
+        min_pullback = 66.0 if is_bear else 58.0
+
+        # 6. Determine Highest-Priority Actionable Signal Type with RVOL & CVD Flow Floors (Item 2)
         signal_type: Optional[str] = None
         stop_loss: float = 0.0
         reasons: List[str] = []
 
-        # Priority A: Check Persistent Retest Bounce Confirmation (from prior breakout)
+        # Priority A: Persistent Retest Bounce Confirmation
         saved_retest = self.state.get("retest_candidates", {}).get(symbol)
         if saved_retest:
             try:
                 rs = RetestState.from_dict(saved_retest)
-                bar_open_ms = int(candle_n[0])
                 if bar_open_ms > rs.last_processed_open_time:
                     next_bar_idx = rs.breakout_bar_index + max(
                         1, int((bar_open_ms - rs.last_processed_open_time) // 3_600_000)
@@ -503,7 +604,7 @@ class SmartMoneySignalEngine:
             except Exception:
                 self.state["retest_candidates"].pop(symbol, None)
 
-        # Priority B: Fresh Resistance Breakout (Phase 2 Stage 1)
+        # Priority B: Fresh Resistance Breakout
         if signal_type is None and primary_cluster is not None and c_n > primary_cluster.r_level:
             if gates_passed and s_break >= 70.0:
                 signal_type = "CONTINUATION_CONFIRMED"
@@ -513,7 +614,6 @@ class SmartMoneySignalEngine:
                 signal_type = "BREAKOUT_DETECTED"
                 stop_loss = primary_cluster.r_level - (0.5 * atr_ref)
                 reasons.append(f"Resistance breakout above {fmt_price(primary_cluster.r_level)} (RVOL {cvd_res.rvol:.2f}x)")
-                # Register candidate for future retest bounce monitoring
                 self.state.setdefault("retest_candidates", {})[symbol] = RetestState(
                     symbol=symbol,
                     breakout_bar_index=0,
@@ -521,35 +621,60 @@ class SmartMoneySignalEngine:
                     atr_ref=atr_ref,
                     breakout_high=highs_1h[n_idx],
                     breakout_vol=volumes_1h[n_idx],
-                    last_processed_open_time=int(candle_n[0]),
+                    last_processed_open_time=bar_open_ms,
                 ).to_dict()
 
-        # Priority C: Wyckoff Pre-Breakout Accumulation (Highest-conviction early entry)
+        # Priority C: Wyckoff Pre-Breakout Accumulation (with RVOL >= 0.70 & positive flow floor)
         if signal_type is None and accum_res.classification == "PRE_BREAKOUT":
-            signal_type = "PRE_BREAKOUT"
-            base_stop = accum_res.range_low - (0.4 * atr_ref)
-            stop_loss = max(c_n - (2.8 * atr_ref), min(c_n - (1.0 * atr_ref), base_stop))
-            reasons.extend(accum_res.reasons[:4])
+            if cvd_res.rvol >= 0.70 and (cvd_res.cvd_slope_normalized >= 0.0 or cvd_res.absorption_detected):
+                signal_type = "PRE_BREAKOUT"
+                base_stop = accum_res.range_low - (0.4 * atr_ref)
+                stop_loss = max(c_n - (2.8 * atr_ref), min(c_n - (1.0 * atr_ref), base_stop))
+                reasons.extend(accum_res.reasons[:4])
 
-        # Priority D: Strong Bullish Trend / Bullish Trend / Bullish Pullback
-        if signal_type is None and trend_res.trend_state in (
-            "STRONG_BULLISH_TREND",
-            "BULLISH_PULLBACK",
-            "BULLISH_TREND",
-        ):
-            signal_type = trend_res.trend_state
-            stop_loss = trend_res.suggested_stop
-            reasons.extend(trend_res.reasons[:4])
+        # Priority D: Bullish Trend / Pullback (with RVOL >= 0.85 & positive CVD slope floor)
+        if signal_type is None:
+            if (
+                trend_res.trend_state == "STRONG_BULLISH_TREND"
+                and trend_res.trend_score >= min_strong_trend
+                and cvd_res.rvol >= 0.85
+                and cvd_res.cvd_slope_normalized > 0.0
+            ):
+                signal_type = "STRONG_BULLISH_TREND"
+                stop_loss = trend_res.suggested_stop
+                reasons.extend(trend_res.reasons[:4])
+            elif (
+                trend_res.trend_state == "BULLISH_PULLBACK"
+                and trend_res.trend_score >= min_pullback
+                and cvd_res.rvol >= 0.65
+                and (cvd_res.cvd_slope_normalized > 0.0 or cvd_res.absorption_detected or cvd_res.cvd_bullish_divergence)
+            ):
+                signal_type = "BULLISH_PULLBACK"
+                stop_loss = trend_res.suggested_stop
+                reasons.extend(trend_res.reasons[:4])
+            elif (
+                trend_res.trend_state == "BULLISH_TREND"
+                and trend_res.trend_score >= min_bull_trend
+                and cvd_res.rvol >= 0.85
+                and cvd_res.cvd_slope_normalized > 0.0
+            ):
+                signal_type = "BULLISH_TREND"
+                stop_loss = trend_res.suggested_stop
+                reasons.extend(trend_res.reasons[:4])
 
-        # Priority E: Wyckoff Early Accumulation (requires institutional footprint — CVD/Absorption/Divergence/OrderBook)
+        # Priority E: Wyckoff Early Accumulation (with RVOL >= 0.65 & positive institutional flow floor)
         if signal_type is None and accum_res.classification == "EARLY_ACCUMULATION":
-            has_institutional_footprint = (
+            has_positive_flow = (
                 cvd_res.absorption_detected
-                or cvd_res.cvd_bullish_divergence
                 or cvd_res.cvd_slope_normalized >= 0.02
-                or (accum_res.orderbook_status == "ASSESSED" and accum_res.dir_1pct >= 0.56)
+                or (cvd_res.cvd_bullish_divergence and cvd_res.cvd_slope_normalized >= -0.02)
+                or (accum_res.orderbook_status == "ASSESSED" and accum_res.dir_1pct >= 0.56 and cvd_res.cvd_slope_normalized >= 0.0)
             )
-            if has_institutional_footprint and accum_res.accumulation_score >= 52.0:
+            if (
+                accum_res.accumulation_score >= min_early_accum
+                and cvd_res.rvol >= 0.65
+                and has_positive_flow
+            ):
                 signal_type = "EARLY_ACCUMULATION"
                 base_stop = accum_res.range_low - (0.4 * atr_ref)
                 stop_loss = max(c_n - (2.8 * atr_ref), min(c_n - (1.0 * atr_ref), base_stop))
@@ -558,7 +683,6 @@ class SmartMoneySignalEngine:
         if signal_type is None:
             return None, metrics
 
-        # Sanity-check Risk/Reward levels
         entry_price = c_n
         if stop_loss <= 0 or stop_loss >= entry_price:
             stop_loss = entry_price - (1.5 * atr_ref)
@@ -572,10 +696,13 @@ class SmartMoneySignalEngine:
         tp1_gain_pct = ((tp1 - entry_price) / entry_price) * 100.0
         tp2_gain_pct = ((tp2 - entry_price) / entry_price) * 100.0
 
-        # Composite ranking score for selecting top signals when multiple trigger
+        # Cross-scanner double confluence check (Classic/SLS + Smart Money)
+        double_confluence = bool(recent_classic_coins and symbol in recent_classic_coins)
+
         composite_rank = (
             SIGNAL_PRIORITY.get(signal_type, 1) * 15.0
             + max(s_break, accum_res.accumulation_score, trend_res.trend_score)
+            + (12.0 if double_confluence else 0.0)
             + (10.0 if trend_res.htf_aligned else 0.0)
             + (8.0 if cvd_res.cvd_bullish_divergence else 0.0)
             + (8.0 if cvd_res.absorption_detected else 0.0)
@@ -584,6 +711,7 @@ class SmartMoneySignalEngine:
         sig = {
             "signal_id": str(uuid.uuid4()),
             "symbol": symbol,
+            "candle_open_ms": bar_open_ms,
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             "signal_type": signal_type,
             "entry_price": round(entry_price, 6),
@@ -611,6 +739,7 @@ class SmartMoneySignalEngine:
             "rsi14": round(trend_res.rsi14, 1),
             "htf_aligned": trend_res.htf_aligned,
             "macro_regime": macro_regime,
+            "double_confluence": double_confluence,
             "gates_passed": gates_passed,
             "failed_gates": failed_gates,
             "reasons": reasons,
@@ -618,7 +747,12 @@ class SmartMoneySignalEngine:
         }
         return sig, metrics
 
-    def analyze_symbol(self, symbol: str, macro_regime: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    def analyze_symbol(
+        self,
+        symbol: str,
+        macro_regime: Optional[str] = None,
+        recent_classic_coins: Optional[Set[str]] = None,
+    ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
         """Fetches live 1h + 4h candles + orderbook for a symbol and evaluates all Smart Money signals."""
         klines_1h = fetch_klines(symbol, interval="1h", limit=100)
         if not klines_1h or len(klines_1h) < 45:
@@ -627,46 +761,94 @@ class SmartMoneySignalEngine:
         klines_4h = fetch_klines(symbol, interval="4h", limit=60)
         regime = macro_regime if macro_regime is not None else self.get_btc_macro_regime()
 
-        # First pass without orderbook (fast), then enrich with live orderbook if candidate looks promising
-        sig, metrics = self.evaluate_symbol_data(symbol, klines_1h, klines_4h, regime, orderbook=None)
+        sig, metrics = self.evaluate_symbol_data(
+            symbol, klines_1h, klines_4h, regime, orderbook=None, recent_classic_coins=recent_classic_coins
+        )
         if sig is not None and self.fetch_orderbook_enabled:
             ob = fetch_orderbook(symbol, limit=50)
             if ob is not None:
-                sig, metrics = self.evaluate_symbol_data(symbol, klines_1h, klines_4h, regime, orderbook=ob)
+                sig, metrics = self.evaluate_symbol_data(
+                    symbol, klines_1h, klines_4h, regime, orderbook=ob, recent_classic_coins=recent_classic_coins
+                )
         return sig, metrics
 
-    def dispatch_signal(self, sig: Dict[str, Any], dry_run: bool = False) -> bool:
-        """Dispatches signal to persistent journal, terminal, and Telegram."""
-        if not dry_run:
-            log_signal_to_journal(sig)
+    def advance_tracked_signals(self, dry_run: bool = False) -> List[Dict[str, Any]]:
+        """Checks all open shadow-tracked Smart Money signals for TP1 / TP2 / SL hits."""
+        if not self.tracker.tracked:
+            return []
 
-        print("\n" + "=" * 78)
-        print(f"⚡ [SMART MONEY SIGNAL] {sig['symbol']} — {sig['signal_type']}")
-        print(f"   Entry: {fmt_price(sig['entry_price'])} | SL: {fmt_price(sig['stop_loss'])} (-{sig['sl_distance_pct']:.2f}%)")
-        print(f"   TP1:   {fmt_price(sig['tp1'])} (+{sig['tp1_gain_pct']:.2f}%) | TP2: {fmt_price(sig['tp2'])} (+{sig['tp2_gain_pct']:.2f}%)")
-        print(
-            f"   Accum: {sig['accumulation_score']:.1f}/100 ({sig['accumulation_class']}) | "
-            f"Trend: {sig['trend_score']:.1f}/100 (ADX {sig['adx14']:.1f}) | "
-            f"RVOL: {sig['rvol']:.2f}x | CVD: {sig['cvd_slope']:+.3f}"
-        )
-        if sig.get("reasons"):
-            print(f"   Why:   {' | '.join(sig['reasons'][:3])}")
-        print("=" * 78)
+        events = self.tracker.advance_all(lambda sym: fetch_klines(sym, interval="1h", limit=36))
+        if not events:
+            if not dry_run:
+                self.tracker.save_tracked()
+            return []
+
+        stats = self.tracker.compute_stats()
+        for ev in events:
+            print(
+                f"🔔 [TRACKER] {ev['symbol']} ({ev['signal_type']}) -> {ev['event_type']} "
+                f"@ {fmt_price(ev['fill_price'])} (PnL: {ev.get('pnl_pct', 0.0):+.2f}%)"
+            )
+
+        if not dry_run:
+            self.tracker.save_tracked()
+            if self.telegram_token and self.telegram_chat_id:
+                try:
+                    msg = format_outcome_telegram_update(events, stats)
+                    telegram_msg(self.telegram_token, self.telegram_chat_id, msg)
+                    print(f"[TELEGRAM] Sent Smart Money outcome update ({len(events)} event(s))")
+                except Exception as e:
+                    print(f"[TELEGRAM] Failed to send outcome update: {e}")
+
+        return events
+
+    def dispatch_digest(
+        self,
+        signals: List[Dict[str, Any]],
+        macro_regime: str,
+        dry_run: bool = False,
+    ) -> bool:
+        """Dispatches 1 clean consolidated Telegram digest + journal entries + shadow tracking."""
+        if not signals:
+            return True
+
+        for sig in signals:
+            if not dry_run:
+                log_signal_to_journal(sig)
+                self.tracker.register_signal(sig, int(sig.get("candle_open_ms", 0)))
+
+            conf_tag = " [🔥 DOUBLE CONFLUENCE]" if sig.get("double_confluence") else ""
+            print("\n" + "=" * 82)
+            print(f"⚡ [SMART MONEY SIGNAL] {sig['symbol']} — {sig['signal_type']}{conf_tag}")
+            print(f"   Entry: {fmt_price(sig['entry_price'])} | SL: {fmt_price(sig['stop_loss'])} (-{sig['sl_distance_pct']:.2f}%)")
+            print(f"   TP1:   {fmt_price(sig['tp1'])} (+{sig['tp1_gain_pct']:.2f}%) | TP2: {fmt_price(sig['tp2'])} (+{sig['tp2_gain_pct']:.2f}%)")
+            print(
+                f"   Accum: {sig['accumulation_score']:.1f}/100 ({sig['accumulation_class']}) | "
+                f"Trend: {sig['trend_score']:.1f}/100 (ADX {sig['adx14']:.1f}) | "
+                f"RVOL: {sig['rvol']:.2f}x | CVD: {sig['cvd_slope']:+.3f} | BTC: {macro_regime}"
+            )
+            if sig.get("reasons"):
+                print(f"   Why:   {' | '.join(sig['reasons'][:3])}")
+            print("=" * 82)
 
         if dry_run:
             return True
 
+        self.tracker.save_tracked()
+
         if self.telegram_token and self.telegram_chat_id:
             try:
-                alert_text = format_telegram_alert(sig)
-                telegram_msg(self.telegram_token, self.telegram_chat_id, alert_text)
-                print(f"[TELEGRAM] Alert sent for {sig['symbol']} ({sig['signal_type']})")
+                stats = self.tracker.compute_stats()
+                digest_text = format_telegram_digest(signals, macro_regime=macro_regime, stats=stats)
+                telegram_msg(self.telegram_token, self.telegram_chat_id, digest_text)
+                syms = ", ".join(f"{s['symbol']}({s['signal_type']})" for s in signals)
+                print(f"[TELEGRAM] Consolidated digest sent ({len(signals)} signal(s)): {syms}")
                 return True
             except Exception as e:
-                print(f"[TELEGRAM] Failed to send alert for {sig['symbol']}: {e}")
+                print(f"[TELEGRAM] Failed to send digest: {e}")
                 return False
         else:
-            print("[INFO] Telegram credentials not set in env. Signal logged to terminal & journal.")
+            print("[INFO] Telegram credentials not set in env. Signals logged to terminal & journal.")
             return True
 
     def scan_universe(
@@ -674,14 +856,29 @@ class SmartMoneySignalEngine:
         symbols: Optional[List[str]] = None,
         dry_run: bool = False,
         show_overview: bool = False,
+        force: bool = False,
         max_workers: int = 8,
     ) -> List[Dict[str, Any]]:
-        """Concurrently scans the liquid Binance Spot universe for Accumulation, Bullish Trend, Breakout & Retest signals."""
+        """Concurrently scans liquid crypto Binance Spot pairs and tracks active signal outcomes."""
+        # Step 1: Always check open tracked signals for TP1 / TP2 / SL updates
+        self.advance_tracked_signals(dry_run=dry_run)
+
+        # Step 2: Closed 1h candle early-exit check (Item 6: avoid redundant 60-coin scans within same hour)
+        latest_1h_ms = self.get_latest_closed_1h_ms()
+        last_scanned_ms = int(self.state.get("last_scanned_1h_ms", 0) or 0)
+        if not force and not dry_run and not show_overview and latest_1h_ms > 0 and latest_1h_ms <= last_scanned_ms:
+            print(
+                f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] "
+                f"No new closed 1h candle since last scan (ts={latest_1h_ms}). Skipping redundant universe scan."
+            )
+            return []
+
         target_symbols = symbols if symbols is not None else discover_liquid_universe(max_symbols=60)
         macro_regime = self.get_btc_macro_regime()
+        recent_classic = load_recent_classic_coins(self.classic_fired_path, lookback_hours=6.0)
         print(
-            f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Scanning {len(target_symbols)} liquid Binance Spot pairs "
-            f"(BTC Macro Regime: {macro_regime})..."
+            f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Scanning {len(target_symbols)} liquid crypto Spot pairs "
+            f"(BTC Macro Regime: {macro_regime} | Active tracked: {len(self.tracker.tracked)})..."
         )
 
         raw_signals: List[Dict[str, Any]] = []
@@ -689,7 +886,7 @@ class SmartMoneySignalEngine:
 
         def _worker(sym: str) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
             try:
-                return self.analyze_symbol(sym, macro_regime=macro_regime)
+                return self.analyze_symbol(sym, macro_regime=macro_regime, recent_classic_coins=recent_classic)
             except Exception as e:
                 print(f"[{sym}] Scan error: {e}")
                 return None, {}
@@ -706,8 +903,7 @@ class SmartMoneySignalEngine:
         if show_overview and all_metrics:
             self._print_metrics_dashboard(all_metrics, macro_regime)
 
-        # Apply cooldown deduplication first, then balance top alerts across categories
-        # so Wyckoff Accumulations, Bullish Trends, and Breakouts are all surfaced fairly.
+        # Apply cooldown deduplication and category-balanced selection (max 3 signals in 1 clean digest)
         eligible_signals = [
             s for s in raw_signals
             if dry_run or self.should_emit_signal(s["symbol"], s["signal_type"])
@@ -729,7 +925,6 @@ class SmartMoneySignalEngine:
             reverse=True,
         )
 
-        # Round-robin selection across active buckets up to max_alerts_per_run
         selected: List[Dict[str, Any]] = []
         seen_syms = set()
         buckets = [breakout_bucket, accum_bucket, trend_bucket]
@@ -746,37 +941,37 @@ class SmartMoneySignalEngine:
             if not progressed:
                 break
 
-        dispatched: List[Dict[str, Any]] = []
-        for sig in selected:
-            self.dispatch_signal(sig, dry_run=dry_run)
-            if not dry_run:
-                self.record_signal_emitted(sig["symbol"], sig["signal_type"])
-            dispatched.append(sig)
+        if selected:
+            sent_ok = self.dispatch_digest(selected, macro_regime=macro_regime, dry_run=dry_run)
+            if not dry_run and sent_ok:
+                for sig in selected:
+                    self.record_signal_emitted(sig["symbol"], sig["signal_type"])
 
         if not dry_run:
+            if latest_1h_ms > 0:
+                self.state["last_scanned_1h_ms"] = latest_1h_ms
             save_scanner_state(self.state, self.state_path)
 
         print(
             f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Scan complete: "
-            f"{len(raw_signals)} setup(s) detected, {len(dispatched)} new alert(s) dispatched."
+            f"{len(raw_signals)} setup(s) detected, {len(selected)} signal(s) dispatched."
         )
-        return dispatched
+        return selected
 
     def _print_metrics_dashboard(self, metrics_list: List[Dict[str, Any]], macro_regime: str) -> None:
-        """Prints a clean 2-section market intelligence dashboard."""
-        print("\n" + "=" * 102)
+        """Prints a clean 2-section crypto market intelligence dashboard."""
+        print("\n" + "=" * 104)
         print(
-            f"📊 SMART MONEY INTELLIGENCE DASHBOARD — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')} "
+            f"📊 SMART MONEY CRYPTO INTELLIGENCE — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')} "
             f"| BTC Regime: {macro_regime}"
         )
-        print("=" * 102)
+        print("=" * 104)
 
-        # Section 1: Top Wyckoff Accumulations
         acc_sorted = sorted(metrics_list, key=lambda m: m["accum_score"], reverse=True)
         acc_top = [m for m in acc_sorted if m["accum_score"] >= 45.0][:10]
-        print("\n📦 TOP WYCKOFF ACCUMULATION COINS:")
-        print(f"{'Symbol':<12} | {'Close':<12} | {'Accum':<10} | {'Class':<18} | {'CVD Slope':<10} | {'Div/Abs':<9} | {'Dist R'}")
-        print("-" * 102)
+        print("\n📦 TOP WYCKOFF ACCUMULATION CRYPTO COINS:")
+        print(f"{'Symbol':<12} | {'Close':<12} | {'Accum':<10} | {'Class':<18} | {'RVOL':<6} | {'CVD Slope':<10} | {'Div/Abs':<7} | {'Dist R'}")
+        print("-" * 104)
         for m in acc_top:
             flags = ("DIV " if m["cvd_divergence"] else "") + ("ABS" if m["absorption"] else "")
             flags = flags.strip() or "-"
@@ -784,38 +979,44 @@ class SmartMoneySignalEngine:
             cvd_s = f"{m['cvd_slope']:+.3f}"
             print(
                 f"{m['symbol']:<12} | {fmt_price(m['close']):<12} | {m['accum_score']:<5.1f}/100 | "
-                f"{m['accum_class']:<18} | {cvd_s:<10} | {flags:<9} | {dist_s}"
+                f"{m['accum_class']:<18} | {m['rvol']:<4.2f}x | {cvd_s:<10} | {flags:<7} | {dist_s}"
             )
 
-        # Section 2: Top Bullish Trending Coins
         trend_sorted = sorted(metrics_list, key=lambda m: m["trend_score"], reverse=True)
         trend_top = [m for m in trend_sorted if m["trend_score"] >= 50.0][:10]
-        print("\n📈 TOP BULLISH TRENDING COINS:")
-        print(f"{'Symbol':<12} | {'Close':<12} | {'Trend':<10} | {'State':<20} | {'ADX14':<7} | {'RSI14':<6} | {'24h %':<8} | {'4h'}")
-        print("-" * 102)
+        print("\n📈 TOP BULLISH TRENDING CRYPTO COINS:")
+        print(f"{'Symbol':<12} | {'Close':<12} | {'Trend':<10} | {'State':<20} | {'ADX14':<6} | {'RVOL':<6} | {'24h %':<8} | {'4h'}")
+        print("-" * 104)
         for m in trend_top:
             htf_s = "BULL" if m["htf_aligned"] is True else ("NEUT" if m["htf_aligned"] is None else "BEAR")
             pct_s = f"{m['pct_24h']:+.2f}%"
             print(
                 f"{m['symbol']:<12} | {fmt_price(m['close']):<12} | {m['trend_score']:<5.1f}/100 | "
-                f"{m['trend_state']:<20} | {m['adx14']:<7.1f} | {m['rsi14']:<6.1f} | {pct_s:<8} | {htf_s}"
+                f"{m['trend_state']:<20} | {m['adx14']:<6.1f} | {m['rvol']:<4.2f}x | {pct_s:<8} | {htf_s}"
             )
-        print("=" * 102 + "\n")
+        print("=" * 104 + "\n")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Smart Money Signal Scanner (Accumulation + Bullish Trend + Breakouts)")
-    parser.add_argument("--scan", action="store_true", help="Run a single scan across top liquid Binance Spot pairs")
+    parser.add_argument("--scan", action="store_true", help="Run scan across top liquid crypto Binance Spot pairs")
     parser.add_argument("--overview", action="store_true", help="Display full Smart Money Intelligence Dashboard")
+    parser.add_argument("--stats", action="store_true", help="Display Smart Money tracked signal win-rate & Profit Factor stats")
     parser.add_argument("--loop", action="store_true", help="Run continuous scan loop")
     parser.add_argument("--interval", type=int, default=300, help="Seconds between loop scans (default: 300s)")
-    parser.add_argument("--max-symbols", type=int, default=60, help="Max top-volume USDT pairs to scan (default: 60)")
+    parser.add_argument("--max-symbols", type=int, default=60, help="Max top-volume USDT crypto pairs to scan (default: 60)")
     parser.add_argument("--symbol", type=str, help="Deep scan a single symbol (e.g. SOLUSDT)")
+    parser.add_argument("--force", action="store_true", help="Force full scan even if closed 1h candle timestamp is unchanged")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate and print signals without Telegram or state mutation")
-    parser.add_argument("--test-telegram", action="store_true", help="Send test alert to verify Telegram credentials")
+    parser.add_argument("--test-telegram", action="store_true", help="Send test digest alert to verify Telegram credentials")
     args = parser.parse_args()
 
     engine = SmartMoneySignalEngine()
+
+    if args.stats:
+        stats = engine.tracker.compute_stats()
+        print(json.dumps(stats, indent=2))
+        return
 
     if args.test_telegram:
         if not engine.telegram_token or not engine.telegram_chat_id:
@@ -824,6 +1025,7 @@ def main():
         test_sig = {
             "signal_id": str(uuid.uuid4()),
             "symbol": "SOLUSDT",
+            "candle_open_ms": int(time.time() * 1000),
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             "signal_type": "PRE_BREAKOUT",
             "entry_price": 182.50,
@@ -847,15 +1049,19 @@ def main():
             "adx14": 26.8,
             "rsi14": 61.5,
             "htf_aligned": True,
+            "double_confluence": True,
             "reasons": [
                 "Tight consolidation base (bandwidth 5.4%)",
                 "Confirmed Wyckoff spring bullish divergence",
-                "4h higher-timeframe bullish alignment confirmed",
             ],
         }
-        print("Sending test Smart Money Telegram alert...")
-        telegram_msg(engine.telegram_token, engine.telegram_chat_id, format_telegram_alert(test_sig))
-        print("Test alert sent successfully!")
+        print("Sending test Smart Money Telegram digest...")
+        telegram_msg(
+            engine.telegram_token,
+            engine.telegram_chat_id,
+            format_telegram_digest([test_sig], macro_regime=engine.get_btc_macro_regime()),
+        )
+        print("Test digest sent successfully!")
         return
 
     if args.symbol:
@@ -863,18 +1069,20 @@ def main():
         if not sym.endswith("USDT"):
             sym += "USDT"
         print(f"Performing deep Smart Money scan on {sym}...")
-        sig, metrics = engine.analyze_symbol(sym)
+        regime = engine.get_btc_macro_regime()
+        recent_classic = load_recent_classic_coins(engine.classic_fired_path)
+        sig, metrics = engine.analyze_symbol(sym, macro_regime=regime, recent_classic_coins=recent_classic)
         if metrics:
-            engine._print_metrics_dashboard([metrics], engine.get_btc_macro_regime())
+            engine._print_metrics_dashboard([metrics], regime)
         if sig:
-            engine.dispatch_signal(sig, dry_run=args.dry_run)
+            engine.dispatch_digest([sig], macro_regime=regime, dry_run=args.dry_run)
         else:
             print(f"No actionable Accumulation, Bullish Trend, Breakout, or Retest signal on {sym} right now.")
         return
 
     if args.overview:
         symbols = discover_liquid_universe(max_symbols=args.max_symbols)
-        engine.scan_universe(symbols=symbols, dry_run=True, show_overview=True)
+        engine.scan_universe(symbols=symbols, dry_run=True, show_overview=True, force=True)
         return
 
     if args.loop:
@@ -882,7 +1090,7 @@ def main():
         while True:
             try:
                 symbols = discover_liquid_universe(max_symbols=args.max_symbols)
-                engine.scan_universe(symbols=symbols, dry_run=args.dry_run, show_overview=False)
+                engine.scan_universe(symbols=symbols, dry_run=args.dry_run, show_overview=False, force=args.force)
             except KeyboardInterrupt:
                 print("\nScanner stopped by user.")
                 break
@@ -891,7 +1099,7 @@ def main():
             time.sleep(args.interval)
     else:
         symbols = discover_liquid_universe(max_symbols=args.max_symbols)
-        engine.scan_universe(symbols=symbols, dry_run=args.dry_run, show_overview=True)
+        engine.scan_universe(symbols=symbols, dry_run=args.dry_run, show_overview=True, force=args.force)
 
 
 if __name__ == "__main__":
