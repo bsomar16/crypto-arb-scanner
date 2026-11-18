@@ -15,6 +15,7 @@ on:
         type: choice
         options:
           - buy
+          - smart_money
           - daily
           - arb
           - price
@@ -65,6 +66,42 @@ jobs:
               git commit -m "Update bot state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
             else
               echo "No changes"
+              break
+            fi
+            sleep 8
+          done
+
+  smart-money-signals:
+    needs: [buy-signals]
+    if: ${{ always() && !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'smart_money' || inputs.mode == 'all'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: smart-money-scan
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Smart Money Accumulation & Bullish Trend scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python smart_money_scanner.py --scan
+      - name: Commit Smart Money state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3; do
+            git pull --rebase || true
+            if [ -n "$(git status --porcelain state/smart_money_scanner_state.json state/smart_money_signals.jsonl 2>/dev/null)" ]; then
+              git add state/smart_money_scanner_state.json state/smart_money_signals.jsonl 2>/dev/null || true
+              git commit -m "Update Smart Money state $(date -u +%Y-%m-%dT%H:%M) [skip ci]" && git push && break
+            else
+              echo "No Smart Money state changes"
               break
             fi
             sleep 8
